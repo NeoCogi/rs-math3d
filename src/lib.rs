@@ -25,8 +25,11 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+
+#![no_std]
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
+#![allow(unused_imports)]
 pub mod scalar;
 pub mod vector;
 pub mod matrix;
@@ -34,6 +37,7 @@ pub mod quaternion;
 pub mod transforms;
 pub mod primitives;
 pub mod queries;
+mod cmath;
 
 pub use scalar::{Scalar, FloatNum};
 pub use vector::{Vector2, Vector3, Vector4, CrossProduct};

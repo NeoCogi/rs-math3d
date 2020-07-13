@@ -294,3 +294,18 @@ implScalar!(Div, div, fdiv, f32);
 implScalar!(Mul, mul, fmul, f32);
 implScalar!(Div, div, fdiv, f64);
 implScalar!(Mul, mul, fmul, f64);
+
+#[cfg(test)]
+mod tests {
+    use crate::{Vector3, Quat};
+    #[test]
+    fn testAxisAngle() {
+        let v = Vector3::normalize(&Vector3::<f32>::new(1.0, 2.0, 3.0));
+        let q0 = Quat::ofAxisAngle(&v, 3.0);
+        let (v2, a) = q0.toAxisAngle();
+        assert_eq!((v.x - v2.x).abs() < 0.00001, true);
+        assert_eq!((v.y - v2.y).abs() < 0.00001, true);
+        assert_eq!((v.z - v2.z).abs() < 0.00001, true);
+        assert_eq!((a - 3.0).abs() < 0.00001, true);
+    }
+}

@@ -28,6 +28,8 @@
 use core::ops::{Add, Sub, Mul, Div, Rem, Neg, AddAssign, SubAssign, DivAssign, MulAssign};
 use core::cmp::{PartialOrd};
 
+use crate::cmath::{CScalar};
+
 pub trait Scalar<Rhs = Self, Output = Self> :
     Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output>

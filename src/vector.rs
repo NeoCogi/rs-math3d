@@ -157,20 +157,23 @@ impl<T> CrossProduct for Vector3<T> where T : Scalar {
     }
 }
 
-#[test]
-pub fn test() {
-    let f1 = Vector2 { x: 1.0, y: 2.0 };
-    let f2 = Vector2 { x: 3.0, y: 4.0 };
-    let out = f1 + f2;
-    assert_eq!(out.x, 4.0);
-    assert_eq!(out.y, 6.0);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    pub fn test() {
+        let f1 = Vector2 { x: 1.0, y: 2.0 };
+        let f2 = Vector2 { x: 3.0, y: 4.0 };
+        let out = f1 + f2;
+        assert_eq!(out.x, 4.0);
+        assert_eq!(out.y, 6.0);
 
-    let f22 : Vector2<f32> = 2.0 * f2;
-    let f23 : Vector2<f32> = f2 * 2.0;
+        let f22 : Vector2<f32> = 2.0 * f2;
+        let f23 : Vector2<f32> = f2 * 2.0;
 
-    println!("{:?} - {:?}", f2, f22);
-    assert_eq!(f22.x, 6.0);
-    assert_eq!(f22.y, 8.0);
-    assert_eq!(f23.x, f22.x);
-    assert_eq!(f23.y, f22.y);
+        assert_eq!(f22.x, 6.0);
+        assert_eq!(f22.y, 8.0);
+        assert_eq!(f23.x, f22.x);
+        assert_eq!(f23.y, f22.y);
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "rs-math3d"
-version = "0.9.0"
+version = "0.9.1"
 license = "BSD-3-Clause"
 authors = ["Raja Lehtihet <raja.lehtihet@gmail.com>", "Wael El Oraiby <wael.eloraiby@gmail.com>"]
 edition = "2018"
@@ -10,7 +10,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libc = "0.2.72"
+libc = "0.2.76"
 
 [lib]
 #crate-type = ["dylib"]

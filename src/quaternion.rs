@@ -27,7 +27,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 use core::ops::*;
 use crate::scalar::*;
-use crate::vector::{Vector3};
+use crate::vector::{Vector, Vector3};
 use crate::matrix::{Matrix3, Matrix4};
 
 #[repr(C)]
@@ -82,13 +82,13 @@ impl<T: Scalar> Quat<T> {
         let	zw = self.z * self.w;
 
         let	m00 = T::one() - T::two() * (yy + zz);
-        let	m01 = T::two() * (xy - zw);
-        let	m02 = T::two() * (xz + yw);
         let	m10 = T::two() * (xy + zw);
-        let	m11 = T::one() - T::two() * (xx + zz);
-        let	m12 = T::two() * (yz - xw);
         let	m20 = T::two() * (xz - yw);
+        let	m01 = T::two() * (xy - zw);
+        let	m11 = T::one() - T::two() * (xx + zz);
         let	m21 = T::two() * (yz + xw);
+        let	m02 = T::two() * (xz + yw);
+        let	m12 = T::two() * (yz - xw);
         let	m22 = T::one() - T::two() * (xx + yy);
 
         Matrix3::new(m00, m10, m20, m01, m11, m21, m02, m12, m22)
@@ -106,13 +106,13 @@ impl<T: Scalar> Quat<T> {
         let	zw = self.z * self.w;
 
         let	m00 = T::one() - T::two() * (yy + zz);
-        let	m01 = T::two() * (xy - zw);
-        let	m02 = T::two() * (xz + yw);
         let	m10 = T::two() * (xy + zw);
-        let	m11 = T::one() - T::two() * (xx + zz);
-        let	m12 = T::two() * (yz - xw);
         let	m20 = T::two() * (xz - yw);
+        let	m01 = T::two() * (xy - zw);
+        let	m11 = T::one() - T::two() * (xx + zz);
         let	m21 = T::two() * (yz + xw);
+        let	m02 = T::two() * (xz + yw);
+        let	m12 = T::two() * (yz - xw);
         let	m22 = T::one() - T::two() * (xx + yy);
 
         Matrix4::new(m00, m10, m20, T::zero(),
@@ -297,16 +297,265 @@ implScalar!(Mul, mul, fmul, f64);
 
 #[cfg(test)]
 mod tests {
-    use crate::{Vector3, Quat};
+    use crate::*;
+    use crate::scalar::*;
+    use crate::vector::*;
+    use crate::matrix::*;
+    use crate::{Quat};
+
+    #[test]
+    fn testIdentity() {
+        let q = Quat::<f32>::identity();
+        let m = q.mat3();
+
+        let x_axis = m.col[0];
+        let y_axis = m.col[1];
+        let z_axis = m.col[2];
+
+        assert_eq!((x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - Vector3::new(0.0, 1.0, 0.0)).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - Vector3::new(0.0, 0.0, 1.0)).length() < f32::epsilon(), true);
+    }
+
+    #[test]
+    fn testIdentityConjugate() {
+        let q = Quat::conjugate(&Quat::<f32>::identity());
+        let m = q.mat3();
+
+        let x_axis = m.col[0];
+        let y_axis = m.col[1];
+        let z_axis = m.col[2];
+
+        assert_eq!((x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - Vector3::new(0.0, 1.0, 0.0)).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - Vector3::new(0.0, 0.0, 1.0)).length() < f32::epsilon(), true);
+    }
+
+    #[test]
+    fn testRotX180() {
+        let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
+        let a = 3.14159265;
+
+        let q = Quat::ofAxisAngle(&v, a);
+        let m = q.mat3();
+
+        let x_axis = m.col[0];
+        let y_axis = m.col[1];
+        let z_axis = m.col[2];
+
+        assert_eq!((x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - Vector3::new(0.0, -1.0, 0.0)).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - Vector3::new(0.0, 0.0, -1.0)).length() < f32::epsilon(), true);
+
+        let m2 = Matrix3::ofAxisAngle(&v, a);
+
+        let x2_axis = m2.col[0];
+        let y2_axis = m2.col[1];
+        let z2_axis = m2.col[2];
+
+        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+    }
+
+    #[test]
+    fn testRotX90() {
+        let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
+        let a = 3.14159265 / 2.0;
+
+        let q = Quat::ofAxisAngle(&v, a);
+        let m = q.mat3();
+
+        let x_axis = m.col[0];
+        let y_axis = m.col[1];
+        let z_axis = m.col[2];
+
+        assert_eq!((x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - Vector3::new(0.0, 0.0, 1.0)).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - Vector3::new(0.0, -1.0, 0.0)).length() < f32::epsilon(), true);
+
+        let m2 = Matrix3::ofAxisAngle(&v, a);
+
+        let x2_axis = m2.col[0];
+        let y2_axis = m2.col[1];
+        let z2_axis = m2.col[2];
+
+        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+    }
+
+    #[test]
+    fn testRotX45() {
+        let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
+        let a = 3.14159265 / 4.0;
+
+        let q = Quat::ofAxisAngle(&v, a);
+        let m = q.mat3();
+
+        let x_axis = m.col[0];
+        let y_axis = m.col[1];
+        let z_axis = m.col[2];
+
+        assert_eq!((x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - Vector3::new(0.0, f32::sqrt(2.0) / 2.0, f32::sqrt(2.0) / 2.0)).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - Vector3::new(0.0, -f32::sqrt(2.0) / 2.0, f32::sqrt(2.0) / 2.0)).length() < f32::epsilon(), true);
+
+        let m2 = Matrix3::ofAxisAngle(&v, a);
+
+        let x2_axis = m2.col[0];
+        let y2_axis = m2.col[1];
+        let z2_axis = m2.col[2];
+
+        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+    }
+
+    #[test]
+    fn testRotXComposed45() {
+        let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
+        let a_u = 3.14159265 / 4.0;
+        let a_f = 3.14159265;
+
+        let q_u = Quat::ofAxisAngle(&v, a_u);
+        let q_f = Quat::ofAxisAngle(&v, a_f);
+
+        let m = q_f.mat3();
+
+        let x_axis = m.col[0];
+        let y_axis = m.col[1];
+        let z_axis = m.col[2];
+
+        let q_t = q_u * q_u * q_u * q_u;
+        let m2 = q_t.mat3();
+
+        let x2_axis = m2.col[0];
+        let y2_axis = m2.col[1];
+        let z2_axis = m2.col[2];
+
+        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+    }
+
+    #[test]
+    fn testRotXComposed120() {
+        let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
+        let a_u1 = 3.14159265 / 2.0;
+        let a_u2 = 3.14159265 / 6.0;
+        let a_f = 3.14159265 / 2.0 + 3.14159265 / 6.0;
+
+        let q_u1 = Quat::ofAxisAngle(&v, a_u1);
+        let q_u2 = Quat::ofAxisAngle(&v, a_u2);
+        let q_f = Quat::ofAxisAngle(&v, a_f);
+
+        let m = q_f.mat3();
+
+        let x_axis = m.col[0];
+        let y_axis = m.col[1];
+        let z_axis = m.col[2];
+
+        let q_t = q_u2 * q_u1;
+        let m2 = q_t.mat3();
+
+        let x2_axis = m2.col[0];
+        let y2_axis = m2.col[1];
+        let z2_axis = m2.col[2];
+
+        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+    }
+
+    #[test]
+    fn testRotXRotY() {
+        let vx = Vector3::<f32>::new(1.0, 0.0, 0.0);
+        let vy = Vector3::<f32>::new(0.0, 1.0, 0.0);
+        let vz = Vector3::<f32>::new(0.0, 0.0, 1.0);
+
+        let v4x = Vector4::<f32>::new(1.0, 0.0, 0.0, 1.0);
+        let v4y = Vector4::<f32>::new(0.0, 1.0, 0.0, 1.0);
+        let v4z = Vector4::<f32>::new(0.0, 0.0, 1.0, 1.0);
+
+        let a = 3.14159265 / 2.0;
+
+        let q_ux = Quat::ofAxisAngle(&vx, a);
+        let q_uy = Quat::ofAxisAngle(&vy, a);
+        let q_uz = Quat::ofAxisAngle(&vz, a);
+
+        let mx = q_ux.mat3();
+        let m4x = q_ux.mat4();
+
+        let px = (m4x * v4x).xyz();
+        let py = (m4x * v4y).xyz();
+        let pz = (m4x * v4z).xyz();
+
+        let x_axis = mx.col[0];
+        let y_axis = mx.col[1];
+        let z_axis = mx.col[2];
+
+        assert_eq!((x_axis - vx).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - vz).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - -vy).length() < f32::epsilon(), true);
+
+        assert_eq!((px - vx).length() < f32::epsilon(), true);
+        assert_eq!((py - vz).length() < f32::epsilon(), true);
+        assert_eq!((pz - -vy).length() < f32::epsilon(), true);
+
+        // rotate x, then y
+        let q_yx = q_uy * q_ux;
+        let myx = q_yx.mat3();
+        let m4yx = q_yx.mat4();
+
+        let px = (m4yx * v4x).xyz();
+        let py = (m4yx * v4y).xyz();
+        let pz = (m4yx * v4z).xyz();
+
+        let x_axis = myx.col[0];
+        let y_axis = myx.col[1];
+        let z_axis = myx.col[2];
+
+        assert_eq!((x_axis - -vz).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - vx).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - -vy).length() < f32::epsilon(), true);
+
+        assert_eq!((px - -vz).length() < f32::epsilon(), true);
+        assert_eq!((py - vx).length() < f32::epsilon(), true);
+        assert_eq!((pz - -vy).length() < f32::epsilon(), true);
+
+        // rotate x, then y, then z
+        let q_zyx = q_uz * q_uy * q_ux;
+        let mzyx = q_zyx.mat3();
+
+        let m4zyx = q_zyx.mat4();
+
+        let px = (m4zyx * v4x).xyz();
+        let py = (m4zyx * v4y).xyz();
+        let pz = (m4zyx * v4z).xyz();
+
+        let x_axis = mzyx.col[0];
+        let y_axis = mzyx.col[1];
+        let z_axis = mzyx.col[2];
+
+        assert_eq!((x_axis - -vz).length() < f32::epsilon(), true);
+        assert_eq!((y_axis - vy).length() < f32::epsilon(), true);
+        assert_eq!((z_axis - vx).length() < f32::epsilon(), true);
+
+        assert_eq!((px - -vz).length() < f32::epsilon(), true);
+        assert_eq!((py - vy).length() < f32::epsilon(), true);
+        assert_eq!((pz - vx).length() < f32::epsilon(), true);
+    }
+
     #[test]
     fn testAxisAngleF32() {
         let v = Vector3::normalize(&Vector3::<f32>::new(1.0, 2.0, 3.0));
         let q0 = Quat::ofAxisAngle(&v, 3.0);
         let (v2, a) = q0.toAxisAngle();
-        assert_eq!((v.x - v2.x).abs() < 0.00001, true);
-        assert_eq!((v.y - v2.y).abs() < 0.00001, true);
-        assert_eq!((v.z - v2.z).abs() < 0.00001, true);
-        assert_eq!((a - 3.0).abs() < 0.00001, true);
+        assert_eq!((v.x - v2.x).abs() < f32::epsilon(), true);
+        assert_eq!((v.y - v2.y).abs() < f32::epsilon(), true);
+        assert_eq!((v.z - v2.z).abs() < f32::epsilon(), true);
+        assert_eq!((a - 3.0).abs()    < f32::epsilon(), true);
     }
 
     #[test]
@@ -314,9 +563,9 @@ mod tests {
         let v = Vector3::normalize(&Vector3::<f64>::new(1.0, 2.0, 3.0));
         let q0 = Quat::ofAxisAngle(&v, 3.0);
         let (v2, a) = q0.toAxisAngle();
-        assert_eq!((v.x - v2.x).abs() < 0.00001, true);
-        assert_eq!((v.y - v2.y).abs() < 0.00001, true);
-        assert_eq!((v.z - v2.z).abs() < 0.00001, true);
-        assert_eq!((a - 3.0).abs() < 0.00001, true);
+        assert_eq!((v.x - v2.x).abs() < f64::epsilon(), true);
+        assert_eq!((v.y - v2.y).abs() < f64::epsilon(), true);
+        assert_eq!((v.z - v2.z).abs() < f64::epsilon(), true);
+        assert_eq!((a - 3.0).abs()    < f64::epsilon(), true);
     }
 }

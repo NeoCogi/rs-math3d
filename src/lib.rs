@@ -39,8 +39,8 @@ pub mod primitives;
 pub mod queries;
 mod cmath;
 
-pub use scalar::{Scalar, FloatNum};
-pub use vector::{Vector2, Vector3, Vector4, CrossProduct};
+pub use scalar::{Scalar, FloatScalar};
+pub use vector::{Vector, Vector2, Vector3, Vector4, CrossProduct};
 pub use matrix::{Matrix2, Matrix3, Matrix4};
 pub use quaternion::{Quat};
 pub use transforms::*;
@@ -82,8 +82,8 @@ pub type Dimensionf = Dimension<f32>;
 pub type Planef = Plane<f32>;
 pub type Planed = Plane<f64>;
 
-pub type Ray3f = Ray3<f32>;
-pub type Ray3d = Ray3<f64>;
+pub type Ray3f = Ray<f32, Vec3f>;
+pub type Ray3d = Ray<f64, Vec3d>;
 
 pub type Box3f = Box3<f32>;
 pub type Box3d = Box3<f64>;

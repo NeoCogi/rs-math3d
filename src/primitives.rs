@@ -154,67 +154,90 @@ impl<T: Scalar> Box3<T> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Line2
+/// Line
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct Line2<T : Scalar> {
-    pub p: Vector2<T>,  // point on the line
-    pub d: Vector2<T>,  // direction of the line
+pub struct Line<T: Scalar, V: Vector<T>> {
+    pub p: V,  // point on the line
+    pub d: V,  // direction of the line
+    t : core::marker::PhantomData<T>,
 }
 
-impl<T: Scalar> Line2<T> {
-    pub fn new(p: &Vector2<T>, d: &Vector2<T>) -> Self { Self { p: *p, d: *d } }
-    pub fn fromStartEnd(s: &Vector2<T>, e: &Vector2<T>) -> Self { Self { p: *s, d: (*e - *s) } }
-    pub fn normalize(&self) -> Self { Self { p: self.p, d: Vector2::normalize(&self.d) }}
-}
+impl<T: Scalar, V: Vector<T>> Line<T, V> {
+    pub fn new(p: &V, d: &V) -> Self { Self { p: *p, d: *d, t: core::marker::PhantomData } }
+    pub fn fromStartEnd(s: &V, e: &V) -> Self { Self { p: *s, d: *e - *s, t: core::marker::PhantomData } }
+    pub fn normalize(&self) -> Self { Self { p: self.p, d: Vector::normalize(&self.d), t: core::marker::PhantomData }}
+    pub fn closestPointOnLine(&self, p: &V) -> V {
+        let p_dir = *p - self.p;
 
-////////////////////////////////////////////////////////////////////////////////
-/// Line3
-////////////////////////////////////////////////////////////////////////////////
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Line3<T : Scalar> {
-    pub p: Vector3<T>,  // point on the line
-    pub d: Vector3<T>,  // direction of the line
-}
+        let d_sp = V::dot(&self.d, &p_dir);
+        let d_ss = V::dot(&self.d, &self.d);
 
-impl<T: Scalar> Line3<T> {
-    pub fn new(p: &Vector3<T>, d: &Vector3<T>) -> Self { Self { p: *p, d: *d } }
-    pub fn fromStartEnd(s: &Vector3<T>, e: &Vector3<T>) -> Self { Self { p: *s, d: (*e - *s) } }
-    pub fn normalize(&self) -> Self { Self { p: self.p, d: Vector3::normalize(&self.d) }}
+        let t = d_sp / d_ss;
+
+        self.p + self.d * t
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Line3
+/// Segment
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct Segment3<T : Scalar> {
-    pub s: Vector3<T>,  // start
-    pub e: Vector3<T>,  // end
+pub struct Segment<T : Scalar, V: Vector<T>> {
+    pub s: V,  // start
+    pub e: V,  // end
+    t : core::marker::PhantomData<T>,
 }
 
-impl<T: Scalar> Segment3<T> {
-    pub fn new(s: &Vector3<T>, e: &Vector3<T>) -> Self { Self { s: *s, e: *e } }
-}
+impl<T: Scalar, V: Vector<T>> Segment<T, V> {
+    pub fn new(s: &V, e: &V) -> Self { Self { s: *s, e: *e, t: core::marker::PhantomData } }
+    pub fn closestPointOnSegment(&self, p: &V) -> V {
+        let dir = self.e - self.s;
+        let p_dir = *p - self.s;
 
-////////////////////////////////////////////////////////////////////////////////
-/// Plane
-////////////////////////////////////////////////////////////////////////////////
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Ray3<T : Scalar> {
-    pub start: Vector3<T>,
-    pub direction: Vector3<T>,
-}
+        let d_sp = V::dot(&dir, &p_dir);
+        let d_ss = V::dot(&dir, &dir);
 
-impl<T: Scalar> Ray3<T> {
-    pub fn new(start: &Vector3<T>, direction: &Vector3<T>) -> Self {
-        Self { start: *start, direction: Vector3::normalize(direction) }
+        if d_sp < T::zero() {
+            return self.s
+        } else if d_sp > d_ss {
+            return self.e
+        }
+
+        let t = d_sp / d_ss;
+
+        self.s + dir * t
     }
 
-    pub fn intersect(&self, p: &Plane<T>) -> Option<Vector3<T>> {
+    pub fn distance(&self, p: &V) -> T {
+        let p_on_seg = self.closestPointOnSegment(p);
+        V::length(&(p_on_seg - *p))
+    }
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+/// Ray
+////////////////////////////////////////////////////////////////////////////////
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Ray<T : Scalar, V: Vector<T>> {
+    pub start: V,
+    pub direction: V,
+    t : core::marker::PhantomData<T>,
+}
+
+impl<T: Scalar, V: Vector<T>> Ray<T, V> {
+    pub fn new(start: &V, direction: &V) -> Self {
+        Self { start: *start, direction: V::normalize(direction), t: core::marker::PhantomData }
+    }
+}
+
+impl<T: Scalar> Ray<T, Vector3<T>> {
+    pub fn intersectPlane(&self, p: &Plane<T>) -> Option<Vector3<T>> {
         let n = p.normal();
         let t : T = -(p.d + Vector3::dot(&n, &self.start)) / Vector3::dot(&n, &self.direction);
         if t < T::zero() {
@@ -230,12 +253,12 @@ impl<T: Scalar> Ray3<T> {
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct Sphere3<T: FloatNum> {
+pub struct Sphere3<T: FloatScalar> {
     pub center  : Vector3<T>,
     pub radius  : T,
 }
 
-impl<T: FloatNum> Sphere3<T> {
+impl<T: FloatScalar> Sphere3<T> {
     pub fn new(center: Vector3<T>, radius: T) -> Self {
         Self {
             center : center,
@@ -249,11 +272,11 @@ impl<T: FloatNum> Sphere3<T> {
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct Tri3<T: FloatNum> {
+pub struct Tri3<T: FloatScalar> {
     vertices: [Vector3<T>; 3],
 }
 
-impl<T: FloatNum> Tri3<T> {
+impl<T: FloatScalar> Tri3<T> {
     pub fn new(vertices: [Vector3<T>; 3]) -> Self { Self { vertices: vertices } }
     pub fn vertices(&self) -> &[Vector3<T>; 3] { &self.vertices }
 
@@ -289,8 +312,8 @@ impl<T: Scalar> Plane<T> {
         Self::new(&n, &c)
     }
 
-    pub fn intersect(&self, r: &Ray3<T>) -> Option<Vector3<T>> {
-        r.intersect(self)
+    pub fn intersectRay(&self, r: &Ray<T, Vector3<T>>) -> Option<Vector3<T>> {
+        r.intersectPlane(self)
     }
 }
 

@@ -28,6 +28,35 @@
 use core::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use crate::scalar::*;
 
+pub trait Vector<T: Scalar, Rhs = Self, Output = Self> :
+    Add<Rhs, Output = Output>
+    + Sub<Rhs, Output = Output>
+    + Mul<Rhs, Output = Output>
+    + Mul<T, Output = Output>
+    + Div<Rhs, Output = Output>
+    + Div<T, Output = Output>
+    + Neg<Output = Output>
+    + Clone + Copy
+{
+    fn zero() -> Self;
+
+    fn addVV(l: &Self, r: &Self)    -> Self;
+    fn subVV(l: &Self, r: &Self)    -> Self;
+    fn mulVV(l: &Self, r: &Self)    -> Self;
+    fn divVV(l: &Self, r: &Self)    -> Self;
+    fn mulVF(l: &Self, r: T)        -> Self;
+    fn divVF(l: &Self, r: T)        -> Self;
+    fn remVV(l: &Self, r: &Self)    -> Self;
+
+    fn length(&self) -> T { Self::dot(&self, &self).tsqrt() }
+    fn dot  (l: &Self, r: &Self) -> T;
+    fn normalize(v: &Self) -> Self;
+    fn distance (l: &Self, r: &Self) -> T;
+
+    fn min(l: &Self, r: &Self) -> Self;
+    fn max(l: &Self, r: &Self) -> Self;
+}
+
 macro_rules! implVecScalar {
     ($vecName:ident, $scalar:ident) => {
         impl Mul<$vecName<$scalar>> for $scalar {
@@ -48,21 +77,23 @@ macro_rules! implVector {
 
         impl<T: Scalar> $vecName<T> {
             pub fn new($($field:T),*) -> Self { Self { $($field: $field),* } }
-            pub fn zero() -> Self { Self { $($field: T::zero()),* } }
+        }
 
-            pub fn length(&self) -> T { Self::dot(&self, &self).tsqrt() }
-            pub fn dot  (l: &Self, r: &Self) -> T { $(l.$field * r.$field +)* T::zero() }
-            pub fn addVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field + r.$field),*) }
-            pub fn subVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field - r.$field),*) }
-            pub fn mulVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field * r.$field),*) }
-            pub fn divVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field / r.$field),*) }
-            pub fn mulVF(l: &Self, r: T) -> Self { Self::new($(l.$field * r),*) }
-            pub fn divVF(l: &Self, r: T) -> Self { Self::new($(l.$field / r),*) }
-            pub fn remVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field % r.$field),*) }
-            pub fn normalize(v: &Self) -> Self { let len = v.length(); *v / len }
-            pub fn distance (l: &Self, r: &Self) -> T { (*r - *l).length() }
-            pub fn min(l: &Self, r: &Self) -> Self { Self::new($(T::min(l.$field, r.$field)),*) }
-            pub fn max(l: &Self, r: &Self) -> Self { Self::new($(T::max(l.$field, r.$field)),*) }
+        impl<T: Scalar> Vector<T> for $vecName<T> {
+            fn zero() -> Self { Self { $($field: T::zero()),* } }
+            fn length(&self) -> T { Self::dot(&self, &self).tsqrt() }
+            fn dot  (l: &Self, r: &Self) -> T { $(l.$field * r.$field +)* T::zero() }
+            fn addVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field + r.$field),*) }
+            fn subVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field - r.$field),*) }
+            fn mulVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field * r.$field),*) }
+            fn divVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field / r.$field),*) }
+            fn mulVF(l: &Self, r: T) -> Self { Self::new($(l.$field * r),*) }
+            fn divVF(l: &Self, r: T) -> Self { Self::new($(l.$field / r),*) }
+            fn remVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field % r.$field),*) }
+            fn normalize(v: &Self) -> Self { let len = v.length(); *v / len }
+            fn distance (l: &Self, r: &Self) -> T { (*r - *l).length() }
+            fn min(l: &Self, r: &Self) -> Self { Self::new($(T::min(l.$field, r.$field)),*) }
+            fn max(l: &Self, r: &Self) -> Self { Self::new($(T::max(l.$field, r.$field)),*) }
         }
 
         impl<T> Add for $vecName<T> where T: Scalar {
@@ -155,6 +186,14 @@ impl<T> CrossProduct for Vector3<T> where T : Scalar {
     fn cross(l: &Vector3<T>, r: &Vector3<T>) -> Vector3<T> {
         Vector3::new(l.y * r.z - l.z * r.y, l.z * r.x - l.x * r.z, l.x * r.y - l.y * r.x)
     }
+}
+
+pub trait Swizzle4<T: Scalar> {
+    fn xyz(&self) -> Vector3<T>;
+}
+
+impl<T: Scalar> Swizzle4<T> for Vector4<T> {
+    fn xyz(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.z) }
 }
 
 #[cfg(test)]

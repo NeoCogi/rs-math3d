@@ -110,14 +110,14 @@ implScalar!(i64, f64);
 implScalar!(f32, f32);
 implScalar!(f64, f64);
 
-pub trait FloatNum : Scalar {
+pub trait FloatScalar : Scalar {
     fn INFINITY() -> Self;
 }
 
-impl FloatNum for f32 {
+impl FloatScalar for f32 {
     fn INFINITY() -> Self { core::f32::INFINITY }
 }
 
-impl FloatNum for f64 {
+impl FloatScalar for f64 {
     fn INFINITY() -> Self { core::f64::INFINITY }
 }

@@ -48,7 +48,7 @@ pub trait Intersection<T, Other> {
 ////////////////////////////////////////////////////////////////////////////////
 /// Distance Queries
 ////////////////////////////////////////////////////////////////////////////////
-impl<T: FloatNum> Distance<T, Vector3<T>> for Plane<T> {
+impl<T: FloatScalar> Distance<T, Vector3<T>> for Plane<T> {
     fn distance(&self, other: &Vector3<T>) -> T {
         let n = self.normal();
         let nom = Vector3::dot(other, &n) + self.constant();
@@ -57,7 +57,7 @@ impl<T: FloatNum> Distance<T, Vector3<T>> for Plane<T> {
     }
 }
 
-impl<T: FloatNum> Distance<T, Vector3<T>> for Segment3<T> {
+impl<T: FloatScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
     fn distance(&self, other: &Vector3<T>) -> T {
         let segDir  = self.e - self.s;
         let ptDir   = *other - self.s;
@@ -78,8 +78,8 @@ impl<T: FloatNum> Distance<T, Vector3<T>> for Segment3<T> {
 ////////////////////////////////////////////////////////////////////////////////
 /// Intersect Queries
 ////////////////////////////////////////////////////////////////////////////////
-impl<T: FloatNum> Intersect<Ray3<T>> for Box3<T> {
-    fn intersect(&self, other: &Ray3<T>) -> bool {
+impl<T: FloatScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
+    fn intersect(&self, other: &Ray<T, Vector3<T>>) -> bool {
         // From the paper: An Efficient and Robust Ray–Box Intersection Algorithm by A. Williams et. al.
         // "... Note also that since IEEE arithmetic guarantees that a positive number divided by zero
         // is +\infinity and a negative number divided by zero is -\infinity, the code works for vertical
@@ -110,7 +110,7 @@ impl<T: FloatNum> Intersect<Ray3<T>> for Box3<T> {
     }
 }
 
-impl<T: FloatNum> Intersect<Sphere3<T>> for Box3<T> {
+impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
     fn intersect(&self, other: &Sphere3<T>) -> bool {
         let mut dist = T::zero();
 
@@ -131,11 +131,11 @@ impl<T: FloatNum> Intersect<Sphere3<T>> for Box3<T> {
 }
 
 
-fn isIn0to1Range<T: FloatNum>(x: T) -> bool {
+fn isIn0to1Range<T: FloatScalar>(x: T) -> bool {
     x >= T::zero() && x <= T::one()
 }
 
-impl<T: FloatNum> Intersect<Tri3<T>> for Sphere3<T> {
+impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
     fn intersect(&self, tri: &Tri3<T>) -> bool {
         let uvw = tri.barycentricCoordinates(&self.center);
         let verts = tri.vertices();
@@ -150,9 +150,9 @@ impl<T: FloatNum> Intersect<Tri3<T>> for Sphere3<T> {
                 false
             }
         } else {
-            let d0 = Segment3::new(&v0, &v1).distance(&self.center);
-            let d1 = Segment3::new(&v1, &v2).distance(&self.center);
-            let d2 = Segment3::new(&v2, &v0).distance(&self.center);
+            let d0 = Segment::new(&v0, &v1).distance(&self.center);
+            let d1 = Segment::new(&v1, &v2).distance(&self.center);
+            let d2 = Segment::new(&v2, &v0).distance(&self.center);
 
             let m = T::min(d0, T::min(d1, d2));
             if m <= self.radius {
@@ -171,7 +171,7 @@ impl<T: FloatNum> Intersect<Tri3<T>> for Sphere3<T> {
 /// http://www.acm.org/jgt/
 /// by Tomas Moller, May 2000
 ///
-impl<T: FloatNum> Intersection<Vector3<T>, Tri3<T>> for Ray3<T> {
+impl<T: FloatScalar> Intersection<Vector3<T>, Tri3<T>> for Ray<T, Vector3<T>> {
     fn intersection(&self, tri: &Tri3<T>) -> Option<Vector3<T>> {
         let verts = tri.vertices();
         let v0 = verts[0];

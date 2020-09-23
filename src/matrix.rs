@@ -107,13 +107,13 @@ impl<T: Scalar> Matrix2<T> {
         Self::new(r00, r10, r01, r11)
     }
 
-    ///
-    ///             [b00 b01]
-    ///             [b10 b11]
-    ///           *   |   |
-    /// [a00 a01] - [c00 c01]
-    /// [a10 a11] - [c10 c11]
-    ///
+    //
+    //             [b00 b01]
+    //             [b10 b11]
+    //           *   |   |
+    // [a00 a01] - [c00 c01]
+    // [a10 a11] - [c10 c11]
+    //
     pub fn mulMatrixMatrix(l: &Self, r: &Self) -> Self {
         let	a00 = l.col[0].x;
         let	a10 = l.col[0].y;
@@ -261,15 +261,15 @@ impl<T: Scalar> Matrix3<T> {
             r02, r12, r22)
     }
 
-    ///
-    ///                 [b00 b01 b02]
-    ///                 [b10 b11 b12]
-    ///                 [b20 b21 b22]
-    ///               *   |   |   |
-    /// [a00 a01 a02] - [c00 c01 c02]
-    /// [a10 a11 a12] - [c10 c11 c12]
-    /// [a20 a21 a22] - [c10 c11 c22]
-    ///
+    //
+    //                 [b00 b01 b02]
+    //                 [b10 b11 b12]
+    //                 [b20 b21 b22]
+    //               *   |   |   |
+    // [a00 a01 a02] - [c00 c01 c02]
+    // [a10 a11 a12] - [c10 c11 c12]
+    // [a20 a21 a22] - [c10 c11 c22]
+    //
     pub fn mulMatrixMatrix(l: &Self, r: &Self) -> Self {
         let	a00 = l.col[0].x;
         let	a10 = l.col[0].y;
@@ -334,6 +334,34 @@ impl<T: Scalar> Matrix3<T> {
             l.col[1] - r.col[1],
             l.col[2] - r.col[2],
         ]}
+    }
+
+    pub fn ofAxisAngle(axis: &Vector3<T>, angle: T) -> Self {
+        let c = T::tcos(angle);
+        let s = T::tsin(angle);
+        let n = Vector3::normalize(axis);
+        let ux  = n.x;
+        let uy  = n.y;
+        let uz  = n.z;
+        let uxx = ux * ux;
+        let uyy = uy * uy;
+        let uzz = uz * uz;
+
+        let oc = T::one() - c;
+
+        let m0 = c + uxx * oc;
+        let m1 = uy * ux * oc + uz * s;
+        let m2 = uz * ux * oc - uy * s;
+
+        let m3 = ux * uy * oc - uz * s;
+        let m4 = c + uyy * oc;
+        let m5 = uz * uy * oc + ux * s;
+
+        let m6 = ux * uz * oc + uy * s;
+        let m7 = uy * uz * oc - ux * s;
+        let m8 = c + uzz * oc;
+
+        Self::new(m0, m1, m2, m3, m4, m5, m6, m7, m8)
     }
 }
 
@@ -538,17 +566,17 @@ impl<T: Scalar> Matrix3<T> {
                 r03, r13, r23, r33)
     }
 
-    ///
-    ///                     [b00 b01 b02 b03]
-    ///                     [b10 b11 b12 b13]
-    ///                     [b20 b21 b22 b23]
-    ///                     [b20 b21 b22 b33]
-    ///                   *   |   |   |   |
-    /// [a00 a01 a02 a03] - [c00 c01 c02 c03]
-    /// [a10 a11 a12 a13] - [c10 c11 c12 c13]
-    /// [a20 a21 a22 a23] - [c10 c11 c22 c23]
-    /// [a20 a21 a22 a33] - [c10 c11 c22 c33]
-    ///
+    //
+    //                     [b00 b01 b02 b03]
+    //                     [b10 b11 b12 b13]
+    //                     [b20 b21 b22 b23]
+    //                     [b20 b21 b22 b33]
+    //                   *   |   |   |   |
+    // [a00 a01 a02 a03] - [c00 c01 c02 c03]
+    // [a10 a11 a12 a13] - [c10 c11 c12 c13]
+    // [a20 a21 a22 a23] - [c10 c11 c22 c23]
+    // [a20 a21 a22 a33] - [c10 c11 c22 c33]
+    //
     pub fn mulMatrixMatrix(l: &Self, r: &Self) -> Self {
         let	a00 = l.col[0].x;
         let	a10 = l.col[0].y;
@@ -620,12 +648,12 @@ impl<T: Scalar> Matrix3<T> {
         Self::mulVectorMatrix(r, &l.transpose())
     }
 
-    ///
-    ///                     [m0 = c0_x | m4 = c1_x | m8 = c2_x | m12= c3_x]
-    /// [v_x v_y v_z v_w] * [m1 = c0_y | m5 = c1_y | m9 = c2_y | m13= c3_y] = [dot(v, c0) dot(v, c1) dot(v, c2) dot(v, c3)]
-    ///                     [m2 = c0_z | m6 = c1_z | m10= c2_z | m14= c3_z]
-    ///                     [m3 = c0_w | m7 = c1_w | m11= c2_w | m15= c3_w]
-    ///
+    //
+    //                     [m0 = c0_x | m4 = c1_x | m8 = c2_x | m12= c3_x]
+    // [v_x v_y v_z v_w] * [m1 = c0_y | m5 = c1_y | m9 = c2_y | m13= c3_y] = [dot(v, c0) dot(v, c1) dot(v, c2) dot(v, c3)]
+    //                     [m2 = c0_z | m6 = c1_z | m10= c2_z | m14= c3_z]
+    //                     [m3 = c0_w | m7 = c1_w | m11= c2_w | m15= c3_w]
+    //
     pub fn mulVectorMatrix(l: &Vector4<T>, r: &Self) -> Vector4<T> {
         Vector4::new(
             Vector4::dot(l, &r.col[0]),

@@ -58,16 +58,16 @@ pub struct Rect<T : Scalar> {
 
 impl<T: Scalar> Rect<T> {
     pub fn new(x: T, y: T, width: T, height: T) -> Self { Self { x, y, width, height} }
-    pub fn from(minVec: &Vector2<T>, maxVec: &Vector2<T>) -> Self {
-        let minX = T::min(minVec.x, maxVec.x);
-        let minY = T::min(minVec.y, maxVec.y);
-        let maxX = T::max(minVec.x, maxVec.x);
-        let maxY = T::max(minVec.y, maxVec.y);
+    pub fn from(min_vec: &Vector2<T>, max_vec: &Vector2<T>) -> Self {
+        let min_x = T::min(min_vec.x, max_vec.x);
+        let min_y = T::min(min_vec.y, max_vec.y);
+        let max_x = T::max(min_vec.x, max_vec.x);
+        let max_y = T::max(min_vec.y, max_vec.y);
         Self {
-            x: minX,
-            y: minY,
-            width: maxX - minX,
-            height: maxY - minY
+            x: min_x,
+            y: min_y,
+            width:  max_x - min_x,
+            height: max_y - min_y
         }
     }
 
@@ -83,9 +83,9 @@ impl<T: Scalar> Rect<T> {
             return None
         }
 
-        let minVec = Vector2::max(&self.min(), &other.min());
-        let maxVec = Vector2::min(&self.max(), &other.max());
-        Some(Self::from(&minVec, &maxVec))
+        let min_vec = Vector2::max(&self.min(), &other.min());
+        let max_vec = Vector2::min(&self.max(), &other.max());
+        Some(Self::from(&min_vec, &max_vec))
     }
 
     pub fn contains(&self, p: &Vector2<T>) -> bool {
@@ -126,7 +126,7 @@ impl<T: Scalar> Box3<T> {
     }
 
     pub fn subdivide(&self) -> [Self; 8] {
-        let cubeTable : [Vector3<i32>; 8] = [
+        let cube_table : [Vector3<i32>; 8] = [
             Vector3::new(0, 1, 0),
             Vector3::new(1, 1, 0),
             Vector3::new(1, 1, 1),
@@ -141,7 +141,7 @@ impl<T: Scalar> Box3<T> {
         let ps: [Vector3<T>; 2] = [ self.min, self.max ];
         let mut vs = [Vector3::zero(); 8];
         for i in 0..8 {
-            vs[i] = Vector3::new(ps[cubeTable[i].x as usize].x, ps[cubeTable[i].y as usize].y, ps[cubeTable[i].z as usize].z);
+            vs[i] = Vector3::new(ps[cube_table[i].x as usize].x, ps[cube_table[i].y as usize].y, ps[cube_table[i].z as usize].z);
         }
 
         let c = self.center();
@@ -166,9 +166,9 @@ pub struct Line<T: Scalar, V: Vector<T>> {
 
 impl<T: Scalar, V: Vector<T>> Line<T, V> {
     pub fn new(p: &V, d: &V) -> Self { Self { p: *p, d: *d, t: core::marker::PhantomData } }
-    pub fn fromStartEnd(s: &V, e: &V) -> Self { Self { p: *s, d: *e - *s, t: core::marker::PhantomData } }
+    pub fn from_start_end(s: &V, e: &V) -> Self { Self { p: *s, d: *e - *s, t: core::marker::PhantomData } }
     pub fn normalize(&self) -> Self { Self { p: self.p, d: Vector::normalize(&self.d), t: core::marker::PhantomData }}
-    pub fn closestPointOnLine(&self, p: &V) -> V {
+    pub fn closest_point_on_line(&self, p: &V) -> (T, V) {
         let p_dir = *p - self.p;
 
         let d_sp = V::dot(&self.d, &p_dir);
@@ -176,7 +176,31 @@ impl<T: Scalar, V: Vector<T>> Line<T, V> {
 
         let t = d_sp / d_ss;
 
-        self.p + self.d * t
+        (t, self.p + self.d * t)
+    }
+}
+
+
+pub fn shortest_segment3d_between_lines3d<T: Scalar>(line0: &Line<T, Vector3<T>>, line1: &Line<T, Vector3<T>>, epsilon: T) -> Option<Segment<T, Vector3<T>>> {
+    let s0  = line0.p;
+    let s1  = line1.p;
+
+    let d1  = line1.d;
+    let d0  = line0.d;
+
+    let normal  = Vector3::normalize(&Vector3::cross(&d1, &d0));
+    let n0      = Vector3::normalize(&Vector3::cross(&normal, &d0));
+    let n1      = Vector3::normalize(&Vector3::cross(&normal, &d1));
+
+    let plane0  = Plane::new(&n0, &s0);
+    let plane1  = Plane::new(&n1, &s1);
+
+    let p1      = plane0.intersect_line(line1, epsilon);
+    let p0      = plane1.intersect_line(line0, epsilon);
+
+    match (p0, p1) {
+        (Some(s), Some(e)) => Some(Segment::new(&s, &e)),
+        _ => None
     }
 }
 
@@ -193,7 +217,7 @@ pub struct Segment<T : Scalar, V: Vector<T>> {
 
 impl<T: Scalar, V: Vector<T>> Segment<T, V> {
     pub fn new(s: &V, e: &V) -> Self { Self { s: *s, e: *e, t: core::marker::PhantomData } }
-    pub fn closestPointOnSegment(&self, p: &V) -> V {
+    pub fn closest_point_on_segment(&self, p: &V) -> (T, V) {
         let dir = self.e - self.s;
         let p_dir = *p - self.s;
 
@@ -201,18 +225,18 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
         let d_ss = V::dot(&dir, &dir);
 
         if d_sp < T::zero() {
-            return self.s
+            return (T::zero(), self.s)
         } else if d_sp > d_ss {
-            return self.e
+            return (T::one(), self.e)
         }
 
         let t = d_sp / d_ss;
 
-        self.s + dir * t
+        (t, self.s + dir * t)
     }
 
     pub fn distance(&self, p: &V) -> T {
-        let p_on_seg = self.closestPointOnSegment(p);
+        let (_, p_on_seg) = self.closest_point_on_segment(p);
         V::length(&(p_on_seg - *p))
     }
 }
@@ -237,7 +261,7 @@ impl<T: Scalar, V: Vector<T>> Ray<T, V> {
 }
 
 impl<T: Scalar> Ray<T, Vector3<T>> {
-    pub fn intersectPlane(&self, p: &Plane<T>) -> Option<Vector3<T>> {
+    pub fn intersect_plane(&self, p: &Plane<T>) -> Option<Vector3<T>> {
         let n = p.normal();
         let t : T = -(p.d + Vector3::dot(&n, &self.start)) / Vector3::dot(&n, &self.direction);
         if t < T::zero() {
@@ -280,7 +304,7 @@ impl<T: FloatScalar> Tri3<T> {
     pub fn new(vertices: [Vector3<T>; 3]) -> Self { Self { vertices: vertices } }
     pub fn vertices(&self) -> &[Vector3<T>; 3] { &self.vertices }
 
-    pub fn barycentricCoordinates(&self, pt: &Vector3<T>) -> Vector3<T> {
+    pub fn barycentric_coordinates(&self, pt: &Vector3<T>) -> Vector3<T> {
         let v0 = self.vertices[0];
         let v1 = self.vertices[1];
         let v2 = self.vertices[2];
@@ -305,22 +329,36 @@ impl<T: Scalar> Plane<T> {
     pub fn new(n: &Vector3<T>, p: &Vector3<T>) -> Self { let norm = Vector3::normalize(n); let d = Vector3::dot(&norm, p); Self { a: norm.x, b: norm.y, c: norm.z, d: -d } }
     pub fn normal(&self) -> Vector3<T> { Vector3::new(self.a, self.b, self.c) }
     pub fn constant(&self) -> T { self.d }
-    pub fn fromTri(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Self { let n = triNormal(v0, v1, v2); Self::new(&n, v0) }
-    pub fn fromQuad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
-        let n = quadNormal(v0, v1, v2, v3);
+    pub fn from_tri(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Self { let n = tri_normal(v0, v1, v2); Self::new(&n, v0) }
+    pub fn from_quad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
+        let n = quad_normal(v0, v1, v2, v3);
         let c = (*v0 + *v1 + *v2 + *v3) * T::quarter();
         Self::new(&n, &c)
     }
 
-    pub fn intersectRay(&self, r: &Ray<T, Vector3<T>>) -> Option<Vector3<T>> {
-        r.intersectPlane(self)
+    pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>) -> Option<Vector3<T>> {
+        r.intersect_plane(self)
+    }
+
+    pub fn intersect_line(&self, line: &Line<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+        let s = line.p;
+        let dir = line.d;
+        let n = self.normal();
+
+        let denom = Vector3::dot(&n, &dir);
+        if denom.tabs() < epsilon {
+            None
+        } else {
+            let t = -(self.constant() + Vector3::dot(&n, &s)) / denom;
+            Some(dir * t + s)
+        }
     }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Tri
 ////////////////////////////////////////////////////////////////////////////////
-pub fn triNormal<T: Scalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
+pub fn tri_normal<T: Scalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
     let v10 = *v1 - *v0;
     let v20 = *v2 - *v0;
     Vector3::normalize(&Vector3::cross(&v10, &v20))
@@ -329,7 +367,7 @@ pub fn triNormal<T: Scalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -
 ////////////////////////////////////////////////////////////////////////////////
 /// Tri
 ////////////////////////////////////////////////////////////////////////////////
-pub fn quadNormal<T: Scalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Vector3<T> {
+pub fn quad_normal<T: Scalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Vector3<T> {
     let v20 = *v2 - *v0;
     let v31 = *v3 - *v1;
     Vector3::normalize(&Vector3::cross(&v20, &v31))

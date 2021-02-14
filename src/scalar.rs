@@ -82,7 +82,7 @@ impl Epsilon for f64 {
     fn epsilon() -> Self { 1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0) }
 }
 
-macro_rules! implScalar {
+macro_rules! impl_scalar {
     ($scalar:ident, $float:ident) => {
         impl Scalar for $scalar {
             fn epsilon() -> $scalar { <$scalar as Epsilon>::epsilon() }
@@ -105,19 +105,19 @@ macro_rules! implScalar {
     }
 }
 
-implScalar!(i32, f32);
-implScalar!(i64, f64);
-implScalar!(f32, f32);
-implScalar!(f64, f64);
+impl_scalar!(i32, f32);
+impl_scalar!(i64, f64);
+impl_scalar!(f32, f32);
+impl_scalar!(f64, f64);
 
 pub trait FloatScalar : Scalar {
-    fn INFINITY() -> Self;
+    fn infinity() -> Self;
 }
 
 impl FloatScalar for f32 {
-    fn INFINITY() -> Self { core::f32::INFINITY }
+    fn infinity() -> Self { core::f32::INFINITY }
 }
 
 impl FloatScalar for f64 {
-    fn INFINITY() -> Self { core::f64::INFINITY }
+    fn infinity() -> Self { core::f64::INFINITY }
 }

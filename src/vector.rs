@@ -40,13 +40,13 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self> :
 {
     fn zero() -> Self;
 
-    fn addVV(l: &Self, r: &Self)    -> Self;
-    fn subVV(l: &Self, r: &Self)    -> Self;
-    fn mulVV(l: &Self, r: &Self)    -> Self;
-    fn divVV(l: &Self, r: &Self)    -> Self;
-    fn mulVF(l: &Self, r: T)        -> Self;
-    fn divVF(l: &Self, r: T)        -> Self;
-    fn remVV(l: &Self, r: &Self)    -> Self;
+    fn add_vv(l: &Self, r: &Self)    -> Self;
+    fn sub_vv(l: &Self, r: &Self)    -> Self;
+    fn mul_vv(l: &Self, r: &Self)    -> Self;
+    fn div_vv(l: &Self, r: &Self)    -> Self;
+    fn mul_vs(l: &Self, r: T)        -> Self;
+    fn div_vs(l: &Self, r: T)        -> Self;
+    fn rem_vv(l: &Self, r: &Self)    -> Self;
 
     fn length(&self) -> T { Self::dot(&self, &self).tsqrt() }
     fn dot  (l: &Self, r: &Self) -> T;
@@ -63,7 +63,7 @@ macro_rules! implVecScalar {
             type Output = $vecName<$scalar>;
 
             fn mul(self, rhs: $vecName<$scalar>) -> Self::Output {
-                $vecName::mulVF(&rhs, self)
+                $vecName::mul_vs(&rhs, self)
             }
         }
     }
@@ -83,13 +83,13 @@ macro_rules! implVector {
             fn zero() -> Self { Self { $($field: T::zero()),* } }
             fn length(&self) -> T { Self::dot(&self, &self).tsqrt() }
             fn dot  (l: &Self, r: &Self) -> T { $(l.$field * r.$field +)* T::zero() }
-            fn addVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field + r.$field),*) }
-            fn subVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field - r.$field),*) }
-            fn mulVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field * r.$field),*) }
-            fn divVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field / r.$field),*) }
-            fn mulVF(l: &Self, r: T) -> Self { Self::new($(l.$field * r),*) }
-            fn divVF(l: &Self, r: T) -> Self { Self::new($(l.$field / r),*) }
-            fn remVV(l: &Self, r: &Self) -> Self { Self::new($(l.$field % r.$field),*) }
+            fn add_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field + r.$field),*) }
+            fn sub_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field - r.$field),*) }
+            fn mul_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field * r.$field),*) }
+            fn div_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field / r.$field),*) }
+            fn mul_vs(l: &Self, r: T) -> Self { Self::new($(l.$field * r),*) }
+            fn div_vs(l: &Self, r: T) -> Self { Self::new($(l.$field / r),*) }
+            fn rem_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field % r.$field),*) }
             fn normalize(v: &Self) -> Self { let len = v.length(); *v / len }
             fn distance (l: &Self, r: &Self) -> T { (*r - *l).length() }
             fn min(l: &Self, r: &Self) -> Self { Self::new($(T::min(l.$field, r.$field)),*) }

@@ -59,19 +59,19 @@ impl<T: FloatScalar> Distance<T, Vector3<T>> for Plane<T> {
 
 impl<T: FloatScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
     fn distance(&self, other: &Vector3<T>) -> T {
-        let segDir  = self.e - self.s;
-        let ptDir   = *other - self.s;
-        let dSP     = Vector3::dot(&segDir, &ptDir);
-        let dSS     = Vector3::dot(&segDir, &segDir);
+        let seg_dir = self.e - self.s;
+        let pt_dir  = *other - self.s;
+        let d_sp    = Vector3::dot(&seg_dir, &pt_dir);
+        let d_ss    = Vector3::dot(&seg_dir, &seg_dir);
 
-        if dSP < T::zero() {
-            return Vector3::length(&ptDir);
-        } else if dSP > dSS {
+        if d_sp < T::zero() {
+            return Vector3::length(&pt_dir);
+        } else if d_sp > d_ss {
             return Vector3::length(&(*other - self.e));
         }
 
-        let t = dSP / dSS;
-        Vector3::length(&(*other - (self.s + segDir * t)))
+        let t = d_sp / d_ss;
+        Vector3::length(&(*other - (self.s + seg_dir * t)))
     }
 }
 
@@ -85,8 +85,8 @@ impl<T: FloatScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
         // is +\infinity and a negative number divided by zero is -\infinity, the code works for vertical
         // and horizontal line ..."
 
-        let mut tmin = -T::INFINITY();
-        let mut tmax = T::INFINITY();
+        let mut tmin = -T::infinity();
+        let mut tmax = T::infinity();
 
         let mut t0 = (self.min.x - other.start.x) / other.direction.x;
         let mut t1 = (self.max.x - other.start.x) / other.direction.x;
@@ -131,19 +131,19 @@ impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
 }
 
 
-fn isIn0to1Range<T: FloatScalar>(x: T) -> bool {
+fn is_in_0_to_1_range<T: FloatScalar>(x: T) -> bool {
     x >= T::zero() && x <= T::one()
 }
 
 impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
     fn intersect(&self, tri: &Tri3<T>) -> bool {
-        let uvw = tri.barycentricCoordinates(&self.center);
+        let uvw = tri.barycentric_coordinates(&self.center);
         let verts = tri.vertices();
         let v0 = verts[0];
         let v1 = verts[1];
         let v2 = verts[2];
-        if isIn0to1Range(uvw.x) && isIn0to1Range(uvw.y) && isIn0to1Range(uvw.z) {
-            let p = Plane::fromTri(&v0, &v1, &v2);
+        if is_in_0_to_1_range(uvw.x) && is_in_0_to_1_range(uvw.y) && is_in_0_to_1_range(uvw.z) {
+            let p = Plane::from_tri(&v0, &v1, &v2);
             if p.distance(&self.center) <= self.radius {
                 true
             } else {
@@ -171,8 +171,8 @@ impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
 /// http://www.acm.org/jgt/
 /// by Tomas Moller, May 2000
 ///
-impl<T: FloatScalar> Intersection<Vector3<T>, Tri3<T>> for Ray<T, Vector3<T>> {
-    fn intersection(&self, tri: &Tri3<T>) -> Option<Vector3<T>> {
+impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>> {
+    fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
         let verts = tri.vertices();
         let v0 = verts[0];
         let v1 = verts[1];
@@ -210,6 +210,34 @@ impl<T: FloatScalar> Intersection<Vector3<T>, Tri3<T>> for Ray<T, Vector3<T>> {
 
         let t = Vector3::dot(&edge2, &qvec) / det;
         let out = self.start + (self.direction * t);
-        Some(out) //Intersect
+        Some((t, out)) //Intersect
     }
+}
+
+///
+/// Building an Orthonormal Basis from a Unit Vector
+/// John. F. Hughes & Thomas Moller
+/// Journal of Graphics Tools, 4:4, 33-35 (DOI: 10.1080/10867651.1999.10487513)
+///
+/// The original implementation has issues around edge cases (any of x,y,z = 0)
+/// I attempt to fix using the following without proof
+/// TODO: do the proof one day!
+///
+pub fn basis_from_unit<T: Scalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
+    let u   = Vector3::normalize(unit);
+    let x   = u.x;
+    let y   = u.y;
+    let z   = u.z;
+
+    let v   =
+        if x.tabs() <= y.tabs() && x.tabs() <= z.tabs() {
+            Vector3::new(T::zero(), -z, y)
+        } else if y.tabs() <= x.tabs() && y.tabs() <= z.tabs() {
+            Vector3::new(-z, T::zero(), x)
+        } else { // z.abs() < x.abs() && z.abs() <= y.abs()
+            Vector3::new(-y, x, T::zero())
+        };
+    let v   = Vector3::normalize(&v);
+    let w   = Vector3::normalize(&Vector3::cross(&u, &v));
+    [u, w, v]
 }

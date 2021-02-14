@@ -44,15 +44,15 @@ pub fn scale<T: Scalar>(scale: Vector3<T>) -> Matrix4<T> {
                  T::zero(), T::zero(), T::zero(), T::one())
 }
 
-pub fn rotationFromQuat<T: Scalar>(q: &Quat<T>) -> Matrix4<T> {
+pub fn rotation_from_quat<T: Scalar>(q: &Quat<T>) -> Matrix4<T> {
     Quat::mat4(q)
 }
 
-pub fn rotationFromAxisAngle<T: Scalar>(axis: &Vector3<T>, angle: T) -> Matrix4<T> {
-    Quat::mat4(&Quat::ofAxisAngle(axis, angle))
+pub fn rotation_from_axis_angle<T: Scalar>(axis: &Vector3<T>, angle: T) -> Matrix4<T> {
+    Quat::mat4(&Quat::of_axis_angle(axis, angle))
 }
 
-pub fn transformVec3<T: Scalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
+pub fn transform_vec3<T: Scalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
     let v4 = Vector4::new(v.x, v.y, v.z, T::one());
     let vout = *m * v4;
     Vector3::new(vout.x / vout.w, vout.y / vout.w, vout.z / vout.w)
@@ -177,11 +177,11 @@ pub fn decompose<T: Scalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vect
         return Option::None;
     }
 
-    let rotMatrix = Matrix3::new(col0.x, col0.y, col0.z,
+    let rot_matrix = Matrix3::new(col0.x, col0.y, col0.z,
                                  col1.x, col1.y, col1.z,
                                  col2.x, col2.y, col2.z);
 
-    let rot	= Quat::ofMatrix3(&rotMatrix);
+    let rot	= Quat::of_matrix3(&rot_matrix);
 
     Some((scale, rot, trans))
 }

@@ -114,7 +114,7 @@ impl<T: Scalar> Matrix2<T> {
     // [a00 a01] - [c00 c01]
     // [a10 a11] - [c10 c11]
     //
-    pub fn mulMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let	a00 = l.col[0].x;
         let	a10 = l.col[0].y;
         let	a01 = l.col[1].x;
@@ -133,22 +133,22 @@ impl<T: Scalar> Matrix2<T> {
         Self::new(c00, c10, c01, c11)
     }
 
-    pub fn mulMatrixVector(l: &Self, r: &Vector2<T>) -> Vector2<T> {
-        Self::mulVectorMatrix(r, &l.transpose())
+    pub fn mul_matrix_vector(l: &Self, r: &Vector2<T>) -> Vector2<T> {
+        Self::mul_vector_matrix(r, &l.transpose())
     }
 
-    pub fn mulVectorMatrix(l: &Vector2<T>, r: &Self) -> Vector2<T> {
+    pub fn mul_vector_matrix(l: &Vector2<T>, r: &Self) -> Vector2<T> {
         Vector2::new(Vector2::dot(l, &r.col[0]), Vector2::dot(l, &r.col[1]))
     }
 
-    pub fn addMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix2 { col : [
             l.col[0] + r.col[0],
             l.col[1] + r.col[1],
         ]}
     }
 
-    pub fn subMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix2 { col : [
             l.col[0] - r.col[0],
             l.col[1] - r.col[1],
@@ -270,7 +270,7 @@ impl<T: Scalar> Matrix3<T> {
     // [a10 a11 a12] - [c10 c11 c12]
     // [a20 a21 a22] - [c10 c11 c22]
     //
-    pub fn mulMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let	a00 = l.col[0].x;
         let	a10 = l.col[0].y;
         let	a20 = l.col[0].z;
@@ -312,15 +312,15 @@ impl<T: Scalar> Matrix3<T> {
                 c02, c12, c22)
     }
 
-    pub fn mulMatrixVector(l: &Self, r: &Vector3<T>) -> Vector3<T> {
-        Self::mulVectorMatrix(r, &l.transpose())
+    pub fn mul_matrix_vector(l: &Self, r: &Vector3<T>) -> Vector3<T> {
+        Self::mul_vector_matrix(r, &l.transpose())
     }
 
-    pub fn mulVectorMatrix(l: &Vector3<T>, r: &Self) -> Vector3<T> {
+    pub fn mul_vector_matrix(l: &Vector3<T>, r: &Self) -> Vector3<T> {
         Vector3::new(Vector3::dot(l, &r.col[0]), Vector3::dot(l, &r.col[1]), Vector3::dot(l, &r.col[2]))
     }
 
-    pub fn addMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix3 { col : [
             l.col[0] + r.col[0],
             l.col[1] + r.col[1],
@@ -328,7 +328,7 @@ impl<T: Scalar> Matrix3<T> {
         ]}
     }
 
-    pub fn subMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix3 { col : [
             l.col[0] - r.col[0],
             l.col[1] - r.col[1],
@@ -336,7 +336,7 @@ impl<T: Scalar> Matrix3<T> {
         ]}
     }
 
-    pub fn ofAxisAngle(axis: &Vector3<T>, angle: T) -> Self {
+    pub fn of_axis_angle(axis: &Vector3<T>, angle: T) -> Self {
         let c = T::tcos(angle);
         let s = T::tsin(angle);
         let n = Vector3::normalize(axis);
@@ -577,7 +577,7 @@ impl<T: Scalar> Matrix3<T> {
     // [a20 a21 a22 a23] - [c10 c11 c22 c23]
     // [a20 a21 a22 a33] - [c10 c11 c22 c33]
     //
-    pub fn mulMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let	a00 = l.col[0].x;
         let	a10 = l.col[0].y;
         let	a20 = l.col[0].z;
@@ -644,8 +644,8 @@ impl<T: Scalar> Matrix3<T> {
                 c03, c13, c23, c33)
     }
 
-    pub fn mulMatrixVector(l: &Self, r: &Vector4<T>) -> Vector4<T> {
-        Self::mulVectorMatrix(r, &l.transpose())
+    pub fn mul_matrix_vector(l: &Self, r: &Vector4<T>) -> Vector4<T> {
+        Self::mul_vector_matrix(r, &l.transpose())
     }
 
     //
@@ -654,7 +654,7 @@ impl<T: Scalar> Matrix3<T> {
     //                     [m2 = c0_z | m6 = c1_z | m10= c2_z | m14= c3_z]
     //                     [m3 = c0_w | m7 = c1_w | m11= c2_w | m15= c3_w]
     //
-    pub fn mulVectorMatrix(l: &Vector4<T>, r: &Self) -> Vector4<T> {
+    pub fn mul_vector_matrix(l: &Vector4<T>, r: &Self) -> Vector4<T> {
         Vector4::new(
             Vector4::dot(l, &r.col[0]),
             Vector4::dot(l, &r.col[1]),
@@ -662,7 +662,7 @@ impl<T: Scalar> Matrix3<T> {
             Vector4::dot(l, &r.col[3]))
     }
 
-    pub fn addMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix4 { col : [
             l.col[0] + r.col[0],
             l.col[1] + r.col[1],
@@ -671,7 +671,7 @@ impl<T: Scalar> Matrix3<T> {
         ]}
     }
 
-    pub fn subMatrixMatrix(l: &Self, r: &Self) -> Self {
+    pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix4 { col : [
             l.col[0] - r.col[0],
             l.col[1] - r.col[1],
@@ -689,35 +689,35 @@ macro_rules! implMatrixOps {
         impl<T: Scalar> Mul<$mat<T>> for $vec<T> {
             type Output = $vec<T>;
             fn mul(self, rhs: $mat<T>) -> $vec<T> {
-                $mat::mulVectorMatrix(&self, &rhs)
+                $mat::mul_vector_matrix(&self, &rhs)
             }
         }
 
         impl<T: Scalar> Mul<$vec<T>> for $mat<T> {
             type Output = $vec<T>;
             fn mul(self, rhs: $vec<T>) -> $vec<T> {
-                $mat::mulMatrixVector(&self, &rhs)
+                $mat::mul_matrix_vector(&self, &rhs)
             }
         }
 
         impl<T: Scalar> Mul<$mat<T>> for $mat<T> {
             type Output = $mat<T>;
             fn mul(self, rhs: $mat<T>) -> $mat<T> {
-                $mat::mulMatrixMatrix(&self, &rhs)
+                $mat::mul_matrix_matrix(&self, &rhs)
             }
         }
 
         impl<T: Scalar> Add<$mat<T>> for $mat<T> {
             type Output = $mat<T>;
             fn add(self, rhs: $mat<T>) -> $mat<T> {
-                $mat::addMatrixMatrix(&self, &rhs)
+                $mat::add_matrix_matrix(&self, &rhs)
             }
         }
 
         impl<T: Scalar> Sub<$mat<T>> for $mat<T> {
             type Output = $mat<T>;
             fn sub(self, rhs: $mat<T>) -> $mat<T> {
-                $mat::subMatrixMatrix(&self, &rhs)
+                $mat::sub_matrix_matrix(&self, &rhs)
             }
         }
     };

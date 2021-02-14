@@ -1,6 +1,6 @@
 #[cfg(any(unix, target_arch="wasm32"))]
 pub(crate) mod implementation {
-    #[link_name = "m"]
+    #[link(name = "m")]
     extern "C" {
         pub fn sqrt(n: f64) -> f64;
         pub fn sqrtf(n: f32) -> f32;

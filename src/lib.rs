@@ -27,8 +27,6 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #![no_std]
-#![allow(non_snake_case)]
-#![allow(non_camel_case_types)]
 #![allow(unused_imports)]
 pub mod scalar;
 pub mod vector;
@@ -78,6 +76,16 @@ pub type Rectd = Rect<f64>;
 
 pub type Dimensioni = Dimension<i32>;
 pub type Dimensionf = Dimension<f32>;
+
+pub type Line2f = Line<f32, Vec2f>;
+pub type Line2d = Line<f64, Vec2d>;
+pub type Line3f = Line<f32, Vec3f>;
+pub type Line3d = Line<f64, Vec3d>;
+
+pub type Segment2f = Segment<f32, Vec2f>;
+pub type Segment2d = Segment<f64, Vec2d>;
+pub type Segment3f = Segment<f32, Vec3f>;
+pub type Segment3d = Segment<f64, Vec3d>;
 
 pub type Planef = Plane<f32>;
 pub type Planed = Plane<f64>;

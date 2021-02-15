@@ -1,3 +1,17 @@
+// This is a hack! One day we will remove it
+extern {
+    /// Returns the absolute value of an `f32`.
+    ///
+    /// The stabilized version of this intrinsic is
+    /// [`f32::abs`](../../std/primitive.f32.html#method.abs)
+    pub fn fabsf32(x: f32) -> f32;
+    /// Returns the absolute value of an `f64`.
+    ///
+    /// The stabilized version of this intrinsic is
+    /// [`f64::abs`](../../std/primitive.f64.html#method.abs)
+    pub fn fabsf64(x: f64) -> f64;
+}
+
 #[cfg(any(unix, target_arch="wasm32"))]
 pub(crate) mod implementation {
     #[link(name = "m")]
@@ -14,8 +28,6 @@ pub(crate) mod implementation {
         pub fn cosf(n: f32) -> f32;
         pub fn sin(n: f64) -> f64;
         pub fn sinf(n: f32) -> f32;
-        pub fn abs(n: f64) -> f64;
-        pub fn absf(n: f32) -> f32;
     }
 }
 
@@ -34,8 +46,6 @@ pub(crate) mod implementation {
         pub fn cosf(n: f32) -> f32;
         pub fn sin(n: f64) -> f64;
         pub fn sinf(n: f32) -> f32;
-        pub fn abs(n: f64) -> f64;
-        pub fn absf(n: f32) -> f32;
     }
 }
 
@@ -56,7 +66,7 @@ impl CScalar for f32 {
     fn tan (self) -> Self { unsafe { implementation::tanf (self) } }
     fn cos (self) -> Self { unsafe { implementation::cosf (self) } }
     fn sin (self) -> Self { unsafe { implementation::sinf (self) } }
-    fn abs (self) -> Self { unsafe { implementation::absf (self) } }
+    fn abs (self) -> Self { unsafe { fabsf32(self) } }
 }
 
 impl CScalar for f64 {
@@ -66,5 +76,5 @@ impl CScalar for f64 {
     fn tan (self) -> Self { unsafe { implementation::tan (self) } }
     fn cos (self) -> Self { unsafe { implementation::cos (self) } }
     fn sin (self) -> Self { unsafe { implementation::sin (self) } }
-    fn abs (self) -> Self { unsafe { implementation::abs (self) } }
+    fn abs (self) -> Self { unsafe { fabsf64(self) } }
 }

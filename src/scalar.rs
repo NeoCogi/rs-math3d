@@ -121,3 +121,14 @@ impl FloatScalar for f32 {
 impl FloatScalar for f64 {
     fn infinity() -> Self { core::f64::INFINITY }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    pub fn test() {
+        let out = -1.0;
+        let f = out.tabs();
+        assert_eq!(f, 1.0);
+    }
+}

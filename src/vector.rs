@@ -188,13 +188,33 @@ impl<T> CrossProduct for Vector3<T> where T : Scalar {
     }
 }
 
-pub trait Swizzle4<T: Scalar> {
+impl<T: Scalar> Swizzle3<T> for Vector3<T> {
+    fn xxx(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.x) }
+    fn xxy(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.y) }
+    fn xxz(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.z) }
+    fn xyx(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.x) }
+    fn xyy(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.y) }
+    fn xyz(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.z) }
+}
+
+pub trait Swizzle3<T: Scalar> {
+    fn xxx(&self) -> Vector3<T>;
+    fn xxy(&self) -> Vector3<T>;
+    fn xxz(&self) -> Vector3<T>;
+    fn xyx(&self) -> Vector3<T>;
+    fn xyy(&self) -> Vector3<T>;
     fn xyz(&self) -> Vector3<T>;
 }
 
-impl<T: Scalar> Swizzle4<T> for Vector4<T> {
+impl<T: Scalar> Swizzle3<T> for Vector4<T> {
+    fn xxx(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.x) }
+    fn xxy(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.y) }
+    fn xxz(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.z) }
+    fn xyx(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.x) }
+    fn xyy(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.y) }
     fn xyz(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.z) }
 }
+
 
 #[cfg(test)]
 mod tests {

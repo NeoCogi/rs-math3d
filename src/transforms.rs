@@ -185,3 +185,36 @@ pub fn decompose<T: Scalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vect
 
     Some((scale, rot, trans))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    pub fn test_decompose() {
+        let ms  = scale(Vector3::<f32>::new(4.0, 5.0, 6.0));
+        let mt  = translate(Vector3::<f32>::new(1.0, 2.0, 3.0));
+        let q   = Quat::<f32>::of_axis_angle(&Vector3::new(1.0, 1.0, 1.0), 1.0);
+        let mr  = rotation_from_quat(&q);
+
+        let m   = mt * mr * ms;
+
+        let v = decompose(&m);
+        match v {
+            None => assert_eq!(1, 2),
+            Some((s, r, t)) => {
+                assert_eq!((s.x - 4.0) < f32::epsilon(), true);
+                assert_eq!((s.y - 5.0) < f32::epsilon(), true);
+                assert_eq!((s.z - 6.0) < f32::epsilon(), true);
+
+                assert_eq!((q.x - r.x) < f32::epsilon(), true);
+                assert_eq!((q.y - r.y) < f32::epsilon(), true);
+                assert_eq!((q.z - r.z) < f32::epsilon(), true);
+                assert_eq!((q.w - r.w) < f32::epsilon(), true);
+
+                assert_eq!((t.x - 1.0) < f32::epsilon(), true);
+                assert_eq!((t.y - 2.0) < f32::epsilon(), true);
+                assert_eq!((t.z - 3.0) < f32::epsilon(), true);
+            }
+        }
+    }
+}

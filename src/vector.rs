@@ -188,15 +188,6 @@ impl<T> CrossProduct for Vector3<T> where T : Scalar {
     }
 }
 
-impl<T: Scalar> Swizzle3<T> for Vector3<T> {
-    fn xxx(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.x) }
-    fn xxy(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.y) }
-    fn xxz(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.z) }
-    fn xyx(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.x) }
-    fn xyy(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.y) }
-    fn xyz(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.z) }
-}
-
 pub trait Swizzle3<T: Scalar> {
     fn xxx(&self) -> Vector3<T>;
     fn xxy(&self) -> Vector3<T>;
@@ -204,6 +195,61 @@ pub trait Swizzle3<T: Scalar> {
     fn xyx(&self) -> Vector3<T>;
     fn xyy(&self) -> Vector3<T>;
     fn xyz(&self) -> Vector3<T>;
+    fn xzx(&self) -> Vector3<T>;
+    fn xzy(&self) -> Vector3<T>;
+    fn xzz(&self) -> Vector3<T>;
+
+    fn yxx(&self) -> Vector3<T>;
+    fn yxy(&self) -> Vector3<T>;
+    fn yxz(&self) -> Vector3<T>;
+    fn yyx(&self) -> Vector3<T>;
+    fn yyy(&self) -> Vector3<T>;
+    fn yyz(&self) -> Vector3<T>;
+    fn yzx(&self) -> Vector3<T>;
+    fn yzy(&self) -> Vector3<T>;
+    fn yzz(&self) -> Vector3<T>;
+
+    fn zxx(&self) -> Vector3<T>;
+    fn zxy(&self) -> Vector3<T>;
+    fn zxz(&self) -> Vector3<T>;
+    fn zyx(&self) -> Vector3<T>;
+    fn zyy(&self) -> Vector3<T>;
+    fn zyz(&self) -> Vector3<T>;
+    fn zzx(&self) -> Vector3<T>;
+    fn zzy(&self) -> Vector3<T>;
+    fn zzz(&self) -> Vector3<T>;
+}
+
+impl<T: Scalar> Swizzle3<T> for Vector3<T> {
+    fn xxx(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.x) }
+    fn xxy(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.y) }
+    fn xxz(&self) -> Vector3<T> { Vector3::new(self.x, self.x, self.z) }
+    fn xyx(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.x) }
+    fn xyy(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.y) }
+    fn xyz(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.z) }
+    fn xzx(&self) -> Vector3<T> { Vector3::new(self.x, self.z, self.x) }
+    fn xzy(&self) -> Vector3<T> { Vector3::new(self.x, self.z, self.y) }
+    fn xzz(&self) -> Vector3<T> { Vector3::new(self.x, self.z, self.z) }
+
+    fn yxx(&self) -> Vector3<T> { Vector3::new(self.y, self.x, self.x) }
+    fn yxy(&self) -> Vector3<T> { Vector3::new(self.y, self.x, self.y) }
+    fn yxz(&self) -> Vector3<T> { Vector3::new(self.y, self.x, self.z) }
+    fn yyx(&self) -> Vector3<T> { Vector3::new(self.y, self.y, self.x) }
+    fn yyy(&self) -> Vector3<T> { Vector3::new(self.y, self.y, self.y) }
+    fn yyz(&self) -> Vector3<T> { Vector3::new(self.y, self.y, self.z) }
+    fn yzx(&self) -> Vector3<T> { Vector3::new(self.y, self.z, self.x) }
+    fn yzy(&self) -> Vector3<T> { Vector3::new(self.y, self.z, self.y) }
+    fn yzz(&self) -> Vector3<T> { Vector3::new(self.y, self.z, self.z) }
+
+    fn zxx(&self) -> Vector3<T> { Vector3::new(self.z, self.x, self.x) }
+    fn zxy(&self) -> Vector3<T> { Vector3::new(self.z, self.x, self.y) }
+    fn zxz(&self) -> Vector3<T> { Vector3::new(self.z, self.x, self.z) }
+    fn zyx(&self) -> Vector3<T> { Vector3::new(self.z, self.y, self.x) }
+    fn zyy(&self) -> Vector3<T> { Vector3::new(self.z, self.y, self.y) }
+    fn zyz(&self) -> Vector3<T> { Vector3::new(self.z, self.y, self.z) }
+    fn zzx(&self) -> Vector3<T> { Vector3::new(self.z, self.z, self.x) }
+    fn zzy(&self) -> Vector3<T> { Vector3::new(self.z, self.z, self.y) }
+    fn zzz(&self) -> Vector3<T> { Vector3::new(self.z, self.z, self.z) }
 }
 
 impl<T: Scalar> Swizzle3<T> for Vector4<T> {
@@ -213,6 +259,29 @@ impl<T: Scalar> Swizzle3<T> for Vector4<T> {
     fn xyx(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.x) }
     fn xyy(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.y) }
     fn xyz(&self) -> Vector3<T> { Vector3::new(self.x, self.y, self.z) }
+    fn xzx(&self) -> Vector3<T> { Vector3::new(self.x, self.z, self.x) }
+    fn xzy(&self) -> Vector3<T> { Vector3::new(self.x, self.z, self.y) }
+    fn xzz(&self) -> Vector3<T> { Vector3::new(self.x, self.z, self.z) }
+
+    fn yxx(&self) -> Vector3<T> { Vector3::new(self.y, self.x, self.x) }
+    fn yxy(&self) -> Vector3<T> { Vector3::new(self.y, self.x, self.y) }
+    fn yxz(&self) -> Vector3<T> { Vector3::new(self.y, self.x, self.z) }
+    fn yyx(&self) -> Vector3<T> { Vector3::new(self.y, self.y, self.x) }
+    fn yyy(&self) -> Vector3<T> { Vector3::new(self.y, self.y, self.y) }
+    fn yyz(&self) -> Vector3<T> { Vector3::new(self.y, self.y, self.z) }
+    fn yzx(&self) -> Vector3<T> { Vector3::new(self.y, self.z, self.x) }
+    fn yzy(&self) -> Vector3<T> { Vector3::new(self.y, self.z, self.y) }
+    fn yzz(&self) -> Vector3<T> { Vector3::new(self.y, self.z, self.z) }
+
+    fn zxx(&self) -> Vector3<T> { Vector3::new(self.z, self.x, self.x) }
+    fn zxy(&self) -> Vector3<T> { Vector3::new(self.z, self.x, self.y) }
+    fn zxz(&self) -> Vector3<T> { Vector3::new(self.z, self.x, self.z) }
+    fn zyx(&self) -> Vector3<T> { Vector3::new(self.z, self.y, self.x) }
+    fn zyy(&self) -> Vector3<T> { Vector3::new(self.z, self.y, self.y) }
+    fn zyz(&self) -> Vector3<T> { Vector3::new(self.z, self.y, self.z) }
+    fn zzx(&self) -> Vector3<T> { Vector3::new(self.z, self.z, self.x) }
+    fn zzy(&self) -> Vector3<T> { Vector3::new(self.z, self.z, self.y) }
+    fn zzz(&self) -> Vector3<T> { Vector3::new(self.z, self.z, self.z) }
 }
 
 

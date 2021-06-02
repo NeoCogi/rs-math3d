@@ -58,10 +58,10 @@ impl BasisPlane {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Basis<T: Scalar> {
-    x_axis      : Vector3<T>,
-    y_axis      : Vector3<T>,
-    z_axis      : Vector3<T>,
-    center      : Vector3<T>,
+    pub x_axis  : Vector3<T>,
+    pub y_axis  : Vector3<T>,
+    pub z_axis  : Vector3<T>,
+    pub center  : Vector3<T>,
 }
 
 impl<T: Scalar> Basis<T> {

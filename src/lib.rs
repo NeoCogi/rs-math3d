@@ -99,4 +99,7 @@ pub type Ray3d = Ray<f64, Vec3d>;
 pub type Box3f = Box3<f32>;
 pub type Box3d = Box3<f64>;
 
+pub type Basisf = Basis<f32>;
+pub type Basisd = Basis<f64>;
+
 pub fn color4b(r: u8, g: u8, b: u8, a: u8) -> Color4b { Color4b { x : r, y: g, z: b, w: a } }

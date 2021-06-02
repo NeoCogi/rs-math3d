@@ -35,15 +35,18 @@ pub mod quaternion;
 pub mod transforms;
 pub mod primitives;
 pub mod queries;
+pub mod basis;
+
 mod cmath;
 
 pub use scalar::{Scalar, FloatScalar};
-pub use vector::{Vector, Vector2, Vector3, Vector4, CrossProduct};
+pub use vector::{Vector, Vector2, Vector3, Vector4, CrossProduct, Swizzle3};
 pub use matrix::{Matrix2, Matrix3, Matrix4};
 pub use quaternion::{Quat};
 pub use transforms::*;
 pub use primitives::*;
 pub use queries::*;
+pub use basis::*;
 
 pub type Color4b = Vector4<u8>;
 

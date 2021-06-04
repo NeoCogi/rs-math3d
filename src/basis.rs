@@ -129,4 +129,19 @@ impl<T: Scalar> Basis<T> {
         }
     }
 
+    pub fn to_mat3(&self) -> Matrix3<T> {
+        Matrix3::new(
+            self.x_axis.x, self.x_axis.y, self.x_axis.z,
+            self.y_axis.x, self.y_axis.y, self.y_axis.z,
+            self.z_axis.x, self.z_axis.y, self.z_axis.z)
+    }
+
+    pub fn of_center_mat3(center: &Vector3<T>, m: Matrix3<T>) -> Self {
+        Self {
+            center  : *center,
+            x_axis  : m.col[0],
+            y_axis  : m.col[1],
+            z_axis  : m.col[2],
+        }
+    }
 }

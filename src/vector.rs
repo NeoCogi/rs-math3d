@@ -77,6 +77,7 @@ macro_rules! implVector {
 
         impl<T: Scalar> $vecName<T> {
             pub fn new($($field:T),*) -> Self { Self { $($field: $field),* } }
+            pub fn normalize(&self) -> Self { <$vecName<T> as Vector<T>>::normalize(self) }
         }
 
         impl<T: Scalar> Vector<T> for $vecName<T> {
@@ -188,6 +189,54 @@ impl<T> CrossProduct for Vector3<T> where T : Scalar {
     }
 }
 
+pub trait Swizzle2<T: Scalar> {
+    fn xx(&self) -> Vector2<T>;
+    fn xy(&self) -> Vector2<T>;
+    fn xz(&self) -> Vector2<T>;
+    fn yx(&self) -> Vector2<T>;
+    fn yy(&self) -> Vector2<T>;
+    fn yz(&self) -> Vector2<T>;
+    fn zx(&self) -> Vector2<T>;
+    fn zy(&self) -> Vector2<T>;
+    fn zz(&self) -> Vector2<T>;
+}
+
+impl<T: Scalar> Swizzle2<T> for Vector2<T> {
+    fn xx(&self) -> Vector2<T> { Vector2::new(self.x, self.x) }
+    fn xy(&self) -> Vector2<T> { Vector2::new(self.x, self.y) }
+    fn xz(&self) -> Vector2<T> { Vector2::new(self.x, T::zero()) }
+    fn yx(&self) -> Vector2<T> { Vector2::new(self.y, self.x) }
+    fn yy(&self) -> Vector2<T> { Vector2::new(self.y, self.y) }
+    fn yz(&self) -> Vector2<T> { Vector2::new(self.y, T::zero()) }
+    fn zx(&self) -> Vector2<T> { Vector2::new(T::zero(), self.x) }
+    fn zy(&self) -> Vector2<T> { Vector2::new(T::zero(), self.y) }
+    fn zz(&self) -> Vector2<T> { Vector2::new(T::zero(), T::zero()) }
+}
+
+impl<T: Scalar> Swizzle2<T> for Vector3<T> {
+    fn xx(&self) -> Vector2<T> { Vector2::new(self.x, self.x) }
+    fn xy(&self) -> Vector2<T> { Vector2::new(self.x, self.y) }
+    fn xz(&self) -> Vector2<T> { Vector2::new(self.x, self.z) }
+    fn yx(&self) -> Vector2<T> { Vector2::new(self.y, self.x) }
+    fn yy(&self) -> Vector2<T> { Vector2::new(self.y, self.y) }
+    fn yz(&self) -> Vector2<T> { Vector2::new(self.y, self.z) }
+    fn zx(&self) -> Vector2<T> { Vector2::new(self.z, self.x) }
+    fn zy(&self) -> Vector2<T> { Vector2::new(self.z, self.y) }
+    fn zz(&self) -> Vector2<T> { Vector2::new(self.z, self.z) }
+}
+
+impl<T: Scalar> Swizzle2<T> for Vector4<T> {
+    fn xx(&self) -> Vector2<T> { Vector2::new(self.x, self.x) }
+    fn xy(&self) -> Vector2<T> { Vector2::new(self.x, self.y) }
+    fn xz(&self) -> Vector2<T> { Vector2::new(self.x, self.z) }
+    fn yx(&self) -> Vector2<T> { Vector2::new(self.y, self.x) }
+    fn yy(&self) -> Vector2<T> { Vector2::new(self.y, self.y) }
+    fn yz(&self) -> Vector2<T> { Vector2::new(self.y, self.z) }
+    fn zx(&self) -> Vector2<T> { Vector2::new(self.z, self.x) }
+    fn zy(&self) -> Vector2<T> { Vector2::new(self.z, self.y) }
+    fn zz(&self) -> Vector2<T> { Vector2::new(self.z, self.z) }
+}
+
 pub trait Swizzle3<T: Scalar> {
     fn xxx(&self) -> Vector3<T>;
     fn xxy(&self) -> Vector3<T>;
@@ -284,6 +333,13 @@ impl<T: Scalar> Swizzle3<T> for Vector4<T> {
     fn zzz(&self) -> Vector3<T> { Vector3::new(self.z, self.z, self.z) }
 }
 
+
+pub fn length   <T: Scalar, V: Vector<T>>   (v: &V) -> T { V::dot(v, v).tsqrt() }
+pub fn dot      <T: Scalar, V: Vector<T>>   (l: &V, r: &V) -> T { V::dot(l, r)  }
+pub fn normalize<T: Scalar, V: Vector<T>>   (v: &V) -> V { let len = v.length(); *v / len }
+pub fn distance <T: Scalar, V: Vector<T>>   (l: &V, r: &V) -> T { (*r - *l).length() }
+pub fn min      <T: Scalar, V: Vector<T>>   (l: &V, r: &V) -> V { V::min(l, r) }
+pub fn max      <T: Scalar, V: Vector<T>>   (l: &V, r: &V) -> V { V::max(l, r) }
 
 #[cfg(test)]
 mod tests {

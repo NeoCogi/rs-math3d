@@ -355,6 +355,47 @@ impl<T: Scalar> Plane<T> {
     }
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+/// Parametric Plane
+////////////////////////////////////////////////////////////////////////////////
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ParametricPlane<T : Scalar> {
+    center  : Vector3<T>,
+    x_axis  : Vector3<T>,
+    y_axis  : Vector3<T>,
+}
+
+impl<T: Scalar> ParametricPlane<T> {
+
+    pub fn new(center: &Vector3<T>, x_axis: &Vector3<T>, y_axis: &Vector3<T>) -> Self {
+        Self { center: *center, x_axis: *x_axis, y_axis: *y_axis }
+    }
+
+    pub fn plane(&self) -> Plane<T> {
+        Plane::new(&self.normal(), &self.center)
+    }
+
+    pub fn normal(&self) -> Vector3<T> {
+        Vector3::cross(&self.x_axis, &self.y_axis).normalize()
+    }
+
+    pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>) -> Option<Vector3<T>> {
+        r.intersect_plane(&self.plane())
+    }
+
+    pub fn intersect_line(&self, line: &Line<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+        self.plane().intersect_line(line, epsilon)
+    }
+
+    pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
+        let x_coord = dot(v, &self.x_axis) / dot(&self.x_axis, &self.x_axis);
+        let y_coord = dot(v, &self.y_axis) / dot(&self.y_axis, &self.y_axis);
+        Vector2::new(x_coord, y_coord)
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Tri
 ////////////////////////////////////////////////////////////////////////////////

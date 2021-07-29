@@ -362,9 +362,9 @@ impl<T: Scalar> Plane<T> {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ParametricPlane<T : Scalar> {
-    center  : Vector3<T>,
-    x_axis  : Vector3<T>,
-    y_axis  : Vector3<T>,
+    pub center  : Vector3<T>,
+    pub x_axis  : Vector3<T>,
+    pub y_axis  : Vector3<T>,
 }
 
 impl<T: Scalar> ParametricPlane<T> {

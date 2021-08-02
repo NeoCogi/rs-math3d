@@ -390,8 +390,9 @@ impl<T: Scalar> ParametricPlane<T> {
     }
 
     pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
-        let x_coord = dot(v, &self.x_axis) / dot(&self.x_axis, &self.x_axis);
-        let y_coord = dot(v, &self.y_axis) / dot(&self.y_axis, &self.y_axis);
+        let p       = *v - self.center;
+        let x_coord = dot(&p, &self.x_axis) / dot(&self.x_axis, &self.x_axis);
+        let y_coord = dot(&p, &self.y_axis) / dot(&self.y_axis, &self.y_axis);
         Vector2::new(x_coord, y_coord)
     }
 }

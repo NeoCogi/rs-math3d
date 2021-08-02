@@ -727,6 +727,20 @@ implMatrixOps!(Matrix2, Vector2);
 implMatrixOps!(Matrix3, Vector3);
 implMatrixOps!(Matrix4, Vector4);
 
+impl<T: Scalar> Mul<Matrix4<T>> for Vector3<T> {
+    type Output = Vector3<T>;
+    fn mul(self, rhs: Matrix4<T>) -> Vector3<T> {
+        Matrix4::mul_vector_matrix(&Vector4::new(self.x, self.y, self.z, T::one()), &rhs).xyz()
+    }
+}
+
+impl<T: Scalar> Mul<Vector3<T>> for Matrix4<T> {
+    type Output = Vector3<T>;
+    fn mul(self, rhs: Vector3<T>) -> Vector3<T> {
+        Matrix4::mul_matrix_vector(&self, &Vector4::new(rhs.x, rhs.y, rhs.z, T::one())).xyz()
+    }
+}
+
 pub trait Matrix4Extension<T : Scalar> {
     fn mat3(&self) -> Matrix3<T>;
 }

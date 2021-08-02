@@ -1,6 +1,6 @@
 [package]
 name = "rs-math3d"
-version = "0.9.13"
+version = "0.9.14"
 license = "BSD-3-Clause"
 authors = ["Raja Lehtihet <raja.lehtihet@gmail.com>", "Wael El Oraiby <wael.eloraiby@gmail.com>"]
 edition = "2018"

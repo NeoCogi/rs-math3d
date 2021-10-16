@@ -31,7 +31,7 @@ use crate::vector::{Vector, Vector3};
 use crate::matrix::{Matrix3, Matrix4};
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct Quat<T: Scalar> {
     pub x: T,
     pub y: T,

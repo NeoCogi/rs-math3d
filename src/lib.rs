@@ -40,7 +40,7 @@ pub mod basis;
 mod cmath;
 
 pub use scalar::{Scalar, FloatScalar};
-pub use vector::{Vector, Vector2, Vector3, Vector4, CrossProduct, Swizzle2, Swizzle3};
+pub use vector::{Vector, FloatVector, Vector2, Vector3, Vector4, CrossProduct, Swizzle2, Swizzle3};
 pub use matrix::{Matrix2, Matrix3, Matrix4};
 pub use quaternion::{Quat};
 pub use transforms::*;

@@ -125,6 +125,55 @@ impl_scalar!(f64, f64);
 impl_float_scalar!(f32);
 impl_float_scalar!(f64);
 
+#[cfg(feature = "fixedpoint")]
+mod fixedpoint {
+    macro_rules! impl_scalar_for_fixed {
+        ($scalar:ident, $float:ident) => {
+            impl Scalar for $scalar {
+                fn epsilon() -> $scalar { Self::zero() }
+                fn zero() -> $scalar    { $scalar::from_num(0   ) }
+                fn one() -> $scalar     { $scalar::from_num(1   ) }
+                fn two() -> $scalar     { $scalar::from_num(2   ) }
+                fn half() -> $scalar    { $scalar::from_num(0.5 ) }
+                fn quarter() -> $scalar { $scalar::from_num(0.25) }
+                fn l8192() -> $scalar   { $scalar::from_num(8192) }
+                fn min(l: Self, r: Self) -> Self { if l < r { l } else { r } }
+                fn max(l: Self, r: Self) -> Self { if l > r { l } else { r } }
+                fn squared(l: Self) -> Self { l * l }
+                fn tabs(self) -> $scalar { self.abs() }
+            }
+        }
+    }
+
+
+    macro_rules! impl_fixed_scalar {
+        ($scalar:ident, $max:path) => {
+            impl FloatScalar for $scalar {
+                fn infinity()  -> $scalar { $max }
+                fn tsqrt(self) -> $scalar { $scalar::from_num((self.to_num::<f64>()).sqrt()) }
+                fn tsin(self)  -> $scalar { $scalar::from_num((self.to_num::<f64>()).sin() ) }
+                fn tcos(self)  -> $scalar { $scalar::from_num((self.to_num::<f64>()).cos() ) }
+                fn ttan(self)  -> $scalar { $scalar::from_num((self.to_num::<f64>()).tan() ) }
+                fn tacos(self) -> $scalar { $scalar::from_num((self.to_num::<f64>()).acos()) }
+            }
+        }
+    }
+
+    pub type Fixed112 = fixed::types::I112F16;
+    pub type Fixed48  = fixed::types::I48F16;
+
+
+
+    impl_scalar_for_fixed!(Fixed48, f64);
+    impl_scalar_for_fixed!(Fixed112, f64);
+
+    impl_fixed_scalar!(Fixed48, fixed::FixedI64::MAX);
+    impl_fixed_scalar!(Fixed112, fixed::FixedI128::MAX);
+}
+
+#[cfg(feature="fixedpoint")]
+pub use fixedpoint::*;
+
 #[cfg(test)]
 mod tests {
     use super::*;

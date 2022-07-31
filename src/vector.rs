@@ -48,13 +48,16 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self> :
     fn div_vs(l: &Self, r: T)        -> Self;
     fn rem_vv(l: &Self, r: &Self)    -> Self;
 
-    fn length(&self) -> T { Self::dot(&self, &self).tsqrt() }
     fn dot  (l: &Self, r: &Self) -> T;
-    fn normalize(v: &Self) -> Self;
-    fn distance (l: &Self, r: &Self) -> T;
 
     fn min(l: &Self, r: &Self) -> Self;
     fn max(l: &Self, r: &Self) -> Self;
+}
+
+pub trait FloatVector<T: FloatScalar> : Vector<T> {
+    fn length(&self) -> T;
+    fn normalize(&self) -> Self;
+    fn distance (l: &Self, r: &Self) -> T;
 }
 
 macro_rules! implVecScalar {
@@ -77,12 +80,10 @@ macro_rules! implVector {
 
         impl<T: Scalar> $vecName<T> {
             pub fn new($($field:T),*) -> Self { Self { $($field: $field),* } }
-            pub fn normalize(&self) -> Self { <$vecName<T> as Vector<T>>::normalize(self) }
         }
 
         impl<T: Scalar> Vector<T> for $vecName<T> {
             fn zero() -> Self { Self { $($field: T::zero()),* } }
-            fn length(&self) -> T { Self::dot(&self, &self).tsqrt() }
             fn dot  (l: &Self, r: &Self) -> T { $(l.$field * r.$field +)* T::zero() }
             fn add_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field + r.$field),*) }
             fn sub_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field - r.$field),*) }
@@ -91,8 +92,6 @@ macro_rules! implVector {
             fn mul_vs(l: &Self, r: T) -> Self { Self::new($(l.$field * r),*) }
             fn div_vs(l: &Self, r: T) -> Self { Self::new($(l.$field / r),*) }
             fn rem_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field % r.$field),*) }
-            fn normalize(v: &Self) -> Self { let len = v.length(); *v / len }
-            fn distance (l: &Self, r: &Self) -> T { (*r - *l).length() }
             fn min(l: &Self, r: &Self) -> Self { Self::new($(T::min(l.$field, r.$field)),*) }
             fn max(l: &Self, r: &Self) -> Self { Self::new($(T::max(l.$field, r.$field)),*) }
         }
@@ -175,6 +174,17 @@ macro_rules! implVector {
     };
 }
 
+macro_rules! implFloatVector {
+    ($vecName:ident) => {
+
+        impl<T: FloatScalar> FloatVector<T> for $vecName<T> {
+            fn length(&self) -> T { Self::dot(self, self).tsqrt() }
+            fn normalize(&self) -> Self { let len = Self::length(self); *self / len }
+            fn distance (l: &Self, r: &Self) -> T { Self::length(&(*r - *l)) }
+        }
+    }
+}
+
 pub trait CrossProduct {
     fn cross(l: &Self, r: &Self) -> Self;
 }
@@ -182,6 +192,10 @@ pub trait CrossProduct {
 implVector!(Vector2, x y);
 implVector!(Vector3, x y z);
 implVector!(Vector4, x y z w);
+
+implFloatVector!(Vector2);
+implFloatVector!(Vector3);
+implFloatVector!(Vector4);
 
 impl<T> CrossProduct for Vector3<T> where T : Scalar {
     fn cross(l: &Vector3<T>, r: &Vector3<T>) -> Vector3<T> {
@@ -334,10 +348,10 @@ impl<T: Scalar> Swizzle3<T> for Vector4<T> {
 }
 
 
-pub fn length   <T: Scalar, V: Vector<T>>   (v: &V) -> T { V::dot(v, v).tsqrt() }
+pub fn length   <T: FloatScalar, V: Vector<T>>   (v: &V) -> T { V::dot(v, v).tsqrt() }
 pub fn dot      <T: Scalar, V: Vector<T>>   (l: &V, r: &V) -> T { V::dot(l, r)  }
-pub fn normalize<T: Scalar, V: Vector<T>>   (v: &V) -> V { let len = v.length(); *v / len }
-pub fn distance <T: Scalar, V: Vector<T>>   (l: &V, r: &V) -> T { (*r - *l).length() }
+pub fn normalize<T: FloatScalar, V: FloatVector<T>>   (v: &V) -> V { let len = v.length(); *v / len }
+pub fn distance <T: FloatScalar, V: FloatVector<T>>   (l: &V, r: &V) -> T { (*r - *l).length() }
 pub fn min      <T: Scalar, V: Vector<T>>   (l: &V, r: &V) -> V { V::min(l, r) }
 pub fn max      <T: Scalar, V: Vector<T>>   (l: &V, r: &V) -> V { V::max(l, r) }
 

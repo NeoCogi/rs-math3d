@@ -44,11 +44,11 @@ pub fn scale<T: Scalar>(scale: Vector3<T>) -> Matrix4<T> {
                  T::zero(), T::zero(), T::zero(), T::one())
 }
 
-pub fn rotation_from_quat<T: Scalar>(q: &Quat<T>) -> Matrix4<T> {
+pub fn rotation_from_quat<T: FloatScalar>(q: &Quat<T>) -> Matrix4<T> {
     Quat::mat4(q)
 }
 
-pub fn rotation_from_axis_angle<T: Scalar>(axis: &Vector3<T>, angle: T) -> Matrix4<T> {
+pub fn rotation_from_axis_angle<T: FloatScalar>(axis: &Vector3<T>, angle: T) -> Matrix4<T> {
     Quat::mat4(&Quat::of_axis_angle(axis, angle))
 }
 
@@ -117,7 +117,7 @@ pub fn ortho4<T: Scalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) 
                 r03,        r13,        r23,        T::one())
 }
 
-pub fn perspective<T: Scalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T> {
+pub fn perspective<T: FloatScalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T> {
     let f       = T::one() / T::ttan(fovy * T::half());
     let denom   = near - far;
     let a       = (far + near) / denom;
@@ -129,7 +129,7 @@ pub fn perspective<T: Scalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T>
                  T::zero(), T::zero(),  b,          T::zero())
 }
 
-pub fn lookat<T: Scalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
+pub fn lookat<T: FloatScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
     let f	= Vector3::normalize(&(*dest - *eye));
     let s	= Vector3::normalize(&Vector3::cross(&f, up));
     let u	= Vector3::normalize(&Vector3::cross(&s, &f));
@@ -144,7 +144,7 @@ pub fn lookat<T: Scalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -
 }
 
 // decompose a matrix into scale, rotation and translation
-pub fn decompose<T: Scalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
+pub fn decompose<T: FloatScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
 
     let	mut col0	= Vector3::new(m.col[0].x, m.col[0].y, m.col[0].z);
     let	mut col1	= Vector3::new(m.col[1].x, m.col[1].y, m.col[1].z);
@@ -152,7 +152,7 @@ pub fn decompose<T: Scalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vect
     let det	        = m.determinant();
 
     // the scale needs to be tested
-    let mut scale	= Vector3::new(col0.length(), col1.length(), col2.length());
+    let mut scale	= Vector3::new(Vector3::length(&col0), Vector3::length(&col1), Vector3::length(&col2));
     let trans	= Vector3::new(m.col[3].x, m.col[3].y, m.col[3].z);
 
     if det < T::zero() {

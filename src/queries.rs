@@ -223,7 +223,7 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
 /// I attempt to fix using the following without proof
 /// TODO: do the proof one day!
 ///
-pub fn basis_from_unit<T: Scalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
+pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
     let u   = Vector3::normalize(unit);
     let x   = u.x;
     let y   = u.y;

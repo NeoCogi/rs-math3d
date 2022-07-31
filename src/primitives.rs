@@ -167,7 +167,6 @@ pub struct Line<T: Scalar, V: Vector<T>> {
 impl<T: Scalar, V: Vector<T>> Line<T, V> {
     pub fn new(p: &V, d: &V) -> Self { Self { p: *p, d: *d, t: core::marker::PhantomData } }
     pub fn from_start_end(s: &V, e: &V) -> Self { Self { p: *s, d: *e - *s, t: core::marker::PhantomData } }
-    pub fn normalize(&self) -> Self { Self { p: self.p, d: Vector::normalize(&self.d), t: core::marker::PhantomData }}
     pub fn closest_point_on_line(&self, p: &V) -> (T, V) {
         let p_dir = *p - self.p;
 
@@ -180,8 +179,12 @@ impl<T: Scalar, V: Vector<T>> Line<T, V> {
     }
 }
 
+impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
+    pub fn normalize(&self) -> Self { Self { p: self.p, d: FloatVector::normalize(&self.d), t: core::marker::PhantomData }}
+}
 
-pub fn shortest_segment3d_between_lines3d<T: Scalar>(line0: &Line<T, Vector3<T>>, line1: &Line<T, Vector3<T>>, epsilon: T) -> Option<Segment<T, Vector3<T>>> {
+
+pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(line0: &Line<T, Vector3<T>>, line1: &Line<T, Vector3<T>>, epsilon: T) -> Option<Segment<T, Vector3<T>>> {
     let s0  = line0.p;
     let s1  = line1.p;
 
@@ -199,7 +202,7 @@ pub fn shortest_segment3d_between_lines3d<T: Scalar>(line0: &Line<T, Vector3<T>>
     let p0      = plane1.intersect_line(line0, epsilon);
 
     match (p0, p1) {
-        (Some(s), Some(e)) => Some(Segment::new(&s, &e)),
+        (Some((_, s)), Some((_, e))) => Some(Segment::new(&s, &e)),
         _ => None
     }
 }
@@ -234,7 +237,9 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
 
         (t, self.s + dir * t)
     }
+}
 
+impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
     pub fn distance(&self, p: &V) -> T {
         let (_, p_on_seg) = self.closest_point_on_segment(p);
         V::length(&(p_on_seg - *p))
@@ -254,7 +259,7 @@ pub struct Ray<T : Scalar, V: Vector<T>> {
     t : core::marker::PhantomData<T>,
 }
 
-impl<T: Scalar, V: Vector<T>> Ray<T, V> {
+impl<T: FloatScalar, V: FloatVector<T>> Ray<T, V> {
     pub fn new(start: &V, direction: &V) -> Self {
         Self { start: *start, direction: V::normalize(direction), t: core::marker::PhantomData }
     }
@@ -326,21 +331,14 @@ pub struct Plane<T : Scalar> {
 }
 
 impl<T: Scalar> Plane<T> {
-    pub fn new(n: &Vector3<T>, p: &Vector3<T>) -> Self { let norm = Vector3::normalize(n); let d = Vector3::dot(&norm, p); Self { a: norm.x, b: norm.y, c: norm.z, d: -d } }
     pub fn normal(&self) -> Vector3<T> { Vector3::new(self.a, self.b, self.c) }
     pub fn constant(&self) -> T { self.d }
-    pub fn from_tri(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Self { let n = tri_normal(v0, v1, v2); Self::new(&n, v0) }
-    pub fn from_quad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
-        let n = quad_normal(v0, v1, v2, v3);
-        let c = (*v0 + *v1 + *v2 + *v3) * T::quarter();
-        Self::new(&n, &c)
-    }
 
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>) -> Option<Vector3<T>> {
         r.intersect_plane(self)
     }
 
-    pub fn intersect_line(&self, line: &Line<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+    pub fn intersect_line(&self, line: &Line<T, Vector3<T>>, epsilon: T) -> Option<(T, Vector3<T>)> {
         let s = line.p;
         let dir = line.d;
         let n = self.normal();
@@ -350,8 +348,19 @@ impl<T: Scalar> Plane<T> {
             None
         } else {
             let t = -(self.constant() + Vector3::dot(&n, &s)) / denom;
-            Some(dir * t + s)
+            Some((t, dir * t + s))
         }
+    }
+}
+
+impl<T: FloatScalar> Plane<T> {
+    pub fn new(n: &Vector3<T>, p: &Vector3<T>) -> Self { let norm = Vector3::normalize(n); let d = Vector3::dot(&norm, p); Self { a: norm.x, b: norm.y, c: norm.z, d: -d } }
+
+    pub fn from_tri(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Self { let n = tri_normal(v0, v1, v2); Self::new(&n, v0) }
+    pub fn from_quad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
+        let n = quad_normal(v0, v1, v2, v3);
+        let c = (*v0 + *v1 + *v2 + *v3) * T::quarter();
+        Self::new(&n, &c)
     }
 }
 
@@ -367,7 +376,7 @@ pub struct ParametricPlane<T : Scalar> {
     pub y_axis  : Vector3<T>,
 }
 
-impl<T: Scalar> ParametricPlane<T> {
+impl<T: FloatScalar> ParametricPlane<T> {
 
     pub fn new(center: &Vector3<T>, x_axis: &Vector3<T>, y_axis: &Vector3<T>) -> Self {
         Self { center: *center, x_axis: *x_axis, y_axis: *y_axis }
@@ -385,7 +394,7 @@ impl<T: Scalar> ParametricPlane<T> {
         r.intersect_plane(&self.plane())
     }
 
-    pub fn intersect_line(&self, line: &Line<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+    pub fn intersect_line(&self, line: &Line<T, Vector3<T>>, epsilon: T) -> Option<(T, Vector3<T>)> {
         self.plane().intersect_line(line, epsilon)
     }
 
@@ -400,7 +409,7 @@ impl<T: Scalar> ParametricPlane<T> {
 ////////////////////////////////////////////////////////////////////////////////
 /// Tri
 ////////////////////////////////////////////////////////////////////////////////
-pub fn tri_normal<T: Scalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
+pub fn tri_normal<T: FloatScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
     let v10 = *v1 - *v0;
     let v20 = *v2 - *v0;
     Vector3::normalize(&Vector3::cross(&v10, &v20))
@@ -409,7 +418,7 @@ pub fn tri_normal<T: Scalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) 
 ////////////////////////////////////////////////////////////////////////////////
 /// Tri
 ////////////////////////////////////////////////////////////////////////////////
-pub fn quad_normal<T: Scalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Vector3<T> {
+pub fn quad_normal<T: FloatScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Vector3<T> {
     let v20 = *v2 - *v0;
     let v31 = *v3 - *v1;
     Vector3::normalize(&Vector3::cross(&v20, &v31))

@@ -27,19 +27,19 @@
 // POSSIBILITY OF SUCH DAMAGE.
 use core::ops::*;
 use crate::scalar::*;
-use crate::vector::{Vector, Vector3};
+use crate::vector::{Vector, FloatVector, Vector3};
 use crate::matrix::{Matrix3, Matrix4};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-pub struct Quat<T: Scalar> {
+pub struct Quat<T: FloatScalar> {
     pub x: T,
     pub y: T,
     pub z: T,
     pub w: T
 }
 
-impl<T: Scalar> Quat<T> {
+impl<T: FloatScalar> Quat<T> {
     pub fn identity() -> Self { Self { x: T::zero(), y: T::zero(), z: T::zero(), w: T::one() } }
     pub fn new(x: T, y: T, z: T, w: T) -> Self { Self { x: x, y: y, z: z, w: w } }
 
@@ -246,7 +246,8 @@ impl<T: Scalar> Quat<T> {
         let	half_angle = angle * T::half();
         let	sin_a = T::tsin(half_angle);
         let	cos_a = T::tcos(half_angle);
-        let	n : Vector3<T> = (if axis.length() > T::zero() { Vector3::normalize(axis) } else { *axis }) * sin_a;
+        let len = axis.length();
+        let	n : Vector3<T> = (if len > T::zero() { Vector3::normalize(&axis) } else { *axis }) * sin_a;
 
         let x = n.x;
         let y = n.y;
@@ -256,27 +257,27 @@ impl<T: Scalar> Quat<T> {
     }
 }
 
-impl<T : Scalar> Add for Quat<T> {
+impl<T : FloatScalar> Add for Quat<T> {
     type Output = Quat<T>;
     fn add(self, rhs: Self) -> Self { Self::add(&self, &rhs) }
 }
 
-impl<T : Scalar> Sub for Quat<T> {
+impl<T : FloatScalar> Sub for Quat<T> {
     type Output = Quat<T>;
     fn sub(self, rhs: Self) -> Self { Self::sub(&self, &rhs) }
 }
 
-impl<T : Scalar> Mul for Quat<T> {
+impl<T : FloatScalar> Mul for Quat<T> {
     type Output = Quat<T>;
     fn mul(self, rhs: Self) -> Self { Self::mul(&self, &rhs) }
 }
 
-impl<T : Scalar> Div<T> for Quat<T> {
+impl<T : FloatScalar> Div<T> for Quat<T> {
     type Output = Quat<T>;
     fn div(self, t: T) -> Self { Self::divf(&self, t) }
 }
 
-impl<T : Scalar> Mul<T> for Quat<T> {
+impl<T : FloatScalar> Mul<T> for Quat<T> {
     type Output = Quat<T>;
     fn mul(self, t: T) -> Self { Self::mulf(&self, t) }
 }

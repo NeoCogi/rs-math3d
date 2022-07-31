@@ -335,7 +335,9 @@ impl<T: Scalar> Matrix3<T> {
             l.col[2] - r.col[2],
         ]}
     }
+}
 
+impl<T: FloatScalar> Matrix3<T> {
     pub fn of_axis_angle(axis: &Vector3<T>, angle: T) -> Self {
         let c = T::tcos(angle);
         let s = T::tsin(angle);

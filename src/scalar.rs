@@ -51,15 +51,19 @@ pub trait Scalar<Rhs = Self, Output = Self> :
     fn half() -> Self;
     fn quarter() -> Self;
     fn l8192() -> Self;
+    fn min(l: Self, r: Self) -> Self;
+    fn max(l: Self, r: Self) -> Self;
+    fn squared(l: Self) -> Self;
+    fn tabs(self) -> Self;
+}
+
+pub trait FloatScalar<Rhs = Self, Output = Self> : Scalar<Rhs, Output> {
+    fn infinity() -> Self;
     fn tsin(self) -> Self;
     fn tcos(self) -> Self;
     fn ttan(self) -> Self;
     fn tacos(self) -> Self;
     fn tsqrt(self) -> Self;
-    fn tabs(self) -> Self;
-    fn min(l: Self, r: Self) -> Self;
-    fn max(l: Self, r: Self) -> Self;
-    fn squared(l: Self) -> Self;
 }
 
 trait Epsilon {
@@ -91,16 +95,24 @@ macro_rules! impl_scalar {
             fn two() -> $scalar { 2 as $scalar }
             fn half() -> $scalar { 0.5 as $scalar }
             fn quarter() -> $scalar { 0.25 as $scalar }
-            fn tsqrt(self) -> $scalar { (self as $float).sqrt() as $scalar }
-            fn tsin(self) -> $scalar { (self as $float).sin() as $scalar }
-            fn tcos(self) -> $scalar { (self as $float).cos() as $scalar }
-            fn ttan(self) -> $scalar { (self as $float).tan() as $scalar }
-            fn tacos(self) -> $scalar { (self as $float).acos() as $scalar }
-            fn tabs(self) -> $scalar { self.abs() }
             fn l8192() -> $scalar { 8192 as $scalar }
             fn min(l: Self, r: Self) -> Self { if l < r { l } else { r } }
             fn max(l: Self, r: Self) -> Self { if l > r { l } else { r } }
             fn squared(l: Self) -> Self { l * l }
+            fn tabs(self) -> $scalar { self.abs() }
+        }
+    }
+}
+
+macro_rules! impl_float_scalar {
+    ($scalar:ident) => {
+        impl FloatScalar for $scalar {
+            fn infinity() -> $scalar { core::$scalar::INFINITY }
+            fn tsqrt(self) -> $scalar { self.sqrt() as $scalar }
+            fn tsin(self) -> $scalar { self.sin() as $scalar }
+            fn tcos(self) -> $scalar { self.cos() as $scalar }
+            fn ttan(self) -> $scalar { self.tan() as $scalar }
+            fn tacos(self) -> $scalar { self.acos() as $scalar }
         }
     }
 }
@@ -110,17 +122,8 @@ impl_scalar!(i64, f64);
 impl_scalar!(f32, f32);
 impl_scalar!(f64, f64);
 
-pub trait FloatScalar : Scalar {
-    fn infinity() -> Self;
-}
-
-impl FloatScalar for f32 {
-    fn infinity() -> Self { core::f32::INFINITY }
-}
-
-impl FloatScalar for f64 {
-    fn infinity() -> Self { core::f64::INFINITY }
-}
+impl_float_scalar!(f32);
+impl_float_scalar!(f64);
 
 #[cfg(test)]
 mod tests {

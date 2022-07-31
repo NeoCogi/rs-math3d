@@ -34,7 +34,7 @@ use crate::matrix::*;
 /// Rect
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Dimension<T : Scalar> {
     pub width: T,
     pub height: T
@@ -48,7 +48,7 @@ impl<T: Scalar> Dimension<T> {
 /// Rect
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Rect<T : Scalar> {
     pub x: T,
     pub y: T,
@@ -97,7 +97,7 @@ impl<T: Scalar> Rect<T> {
 /// Box3
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Box3<T : Scalar> {
     pub min: Vector3<T>,
     pub max: Vector3<T>,
@@ -157,7 +157,7 @@ impl<T: Scalar> Box3<T> {
 /// Line
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Line<T: Scalar, V: Vector<T>> {
     pub p: V,  // point on the line
     pub d: V,  // direction of the line
@@ -211,7 +211,7 @@ pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(line0: &Line<T, Vector
 /// Segment
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Segment<T : Scalar, V: Vector<T>> {
     pub s: V,  // start
     pub e: V,  // end
@@ -252,7 +252,7 @@ impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
 /// Ray
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Ray<T : Scalar, V: Vector<T>> {
     pub start: V,
     pub direction: V,
@@ -281,7 +281,7 @@ impl<T: Scalar> Ray<T, Vector3<T>> {
 /// Sphere3
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Sphere3<T: FloatScalar> {
     pub center  : Vector3<T>,
     pub radius  : T,
@@ -300,7 +300,7 @@ impl<T: FloatScalar> Sphere3<T> {
 /// Triangle
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Tri3<T: FloatScalar> {
     vertices: [Vector3<T>; 3],
 }
@@ -322,7 +322,7 @@ impl<T: FloatScalar> Tri3<T> {
 /// Plane
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Plane<T : Scalar> {
     a: T,
     b: T,
@@ -369,7 +369,7 @@ impl<T: FloatScalar> Plane<T> {
 /// Parametric Plane
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct ParametricPlane<T : Scalar> {
     pub center  : Vector3<T>,
     pub x_axis  : Vector3<T>,

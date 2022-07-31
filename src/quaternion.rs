@@ -31,8 +31,8 @@ use crate::vector::{Vector, FloatVector, Vector3};
 use crate::matrix::{Matrix3, Matrix4};
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct Quat<T: FloatScalar> {
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Quat<T: Scalar> {
     pub x: T,
     pub y: T,
     pub z: T,

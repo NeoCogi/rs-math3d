@@ -75,7 +75,7 @@ macro_rules! implVecScalar {
 macro_rules! implVector {
     ($vecName:ident, $($field:ident)*) => {
         #[repr(C)]
-        #[derive(Copy, Clone, Debug)]
+        #[derive(Copy, Clone, Debug, Default)]
         pub struct $vecName<T> { $(pub $field: T),* }
 
         impl<T: Scalar> $vecName<T> {

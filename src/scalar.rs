@@ -28,7 +28,7 @@
 use core::ops::{Add, Sub, Mul, Div, Rem, Neg, AddAssign, SubAssign, DivAssign, MulAssign};
 use core::cmp::{PartialOrd};
 
-use crate::cmath::{CScalar};
+use crate::cmath::*;
 
 pub trait Scalar<Rhs = Self, Output = Self> :
     Add<Rhs, Output = Output>
@@ -127,6 +127,8 @@ impl_float_scalar!(f64);
 
 #[cfg(feature = "fixedpoint")]
 mod fixedpoint {
+    use super::*;
+
     macro_rules! impl_scalar_for_fixed {
         ($scalar:ident, $float:ident) => {
             impl super::Scalar for $scalar {
@@ -159,14 +161,14 @@ mod fixedpoint {
         }
     }
 
-    pub type Fixed112 = fixed::types::I112F16;
-    pub type Fixed48  = fixed::types::I48F16;
+    pub type Hx = fixed::types::I96F32;
+    pub type Lx  = fixed::types::I48F16;
 
-    impl_scalar_for_fixed!(Fixed48, f64);
-    impl_scalar_for_fixed!(Fixed112, f64);
+    impl_scalar_for_fixed!(Lx, f64);
+    impl_scalar_for_fixed!(Hx, f64);
 
-    impl_fixed_scalar!(Fixed48, fixed::FixedI64::MAX);
-    impl_fixed_scalar!(Fixed112, fixed::FixedI128::MAX);
+    impl_fixed_scalar!(Lx, fixed::FixedI64::MAX);
+    impl_fixed_scalar!(Hx, fixed::FixedI128::MAX);
 }
 
 #[cfg(feature="fixedpoint")]

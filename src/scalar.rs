@@ -129,7 +129,7 @@ impl_float_scalar!(f64);
 mod fixedpoint {
     macro_rules! impl_scalar_for_fixed {
         ($scalar:ident, $float:ident) => {
-            impl Scalar for $scalar {
+            impl super::Scalar for $scalar {
                 fn epsilon() -> $scalar { Self::zero() }
                 fn zero() -> $scalar    { $scalar::from_num(0   ) }
                 fn one() -> $scalar     { $scalar::from_num(1   ) }
@@ -148,7 +148,7 @@ mod fixedpoint {
 
     macro_rules! impl_fixed_scalar {
         ($scalar:ident, $max:path) => {
-            impl FloatScalar for $scalar {
+            impl super::FloatScalar for $scalar {
                 fn infinity()  -> $scalar { $max }
                 fn tsqrt(self) -> $scalar { $scalar::from_num((self.to_num::<f64>()).sqrt()) }
                 fn tsin(self)  -> $scalar { $scalar::from_num((self.to_num::<f64>()).sin() ) }
@@ -161,8 +161,6 @@ mod fixedpoint {
 
     pub type Fixed112 = fixed::types::I112F16;
     pub type Fixed48  = fixed::types::I48F16;
-
-
 
     impl_scalar_for_fixed!(Fixed48, f64);
     impl_scalar_for_fixed!(Fixed112, f64);

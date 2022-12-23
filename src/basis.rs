@@ -25,9 +25,9 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+use crate::matrix::*;
 use crate::scalar::*;
 use crate::vector::*;
-use crate::matrix::*;
 
 #[derive(Debug, Clone, Copy)]
 pub enum BasisPlane {
@@ -50,7 +50,7 @@ impl BasisPlane {
             0 => BasisPlane::YZ,
             1 => BasisPlane::ZX,
             2 => BasisPlane::XY,
-            _ => panic!("invalid id")
+            _ => panic!("invalid id"),
         }
     }
 }
@@ -58,14 +58,13 @@ impl BasisPlane {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Basis<T: Scalar> {
-    pub x_axis  : Vector3<T>,
-    pub y_axis  : Vector3<T>,
-    pub z_axis  : Vector3<T>,
-    pub center  : Vector3<T>,
+    pub x_axis: Vector3<T>,
+    pub y_axis: Vector3<T>,
+    pub z_axis: Vector3<T>,
+    pub center: Vector3<T>,
 }
 
 impl<T: Scalar> Basis<T> {
-
     pub fn center(&self) -> &Vector3<T> {
         &self.center
     }
@@ -76,40 +75,53 @@ impl<T: Scalar> Basis<T> {
 
     pub fn to_mat4(&self) -> Matrix4<T> {
         Matrix4::new(
-            self.x_axis.x, self.x_axis.y, self.x_axis.z, T::zero(),
-            self.y_axis.x, self.y_axis.y, self.y_axis.z, T::zero(),
-            self.z_axis.x, self.z_axis.y, self.z_axis.z, T::zero(),
-            self.center.x, self.center.y, self.center.z, T::one())
+            self.x_axis.x,
+            self.x_axis.y,
+            self.x_axis.z,
+            T::zero(),
+            self.y_axis.x,
+            self.y_axis.y,
+            self.y_axis.z,
+            T::zero(),
+            self.z_axis.x,
+            self.z_axis.y,
+            self.z_axis.z,
+            T::zero(),
+            self.center.x,
+            self.center.y,
+            self.center.z,
+            T::one(),
+        )
     }
 
     pub fn of_mat4(mat: &Matrix4<T>) -> Self {
-        let col0    = mat.col[0];
-        let col1    = mat.col[1];
-        let col2    = mat.col[2];
-        let col3    = mat.col[3];
+        let col0 = mat.col[0];
+        let col1 = mat.col[1];
+        let col2 = mat.col[2];
+        let col3 = mat.col[3];
         Self {
-            center  : col3.xyz(),
-            x_axis  : col0.xyz(),
-            y_axis  : col1.xyz(),
-            z_axis  : col2.xyz(),
+            center: col3.xyz(),
+            x_axis: col0.xyz(),
+            y_axis: col1.xyz(),
+            z_axis: col2.xyz(),
         }
     }
 
     pub fn default() -> Self {
         Self {
-            center  : Vector3::new(T::zero(), T::zero(), T::zero()),
-            x_axis  : Vector3::new(T::one() , T::zero(), T::zero()),
-            y_axis  : Vector3::new(T::zero(), T::one() , T::zero()),
-            z_axis  : Vector3::new(T::zero(), T::zero(), T::one() ),
+            center: Vector3::new(T::zero(), T::zero(), T::zero()),
+            x_axis: Vector3::new(T::one(), T::zero(), T::zero()),
+            y_axis: Vector3::new(T::zero(), T::one(), T::zero()),
+            z_axis: Vector3::new(T::zero(), T::zero(), T::one()),
         }
     }
 
     pub fn default_with_center(center: &Vector3<T>) -> Self {
         Self {
-            center  : *center,
-            x_axis  : Vector3::new(T::one() , T::zero(), T::zero()),
-            y_axis  : Vector3::new(T::zero(), T::one() , T::zero()),
-            z_axis  : Vector3::new(T::zero(), T::zero(), T::one() ),
+            center: *center,
+            x_axis: Vector3::new(T::one(), T::zero(), T::zero()),
+            y_axis: Vector3::new(T::zero(), T::one(), T::zero()),
+            z_axis: Vector3::new(T::zero(), T::zero(), T::one()),
         }
     }
 
@@ -131,17 +143,24 @@ impl<T: Scalar> Basis<T> {
 
     pub fn to_mat3(&self) -> Matrix3<T> {
         Matrix3::new(
-            self.x_axis.x, self.x_axis.y, self.x_axis.z,
-            self.y_axis.x, self.y_axis.y, self.y_axis.z,
-            self.z_axis.x, self.z_axis.y, self.z_axis.z)
+            self.x_axis.x,
+            self.x_axis.y,
+            self.x_axis.z,
+            self.y_axis.x,
+            self.y_axis.y,
+            self.y_axis.z,
+            self.z_axis.x,
+            self.z_axis.y,
+            self.z_axis.z,
+        )
     }
 
     pub fn of_center_mat3(center: &Vector3<T>, m: Matrix3<T>) -> Self {
         Self {
-            center  : *center,
-            x_axis  : m.col[0],
-            y_axis  : m.col[1],
-            z_axis  : m.col[2],
+            center: *center,
+            x_axis: m.col[0],
+            y_axis: m.col[1],
+            z_axis: m.col[2],
         }
     }
 }

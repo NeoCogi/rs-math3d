@@ -28,25 +28,25 @@
 
 #![no_std]
 #![allow(unused_imports)]
-pub mod scalar;
-pub mod vector;
-pub mod matrix;
-pub mod quaternion;
-pub mod transforms;
-pub mod primitives;
-pub mod queries;
 pub mod basis;
+pub mod matrix;
+pub mod primitives;
+pub mod quaternion;
+pub mod queries;
+pub mod scalar;
+pub mod transforms;
+pub mod vector;
 
-mod cmath;
-
-pub use scalar::{Scalar, FloatScalar};
-pub use vector::{Vector, FloatVector, Vector2, Vector3, Vector4, CrossProduct, Swizzle2, Swizzle3};
-pub use matrix::{Matrix2, Matrix3, Matrix4};
-pub use quaternion::{Quat};
-pub use transforms::*;
-pub use primitives::*;
-pub use queries::*;
 pub use basis::*;
+pub use matrix::{Matrix2, Matrix3, Matrix4};
+pub use primitives::*;
+pub use quaternion::Quat;
+pub use queries::*;
+pub use scalar::{FloatScalar, Scalar};
+pub use transforms::*;
+pub use vector::{
+    CrossProduct, FloatVector, Swizzle2, Swizzle3, Vector, Vector2, Vector3, Vector4,
+};
 
 pub type Color4b = Vector4<u8>;
 
@@ -102,15 +102,22 @@ pub type Box3d = Box3<f64>;
 pub type Basisf = Basis<f32>;
 pub type Basisd = Basis<f64>;
 
-pub type ParametricPlanef   = ParametricPlane<f32>;
-pub type ParametricPlaned   = ParametricPlane<f64>;
+pub type ParametricPlanef = ParametricPlane<f32>;
+pub type ParametricPlaned = ParametricPlane<f64>;
 
-pub fn color4b(r: u8, g: u8, b: u8, a: u8) -> Color4b { Color4b { x : r, y: g, z: b, w: a } }
+pub fn color4b(r: u8, g: u8, b: u8, a: u8) -> Color4b {
+    Color4b {
+        x: r,
+        y: g,
+        z: b,
+        w: a,
+    }
+}
 
 #[cfg(feature = "fixedpoint")]
 mod fixedpoint {
     use super::*;
-    pub use scalar::{Lx, Hx};
+    pub use scalar::{Hx, Lx};
 
     pub type Vec2x = Vector2<Lx>;
     pub type Vec3x = Vector3<Lx>;
@@ -155,8 +162,7 @@ mod fixedpoint {
 
     pub type Box3x = Box3<Lx>;
     pub type Box3X = Box3<Hx>;
-
 }
 
-#[cfg(feature="fixedpoint")]
+#[cfg(feature = "fixedpoint")]
 pub use fixedpoint::*;

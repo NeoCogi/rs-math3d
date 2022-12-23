@@ -25,26 +25,26 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
-use core::ops::*;
 use crate::scalar::*;
 use crate::vector::*;
+use core::ops::*;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct Matrix2<T : Scalar> {
-    pub col: [Vector2<T>; 2]
+pub struct Matrix2<T: Scalar> {
+    pub col: [Vector2<T>; 2],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct Matrix3<T : Scalar> {
-    pub col: [Vector3<T>; 3]
+pub struct Matrix3<T: Scalar> {
+    pub col: [Vector3<T>; 3],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct Matrix4<T : Scalar> {
-    pub col: [Vector4<T>; 4]
+pub struct Matrix4<T: Scalar> {
+    pub col: [Vector4<T>; 4],
 }
 
 /******************************************************************************
@@ -59,10 +59,8 @@ pub struct Matrix4<T : Scalar> {
  *****************************************************************************/
 impl<T: Scalar> Matrix2<T> {
     pub fn new(m0: T, m1: T, m2: T, m3: T) -> Self {
-        Matrix2 { col: [
-            Vector2::new(m0, m1),
-            Vector2::new(m2, m3)
-            ]
+        Matrix2 {
+            col: [Vector2::new(m0, m1), Vector2::new(m2, m3)],
         }
     }
 
@@ -71,11 +69,11 @@ impl<T: Scalar> Matrix2<T> {
     }
 
     pub fn determinant(&self) -> T {
-        let	m00 = self.col[0].x;
-        let	m10 = self.col[0].y;
+        let m00 = self.col[0].x;
+        let m10 = self.col[0].y;
 
-        let	m01 = self.col[1].x;
-        let	m11 = self.col[1].y;
+        let m01 = self.col[1].x;
+        let m11 = self.col[1].y;
 
         m00 * m11 - m01 * m10
     }
@@ -91,18 +89,18 @@ impl<T: Scalar> Matrix2<T> {
     }
 
     pub fn inverse(&self) -> Self {
-        let	m00 = self.col[0].x;
-        let	m10 = self.col[0].y;
+        let m00 = self.col[0].x;
+        let m10 = self.col[0].y;
 
-        let	m01 = self.col[1].x;
-        let	m11 = self.col[1].y;
+        let m01 = self.col[1].x;
+        let m11 = self.col[1].y;
 
-        let	inv_det = T::one() / (m00 * m11 - m01 * m10);
+        let inv_det = T::one() / (m00 * m11 - m01 * m10);
 
-        let	r00 = m11 * inv_det;
-        let	r01 = -m01 * inv_det;
-        let	r10 = -m10 * inv_det;
-        let	r11 = m00 * inv_det;
+        let r00 = m11 * inv_det;
+        let r01 = -m01 * inv_det;
+        let r10 = -m10 * inv_det;
+        let r11 = m00 * inv_det;
 
         Self::new(r00, r10, r01, r11)
     }
@@ -115,20 +113,20 @@ impl<T: Scalar> Matrix2<T> {
     // [a10 a11] - [c10 c11]
     //
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
-        let	a00 = l.col[0].x;
-        let	a10 = l.col[0].y;
-        let	a01 = l.col[1].x;
-        let	a11 = l.col[1].y;
+        let a00 = l.col[0].x;
+        let a10 = l.col[0].y;
+        let a01 = l.col[1].x;
+        let a11 = l.col[1].y;
 
-        let	b00 = r.col[0].x;
-        let	b10 = r.col[0].y;
-        let	b01 = r.col[1].x;
-        let	b11 = r.col[1].y;
+        let b00 = r.col[0].x;
+        let b10 = r.col[0].y;
+        let b01 = r.col[1].x;
+        let b11 = r.col[1].y;
 
-        let	c00 = a00 * b00 + a01 * b10;
-        let	c01 = a00 * b01 + a01 * b11;
-        let	c10 = a10 * b00 + a11 * b10;
-        let	c11 = a10 * b01 + a11 * b11;
+        let c00 = a00 * b00 + a01 * b10;
+        let c01 = a00 * b01 + a01 * b11;
+        let c10 = a10 * b00 + a11 * b10;
+        let c11 = a10 * b01 + a11 * b11;
 
         Self::new(c00, c10, c01, c11)
     }
@@ -142,17 +140,15 @@ impl<T: Scalar> Matrix2<T> {
     }
 
     pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
-        Matrix2 { col : [
-            l.col[0] + r.col[0],
-            l.col[1] + r.col[1],
-        ]}
+        Matrix2 {
+            col: [l.col[0] + r.col[0], l.col[1] + r.col[1]],
+        }
     }
 
     pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
-        Matrix2 { col : [
-            l.col[0] - r.col[0],
-            l.col[1] - r.col[1],
-        ]}
+        Matrix2 {
+            col: [l.col[0] - r.col[0], l.col[1] - r.col[1]],
+        }
     }
 }
 
@@ -168,97 +164,95 @@ impl<T: Scalar> Matrix2<T> {
  *
  *****************************************************************************/
 impl<T: Scalar> Matrix3<T> {
-    pub fn new(m0: T, m1: T, m2: T,
-        m3: T, m4: T, m5: T,
-        m6: T, m7: T, m8: T) -> Self {
-        Matrix3 { col: [
-            Vector3::new(m0, m1, m2),
-            Vector3::new(m3, m4, m5),
-            Vector3::new(m6, m7, m8)
-            ]
+    pub fn new(m0: T, m1: T, m2: T, m3: T, m4: T, m5: T, m6: T, m7: T, m8: T) -> Self {
+        Matrix3 {
+            col: [
+                Vector3::new(m0, m1, m2),
+                Vector3::new(m3, m4, m5),
+                Vector3::new(m6, m7, m8),
+            ],
         }
     }
 
     pub fn identity() -> Self {
         Self::new(
-            T::one(), T::zero(), T::zero(),
-            T::zero(), T::one(), T::zero(),
-            T::zero(), T::zero(), T::one())
+            T::one(),
+            T::zero(),
+            T::zero(),
+            T::zero(),
+            T::one(),
+            T::zero(),
+            T::zero(),
+            T::zero(),
+            T::one(),
+        )
     }
 
     pub fn determinant(&self) -> T {
-        let	m00 = self.col[0].x;
-        let	m10 = self.col[0].y;
-        let	m20 = self.col[0].z;
+        let m00 = self.col[0].x;
+        let m10 = self.col[0].y;
+        let m20 = self.col[0].z;
 
-        let	m01 = self.col[1].x;
-        let	m11 = self.col[1].y;
-        let	m21 = self.col[1].z;
+        let m01 = self.col[1].x;
+        let m11 = self.col[1].y;
+        let m21 = self.col[1].z;
 
-        let	m02 = self.col[2].x;
-        let	m12 = self.col[2].y;
-        let	m22 = self.col[2].z;
+        let m02 = self.col[2].x;
+        let m12 = self.col[2].y;
+        let m22 = self.col[2].z;
 
-        m00 * m11 * m22 +
-        m01 * m12 * m20 +
-        m02 * m10 * m21 -
-        m00 * m12 * m21 -
-        m01 * m10 * m22 -
-        m02 * m11 * m20
+        m00 * m11 * m22 + m01 * m12 * m20 + m02 * m10 * m21
+            - m00 * m12 * m21
+            - m01 * m10 * m22
+            - m02 * m11 * m20
     }
 
     pub fn transpose(&self) -> Self {
-        let	m00 = self.col[0].x;
-        let	m10 = self.col[0].y;
-        let	m20 = self.col[0].z;
+        let m00 = self.col[0].x;
+        let m10 = self.col[0].y;
+        let m20 = self.col[0].z;
 
-        let	m01 = self.col[1].x;
-        let	m11 = self.col[1].y;
-        let	m21 = self.col[1].z;
+        let m01 = self.col[1].x;
+        let m11 = self.col[1].y;
+        let m21 = self.col[1].z;
 
-        let	m02 = self.col[2].x;
-        let	m12 = self.col[2].y;
-        let	m22 = self.col[2].z;
+        let m02 = self.col[2].x;
+        let m12 = self.col[2].y;
+        let m22 = self.col[2].z;
 
-        Self::new(m00, m01, m02,
-                m10, m11, m12,
-                m20, m21, m22)
-
+        Self::new(m00, m01, m02, m10, m11, m12, m20, m21, m22)
     }
 
     pub fn inverse(&self) -> Self {
-        let	m00 = self.col[0].x;
-        let	m10 = self.col[0].y;
-        let	m20 = self.col[0].z;
+        let m00 = self.col[0].x;
+        let m10 = self.col[0].y;
+        let m20 = self.col[0].z;
 
-        let	m01 = self.col[1].x;
-        let	m11 = self.col[1].y;
-        let	m21 = self.col[1].z;
+        let m01 = self.col[1].x;
+        let m11 = self.col[1].y;
+        let m21 = self.col[1].z;
 
-        let	m02 = self.col[2].x;
-        let	m12 = self.col[2].y;
-        let	m22 = self.col[2].z;
+        let m02 = self.col[2].x;
+        let m12 = self.col[2].y;
+        let m22 = self.col[2].z;
 
-        let	inv_det = T::one() / (m00 * m11 * m22 +
-                      m01 * m12 * m20 +
-                      m02 * m10 * m21 -
-                      m00 * m12 * m21 -
-                      m01 * m10 * m22 -
-                      m02 * m11 * m20);
+        let inv_det = T::one()
+            / (m00 * m11 * m22 + m01 * m12 * m20 + m02 * m10 * m21
+                - m00 * m12 * m21
+                - m01 * m10 * m22
+                - m02 * m11 * m20);
 
-        let	r00 = (m11 * m22 - m12 * m21) * inv_det;
-        let	r01 = (m02 * m21 - m01 * m22) * inv_det;
-        let	r02 = (m01 * m12 - m02 * m11) * inv_det;
-        let	r10 = (m12 * m20 - m10 * m22) * inv_det;
-        let	r11 = (m00 * m22 - m02 * m20) * inv_det;
-        let	r12 = (m02 * m10 - m00 * m12) * inv_det;
-        let	r20 = (m10 * m21 - m11 * m20) * inv_det;
-        let	r21 = (m01 * m20 - m00 * m21) * inv_det;
-        let	r22 = (m00 * m11 - m01 * m10) * inv_det;
+        let r00 = (m11 * m22 - m12 * m21) * inv_det;
+        let r01 = (m02 * m21 - m01 * m22) * inv_det;
+        let r02 = (m01 * m12 - m02 * m11) * inv_det;
+        let r10 = (m12 * m20 - m10 * m22) * inv_det;
+        let r11 = (m00 * m22 - m02 * m20) * inv_det;
+        let r12 = (m02 * m10 - m00 * m12) * inv_det;
+        let r20 = (m10 * m21 - m11 * m20) * inv_det;
+        let r21 = (m01 * m20 - m00 * m21) * inv_det;
+        let r22 = (m00 * m11 - m01 * m10) * inv_det;
 
-        Self::new(r00, r10, r20,
-            r01, r11, r21,
-            r02, r12, r22)
+        Self::new(r00, r10, r20, r01, r11, r21, r02, r12, r22)
     }
 
     //
@@ -271,45 +265,43 @@ impl<T: Scalar> Matrix3<T> {
     // [a20 a21 a22] - [c10 c11 c22]
     //
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
-        let	a00 = l.col[0].x;
-        let	a10 = l.col[0].y;
-        let	a20 = l.col[0].z;
+        let a00 = l.col[0].x;
+        let a10 = l.col[0].y;
+        let a20 = l.col[0].z;
 
-        let	a01 = l.col[1].x;
-        let	a11 = l.col[1].y;
-        let	a21 = l.col[1].z;
+        let a01 = l.col[1].x;
+        let a11 = l.col[1].y;
+        let a21 = l.col[1].z;
 
-        let	a02 = l.col[2].x;
-        let	a12 = l.col[2].y;
-        let	a22 = l.col[2].z;
+        let a02 = l.col[2].x;
+        let a12 = l.col[2].y;
+        let a22 = l.col[2].z;
 
-        let	b00 = r.col[0].x;
-        let	b10 = r.col[0].y;
-        let	b20 = r.col[0].z;
+        let b00 = r.col[0].x;
+        let b10 = r.col[0].y;
+        let b20 = r.col[0].z;
 
-        let	b01 = r.col[1].x;
-        let	b11 = r.col[1].y;
-        let	b21 = r.col[1].z;
+        let b01 = r.col[1].x;
+        let b11 = r.col[1].y;
+        let b21 = r.col[1].z;
 
-        let	b02 = r.col[2].x;
-        let	b12 = r.col[2].y;
-        let	b22 = r.col[2].z;
+        let b02 = r.col[2].x;
+        let b12 = r.col[2].y;
+        let b22 = r.col[2].z;
 
-        let	c00 = a00 * b00 + a01 * b10 + a02 * b20;
-        let	c01 = a00 * b01 + a01 * b11 + a02 * b21;
-        let	c02 = a00 * b02 + a01 * b12 + a02 * b22;
+        let c00 = a00 * b00 + a01 * b10 + a02 * b20;
+        let c01 = a00 * b01 + a01 * b11 + a02 * b21;
+        let c02 = a00 * b02 + a01 * b12 + a02 * b22;
 
-        let	c10 = a10 * b00 + a11 * b10 + a12 * b20;
-        let	c11 = a10 * b01 + a11 * b11 + a12 * b21;
-        let	c12 = a10 * b02 + a11 * b12 + a12 * b22;
+        let c10 = a10 * b00 + a11 * b10 + a12 * b20;
+        let c11 = a10 * b01 + a11 * b11 + a12 * b21;
+        let c12 = a10 * b02 + a11 * b12 + a12 * b22;
 
-        let	c20 = a20 * b00 + a21 * b10 + a22 * b20;
-        let	c21 = a20 * b01 + a21 * b11 + a22 * b21;
-        let	c22 = a20 * b02 + a21 * b12 + a22 * b22;
+        let c20 = a20 * b00 + a21 * b10 + a22 * b20;
+        let c21 = a20 * b01 + a21 * b11 + a22 * b21;
+        let c22 = a20 * b02 + a21 * b12 + a22 * b22;
 
-        Self::new(c00, c10, c20,
-                c01, c11, c21,
-                c02, c12, c22)
+        Self::new(c00, c10, c20, c01, c11, c21, c02, c12, c22)
     }
 
     pub fn mul_matrix_vector(l: &Self, r: &Vector3<T>) -> Vector3<T> {
@@ -317,23 +309,31 @@ impl<T: Scalar> Matrix3<T> {
     }
 
     pub fn mul_vector_matrix(l: &Vector3<T>, r: &Self) -> Vector3<T> {
-        Vector3::new(Vector3::dot(l, &r.col[0]), Vector3::dot(l, &r.col[1]), Vector3::dot(l, &r.col[2]))
+        Vector3::new(
+            Vector3::dot(l, &r.col[0]),
+            Vector3::dot(l, &r.col[1]),
+            Vector3::dot(l, &r.col[2]),
+        )
     }
 
     pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
-        Matrix3 { col : [
-            l.col[0] + r.col[0],
-            l.col[1] + r.col[1],
-            l.col[2] + r.col[2],
-        ]}
+        Matrix3 {
+            col: [
+                l.col[0] + r.col[0],
+                l.col[1] + r.col[1],
+                l.col[2] + r.col[2],
+            ],
+        }
     }
 
     pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
-        Matrix3 { col : [
-            l.col[0] - r.col[0],
-            l.col[1] - r.col[1],
-            l.col[2] - r.col[2],
-        ]}
+        Matrix3 {
+            col: [
+                l.col[0] - r.col[0],
+                l.col[1] - r.col[1],
+                l.col[2] - r.col[2],
+            ],
+        }
     }
 }
 
@@ -342,9 +342,9 @@ impl<T: FloatScalar> Matrix3<T> {
         let c = T::tcos(angle);
         let s = T::tsin(angle);
         let n = Vector3::normalize(axis);
-        let ux  = n.x;
-        let uy  = n.y;
-        let uz  = n.z;
+        let ux = n.x;
+        let uy = n.y;
+        let uz = n.z;
         let uxx = ux * ux;
         let uyy = uy * uy;
         let uzz = uz * uz;
@@ -379,193 +379,271 @@ impl<T: FloatScalar> Matrix3<T> {
  *  aij => i = row, j = col (yx form)
  *
  *****************************************************************************/
- impl<T: Scalar> Matrix4<T> {
-    pub fn new(m0: T, m1: T, m2: T, m3: T,
-        m4: T, m5: T, m6: T, m7: T,
-        m8: T, m9: T, m10: T, m11: T,
-        m12: T, m13: T, m14: T, m15: T) -> Self {
-        Matrix4 { col: [
-            Vector4::new(m0, m1, m2, m3),
-            Vector4::new(m4, m5, m6, m7),
-            Vector4::new(m8, m9, m10, m11),
-            Vector4::new(m12, m13, m14, m15),
-            ]
+impl<T: Scalar> Matrix4<T> {
+    pub fn new(
+        m0: T,
+        m1: T,
+        m2: T,
+        m3: T,
+        m4: T,
+        m5: T,
+        m6: T,
+        m7: T,
+        m8: T,
+        m9: T,
+        m10: T,
+        m11: T,
+        m12: T,
+        m13: T,
+        m14: T,
+        m15: T,
+    ) -> Self {
+        Matrix4 {
+            col: [
+                Vector4::new(m0, m1, m2, m3),
+                Vector4::new(m4, m5, m6, m7),
+                Vector4::new(m8, m9, m10, m11),
+                Vector4::new(m12, m13, m14, m15),
+            ],
         }
     }
 
     pub fn identity() -> Self {
         Self::new(
-            T::one(), T::zero(), T::zero(), T::zero(),
-            T::zero(), T::one(), T::zero(), T::zero(),
-            T::zero(), T::zero(), T::one(), T::zero(),
-            T::zero(), T::zero(), T::zero(), T::one())
+            T::one(),
+            T::zero(),
+            T::zero(),
+            T::zero(),
+            T::zero(),
+            T::one(),
+            T::zero(),
+            T::zero(),
+            T::zero(),
+            T::zero(),
+            T::one(),
+            T::zero(),
+            T::zero(),
+            T::zero(),
+            T::zero(),
+            T::one(),
+        )
     }
 
     pub fn determinant(&self) -> T {
-        let	m00 = self.col[0].x;
-        let	m10 = self.col[0].y;
-        let	m20 = self.col[0].z;
-        let	m30 = self.col[0].w;
+        let m00 = self.col[0].x;
+        let m10 = self.col[0].y;
+        let m20 = self.col[0].z;
+        let m30 = self.col[0].w;
 
-        let	m01 = self.col[1].x;
-        let	m11 = self.col[1].y;
-        let	m21 = self.col[1].z;
-        let	m31 = self.col[1].w;
+        let m01 = self.col[1].x;
+        let m11 = self.col[1].y;
+        let m21 = self.col[1].z;
+        let m31 = self.col[1].w;
 
-        let	m02 = self.col[2].x;
-        let	m12 = self.col[2].y;
-        let	m22 = self.col[2].z;
-        let	m32 = self.col[2].w;
+        let m02 = self.col[2].x;
+        let m12 = self.col[2].y;
+        let m22 = self.col[2].z;
+        let m32 = self.col[2].w;
 
-        let	m03 = self.col[3].x;
-        let	m13 = self.col[3].y;
-        let	m23 = self.col[3].z;
-        let	m33 = self.col[3].w;
+        let m03 = self.col[3].x;
+        let m13 = self.col[3].y;
+        let m23 = self.col[3].z;
+        let m33 = self.col[3].w;
 
-        m03 * m12 * m21 * m30 - m02 * m13 * m21 * m30 -
-        m03 * m11 * m22 * m30 + m01 * m13 * m22 * m30 +
-        m02 * m11 * m23 * m30 - m01 * m12 * m23 * m30 -
-        m03 * m12 * m20 * m31 + m02 * m13 * m20 * m31 +
-        m03 * m10 * m22 * m31 - m00 * m13 * m22 * m31 -
-        m02 * m10 * m23 * m31 + m00 * m12 * m23 * m31 +
-        m03 * m11 * m20 * m32 - m01 * m13 * m20 * m32 -
-        m03 * m10 * m21 * m32 + m00 * m13 * m21 * m32 +
-        m01 * m10 * m23 * m32 - m00 * m11 * m23 * m32 -
-        m02 * m11 * m20 * m33 + m01 * m12 * m20 * m33 +
-        m02 * m10 * m21 * m33 - m00 * m12 * m21 * m33 -
-        m01 * m10 * m22 * m33 + m00 * m11 * m22 * m33
+        m03 * m12 * m21 * m30 - m02 * m13 * m21 * m30 - m03 * m11 * m22 * m30
+            + m01 * m13 * m22 * m30
+            + m02 * m11 * m23 * m30
+            - m01 * m12 * m23 * m30
+            - m03 * m12 * m20 * m31
+            + m02 * m13 * m20 * m31
+            + m03 * m10 * m22 * m31
+            - m00 * m13 * m22 * m31
+            - m02 * m10 * m23 * m31
+            + m00 * m12 * m23 * m31
+            + m03 * m11 * m20 * m32
+            - m01 * m13 * m20 * m32
+            - m03 * m10 * m21 * m32
+            + m00 * m13 * m21 * m32
+            + m01 * m10 * m23 * m32
+            - m00 * m11 * m23 * m32
+            - m02 * m11 * m20 * m33
+            + m01 * m12 * m20 * m33
+            + m02 * m10 * m21 * m33
+            - m00 * m12 * m21 * m33
+            - m01 * m10 * m22 * m33
+            + m00 * m11 * m22 * m33
     }
 
     pub fn transpose(&self) -> Self {
-        let	m00 = self.col[0].x;
-        let	m10 = self.col[0].y;
-        let	m20 = self.col[0].z;
-        let	m30 = self.col[0].w;
+        let m00 = self.col[0].x;
+        let m10 = self.col[0].y;
+        let m20 = self.col[0].z;
+        let m30 = self.col[0].w;
 
-        let	m01 = self.col[1].x;
-        let	m11 = self.col[1].y;
-        let	m21 = self.col[1].z;
-        let	m31 = self.col[1].w;
+        let m01 = self.col[1].x;
+        let m11 = self.col[1].y;
+        let m21 = self.col[1].z;
+        let m31 = self.col[1].w;
 
-        let	m02 = self.col[2].x;
-        let	m12 = self.col[2].y;
-        let	m22 = self.col[2].z;
-        let	m32 = self.col[2].w;
+        let m02 = self.col[2].x;
+        let m12 = self.col[2].y;
+        let m22 = self.col[2].z;
+        let m32 = self.col[2].w;
 
-        let	m03 = self.col[3].x;
-        let	m13 = self.col[3].y;
-        let	m23 = self.col[3].z;
-        let	m33 = self.col[3].w;
+        let m03 = self.col[3].x;
+        let m13 = self.col[3].y;
+        let m23 = self.col[3].z;
+        let m33 = self.col[3].w;
 
-        Self::new(m00, m01, m02, m03,
-                m10, m11, m12, m13,
-                m20, m21, m22, m23,
-                m30, m31, m32, m33)
+        Self::new(
+            m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33,
+        )
     }
 
     pub fn inverse(&self) -> Self {
-        let	m00 = self.col[0].x;
-        let	m10 = self.col[0].y;
-        let	m20 = self.col[0].z;
-        let	m30 = self.col[0].w;
+        let m00 = self.col[0].x;
+        let m10 = self.col[0].y;
+        let m20 = self.col[0].z;
+        let m30 = self.col[0].w;
 
-        let	m01 = self.col[1].x;
-        let	m11 = self.col[1].y;
-        let	m21 = self.col[1].z;
-        let	m31 = self.col[1].w;
+        let m01 = self.col[1].x;
+        let m11 = self.col[1].y;
+        let m21 = self.col[1].z;
+        let m31 = self.col[1].w;
 
-        let	m02 = self.col[2].x;
-        let	m12 = self.col[2].y;
-        let	m22 = self.col[2].z;
-        let	m32 = self.col[2].w;
+        let m02 = self.col[2].x;
+        let m12 = self.col[2].y;
+        let m22 = self.col[2].z;
+        let m32 = self.col[2].w;
 
-        let	m03 = self.col[3].x;
-        let	m13 = self.col[3].y;
-        let	m23 = self.col[3].z;
-        let	m33 = self.col[3].w;
+        let m03 = self.col[3].x;
+        let m13 = self.col[3].y;
+        let m23 = self.col[3].z;
+        let m33 = self.col[3].w;
 
-        let	denom	= m03 * m12 * m21 * m30 - m02 * m13 * m21 * m30 -
-                   m03 * m11 * m22 * m30 + m01 * m13 * m22 * m30 +
-                   m02 * m11 * m23 * m30 - m01 * m12 * m23 * m30 -
-                   m03 * m12 * m20 * m31 + m02 * m13 * m20 * m31 +
-                   m03 * m10 * m22 * m31 - m00 * m13 * m22 * m31 -
-                   m02 * m10 * m23 * m31 + m00 * m12 * m23 * m31 +
-                   m03 * m11 * m20 * m32 - m01 * m13 * m20 * m32 -
-                   m03 * m10 * m21 * m32 + m00 * m13 * m21 * m32 +
-                   m01 * m10 * m23 * m32 - m00 * m11 * m23 * m32 -
-                   m02 * m11 * m20 * m33 + m01 * m12 * m20 * m33 +
-                   m02 * m10 * m21 * m33 - m00 * m12 * m21 * m33 -
-                   m01 * m10 * m22 * m33 + m00 * m11 * m22 * m33;
-        let	inv_det = T::one() / denom;
+        let denom = m03 * m12 * m21 * m30 - m02 * m13 * m21 * m30 - m03 * m11 * m22 * m30
+            + m01 * m13 * m22 * m30
+            + m02 * m11 * m23 * m30
+            - m01 * m12 * m23 * m30
+            - m03 * m12 * m20 * m31
+            + m02 * m13 * m20 * m31
+            + m03 * m10 * m22 * m31
+            - m00 * m13 * m22 * m31
+            - m02 * m10 * m23 * m31
+            + m00 * m12 * m23 * m31
+            + m03 * m11 * m20 * m32
+            - m01 * m13 * m20 * m32
+            - m03 * m10 * m21 * m32
+            + m00 * m13 * m21 * m32
+            + m01 * m10 * m23 * m32
+            - m00 * m11 * m23 * m32
+            - m02 * m11 * m20 * m33
+            + m01 * m12 * m20 * m33
+            + m02 * m10 * m21 * m33
+            - m00 * m12 * m21 * m33
+            - m01 * m10 * m22 * m33
+            + m00 * m11 * m22 * m33;
+        let inv_det = T::one() / denom;
 
-        let	r00 = (m12 * m23 * m31 - m13 * m22 * m31 +
-                   m13 * m21 * m32 - m11 * m23 * m32 -
-                   m12 * m21 * m33 + m11 * m22 * m33) * inv_det;
+        let r00 = (m12 * m23 * m31 - m13 * m22 * m31 + m13 * m21 * m32
+            - m11 * m23 * m32
+            - m12 * m21 * m33
+            + m11 * m22 * m33)
+            * inv_det;
 
-        let	r01 = (m03 * m22 * m31 - m02 * m23 * m31 -
-                   m03 * m21 * m32 + m01 * m23 * m32 +
-                   m02 * m21 * m33 - m01 * m22 * m33) * inv_det;
+        let r01 = (m03 * m22 * m31 - m02 * m23 * m31 - m03 * m21 * m32
+            + m01 * m23 * m32
+            + m02 * m21 * m33
+            - m01 * m22 * m33)
+            * inv_det;
 
-        let	r02 = (m02 * m13 * m31 - m03 * m12 * m31 +
-                   m03 * m11 * m32 - m01 * m13 * m32 -
-                   m02 * m11 * m33 + m01 * m12 * m33) * inv_det;
+        let r02 = (m02 * m13 * m31 - m03 * m12 * m31 + m03 * m11 * m32
+            - m01 * m13 * m32
+            - m02 * m11 * m33
+            + m01 * m12 * m33)
+            * inv_det;
 
-        let	r03 = (m03 * m12 * m21 - m02 * m13 * m21 -
-                   m03 * m11 * m22 + m01 * m13 * m22 +
-                   m02 * m11 * m23 - m01 * m12 * m23) * inv_det;
+        let r03 = (m03 * m12 * m21 - m02 * m13 * m21 - m03 * m11 * m22
+            + m01 * m13 * m22
+            + m02 * m11 * m23
+            - m01 * m12 * m23)
+            * inv_det;
 
-        let	r10 = (m13 * m22 * m30 - m12 * m23 * m30 -
-                   m13 * m20 * m32 + m10 * m23 * m32 +
-                   m12 * m20 * m33 - m10 * m22 * m33) * inv_det;
+        let r10 = (m13 * m22 * m30 - m12 * m23 * m30 - m13 * m20 * m32
+            + m10 * m23 * m32
+            + m12 * m20 * m33
+            - m10 * m22 * m33)
+            * inv_det;
 
-        let	r11 = (m02 * m23 * m30 - m03 * m22 * m30 +
-                   m03 * m20 * m32 - m00 * m23 * m32 -
-                   m02 * m20 * m33 + m00 * m22 * m33) * inv_det;
+        let r11 = (m02 * m23 * m30 - m03 * m22 * m30 + m03 * m20 * m32
+            - m00 * m23 * m32
+            - m02 * m20 * m33
+            + m00 * m22 * m33)
+            * inv_det;
 
-        let	r12 = (m03 * m12 * m30 - m02 * m13 * m30 -
-                   m03 * m10 * m32 + m00 * m13 * m32 +
-                   m02 * m10 * m33 - m00 * m12 * m33) * inv_det;
+        let r12 = (m03 * m12 * m30 - m02 * m13 * m30 - m03 * m10 * m32
+            + m00 * m13 * m32
+            + m02 * m10 * m33
+            - m00 * m12 * m33)
+            * inv_det;
 
-        let	r13 = (m02 * m13 * m20 - m03 * m12 * m20 +
-                   m03 * m10 * m22 - m00 * m13 * m22 -
-                   m02 * m10 * m23 + m00 * m12 * m23) * inv_det;
+        let r13 = (m02 * m13 * m20 - m03 * m12 * m20 + m03 * m10 * m22
+            - m00 * m13 * m22
+            - m02 * m10 * m23
+            + m00 * m12 * m23)
+            * inv_det;
 
-        let	r20 = (m11 * m23 * m30 - m13 * m21 * m30 +
-                   m13 * m20 * m31 - m10 * m23 * m31 -
-                   m11 * m20 * m33 + m10 * m21 * m33) * inv_det;
+        let r20 = (m11 * m23 * m30 - m13 * m21 * m30 + m13 * m20 * m31
+            - m10 * m23 * m31
+            - m11 * m20 * m33
+            + m10 * m21 * m33)
+            * inv_det;
 
-        let	r21 = (m03 * m21 * m30 - m01 * m23 * m30 -
-                   m03 * m20 * m31 + m00 * m23 * m31 +
-                   m01 * m20 * m33 - m00 * m21 * m33) * inv_det;
+        let r21 = (m03 * m21 * m30 - m01 * m23 * m30 - m03 * m20 * m31
+            + m00 * m23 * m31
+            + m01 * m20 * m33
+            - m00 * m21 * m33)
+            * inv_det;
 
-        let	r22 = (m01 * m13 * m30 - m03 * m11 * m30 +
-                   m03 * m10 * m31 - m00 * m13 * m31 -
-                   m01 * m10 * m33 + m00 * m11 * m33) * inv_det;
+        let r22 = (m01 * m13 * m30 - m03 * m11 * m30 + m03 * m10 * m31
+            - m00 * m13 * m31
+            - m01 * m10 * m33
+            + m00 * m11 * m33)
+            * inv_det;
 
-        let	r23 = (m03 * m11 * m20 - m01 * m13 * m20 -
-                   m03 * m10 * m21 + m00 * m13 * m21 +
-                   m01 * m10 * m23 - m00 * m11 * m23) * inv_det;
+        let r23 = (m03 * m11 * m20 - m01 * m13 * m20 - m03 * m10 * m21
+            + m00 * m13 * m21
+            + m01 * m10 * m23
+            - m00 * m11 * m23)
+            * inv_det;
 
-        let	r30 = (m12 * m21 * m30 - m11 * m22 * m30 -
-                   m12 * m20 * m31 + m10 * m22 * m31 +
-                   m11 * m20 * m32 - m10 * m21 * m32) * inv_det;
+        let r30 = (m12 * m21 * m30 - m11 * m22 * m30 - m12 * m20 * m31
+            + m10 * m22 * m31
+            + m11 * m20 * m32
+            - m10 * m21 * m32)
+            * inv_det;
 
-        let	r31 = (m01 * m22 * m30 - m02 * m21 * m30 +
-                   m02 * m20 * m31 - m00 * m22 * m31 -
-                   m01 * m20 * m32 + m00 * m21 * m32) * inv_det;
+        let r31 = (m01 * m22 * m30 - m02 * m21 * m30 + m02 * m20 * m31
+            - m00 * m22 * m31
+            - m01 * m20 * m32
+            + m00 * m21 * m32)
+            * inv_det;
 
-        let	r32 = (m02 * m11 * m30 - m01 * m12 * m30 -
-                   m02 * m10 * m31 + m00 * m12 * m31 +
-                   m01 * m10 * m32 - m00 * m11 * m32) * inv_det;
+        let r32 = (m02 * m11 * m30 - m01 * m12 * m30 - m02 * m10 * m31
+            + m00 * m12 * m31
+            + m01 * m10 * m32
+            - m00 * m11 * m32)
+            * inv_det;
 
-        let	r33 = (m01 * m12 * m20 - m02 * m11 * m20 +
-                   m02 * m10 * m21 - m00 * m12 * m21 -
-                   m01 * m10 * m22 + m00 * m11 * m22) * inv_det;
+        let r33 = (m01 * m12 * m20 - m02 * m11 * m20 + m02 * m10 * m21
+            - m00 * m12 * m21
+            - m01 * m10 * m22
+            + m00 * m11 * m22)
+            * inv_det;
 
-        Self::new(r00, r10, r20, r30,
-                r01, r11, r21, r31,
-                r02, r12, r22, r32,
-                r03, r13, r23, r33)
+        Self::new(
+            r00, r10, r20, r30, r01, r11, r21, r31, r02, r12, r22, r32, r03, r13, r23, r33,
+        )
     }
 
     //
@@ -580,70 +658,69 @@ impl<T: FloatScalar> Matrix3<T> {
     // [a20 a21 a22 a33] - [c10 c11 c22 c33]
     //
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
-        let	a00 = l.col[0].x;
-        let	a10 = l.col[0].y;
-        let	a20 = l.col[0].z;
-        let	a30 = l.col[0].w;
+        let a00 = l.col[0].x;
+        let a10 = l.col[0].y;
+        let a20 = l.col[0].z;
+        let a30 = l.col[0].w;
 
-        let	a01 = l.col[1].x;
-        let	a11 = l.col[1].y;
-        let	a21 = l.col[1].z;
-        let	a31 = l.col[1].w;
+        let a01 = l.col[1].x;
+        let a11 = l.col[1].y;
+        let a21 = l.col[1].z;
+        let a31 = l.col[1].w;
 
-        let	a02 = l.col[2].x;
-        let	a12 = l.col[2].y;
-        let	a22 = l.col[2].z;
-        let	a32 = l.col[2].w;
+        let a02 = l.col[2].x;
+        let a12 = l.col[2].y;
+        let a22 = l.col[2].z;
+        let a32 = l.col[2].w;
 
-        let	a03 = l.col[3].x;
-        let	a13 = l.col[3].y;
-        let	a23 = l.col[3].z;
-        let	a33 = l.col[3].w;
+        let a03 = l.col[3].x;
+        let a13 = l.col[3].y;
+        let a23 = l.col[3].z;
+        let a33 = l.col[3].w;
 
-        let	b00 = r.col[0].x;
-        let	b10 = r.col[0].y;
-        let	b20 = r.col[0].z;
-        let	b30 = r.col[0].w;
+        let b00 = r.col[0].x;
+        let b10 = r.col[0].y;
+        let b20 = r.col[0].z;
+        let b30 = r.col[0].w;
 
-        let	b01 = r.col[1].x;
-        let	b11 = r.col[1].y;
-        let	b21 = r.col[1].z;
-        let	b31 = r.col[1].w;
+        let b01 = r.col[1].x;
+        let b11 = r.col[1].y;
+        let b21 = r.col[1].z;
+        let b31 = r.col[1].w;
 
-        let	b02 = r.col[2].x;
-        let	b12 = r.col[2].y;
-        let	b22 = r.col[2].z;
-        let	b32 = r.col[2].w;
+        let b02 = r.col[2].x;
+        let b12 = r.col[2].y;
+        let b22 = r.col[2].z;
+        let b32 = r.col[2].w;
 
-        let	b03 = r.col[3].x;
-        let	b13 = r.col[3].y;
-        let	b23 = r.col[3].z;
-        let	b33 = r.col[3].w;
+        let b03 = r.col[3].x;
+        let b13 = r.col[3].y;
+        let b23 = r.col[3].z;
+        let b33 = r.col[3].w;
 
-        let	c00 = a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
-        let	c01 = a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
-        let	c02 = a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
-        let	c03 = a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+        let c00 = a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+        let c01 = a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+        let c02 = a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+        let c03 = a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
 
-        let	c10 = a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
-        let	c11 = a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
-        let	c12 = a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
-        let	c13 = a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+        let c10 = a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+        let c11 = a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
+        let c12 = a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
+        let c13 = a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
 
-        let	c20 = a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
-        let	c21 = a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
-        let	c22 = a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
-        let	c23 = a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+        let c20 = a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+        let c21 = a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
+        let c22 = a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
+        let c23 = a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
 
-        let	c30 = a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
-        let	c31 = a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
-        let	c32 = a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
-        let	c33 = a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+        let c30 = a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+        let c31 = a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
+        let c32 = a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
+        let c33 = a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
 
-        Self::new(c00, c10, c20, c30,
-                c01, c11, c21, c31,
-                c02, c12, c22, c32,
-                c03, c13, c23, c33)
+        Self::new(
+            c00, c10, c20, c30, c01, c11, c21, c31, c02, c12, c22, c32, c03, c13, c23, c33,
+        )
     }
 
     pub fn mul_matrix_vector(l: &Self, r: &Vector4<T>) -> Vector4<T> {
@@ -661,25 +738,30 @@ impl<T: FloatScalar> Matrix3<T> {
             Vector4::dot(l, &r.col[0]),
             Vector4::dot(l, &r.col[1]),
             Vector4::dot(l, &r.col[2]),
-            Vector4::dot(l, &r.col[3]))
+            Vector4::dot(l, &r.col[3]),
+        )
     }
 
     pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
-        Matrix4 { col : [
-            l.col[0] + r.col[0],
-            l.col[1] + r.col[1],
-            l.col[2] + r.col[2],
-            l.col[3] + r.col[3],
-        ]}
+        Matrix4 {
+            col: [
+                l.col[0] + r.col[0],
+                l.col[1] + r.col[1],
+                l.col[2] + r.col[2],
+                l.col[3] + r.col[3],
+            ],
+        }
     }
 
     pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
-        Matrix4 { col : [
-            l.col[0] - r.col[0],
-            l.col[1] - r.col[1],
-            l.col[2] - r.col[2],
-            l.col[3] - r.col[3],
-        ]}
+        Matrix4 {
+            col: [
+                l.col[0] - r.col[0],
+                l.col[1] - r.col[1],
+                l.col[2] - r.col[2],
+                l.col[3] - r.col[3],
+            ],
+        }
     }
 }
 
@@ -743,14 +825,22 @@ impl<T: Scalar> Mul<Vector3<T>> for Matrix4<T> {
     }
 }
 
-pub trait Matrix4Extension<T : Scalar> {
+pub trait Matrix4Extension<T: Scalar> {
     fn mat3(&self) -> Matrix3<T>;
 }
 
 impl<T: Scalar> Matrix4Extension<T> for Matrix4<T> {
     fn mat3(&self) -> Matrix3<T> {
-        Matrix3::new(self.col[0].x, self.col[0].y, self.col[0].z,
-                     self.col[1].x, self.col[1].y, self.col[1].z,
-                     self.col[2].x, self.col[2].y, self.col[2].z)
+        Matrix3::new(
+            self.col[0].x,
+            self.col[0].y,
+            self.col[0].z,
+            self.col[1].x,
+            self.col[1].y,
+            self.col[1].z,
+            self.col[2].x,
+            self.col[2].y,
+            self.col[2].z,
+        )
     }
 }

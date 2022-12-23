@@ -25,12 +25,14 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
-use core::ops::{Add, Sub, Mul, Div, Rem, Neg, AddAssign, SubAssign, DivAssign, MulAssign};
-use core::cmp::{PartialOrd};
+use core::cmp::PartialOrd;
+use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Sub, SubAssign};
 
-use crate::cmath::*;
+extern crate std;
 
-pub trait Scalar<Rhs = Self, Output = Self> :
+use std::{f32, f64};
+
+pub trait Scalar<Rhs = Self, Output = Self>:
     Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output>
     + Mul<Rhs, Output = Output>
@@ -42,7 +44,8 @@ pub trait Scalar<Rhs = Self, Output = Self> :
     + AddAssign<Rhs>
     + SubAssign<Rhs>
     + PartialOrd
-    + Clone + Copy
+    + Clone
+    + Copy
 {
     fn zero() -> Self;
     fn epsilon() -> Self;
@@ -57,7 +60,7 @@ pub trait Scalar<Rhs = Self, Output = Self> :
     fn tabs(self) -> Self;
 }
 
-pub trait FloatScalar<Rhs = Self, Output = Self> : Scalar<Rhs, Output> {
+pub trait FloatScalar<Rhs = Self, Output = Self>: Scalar<Rhs, Output> {
     fn infinity() -> Self;
     fn tsin(self) -> Self;
     fn tcos(self) -> Self;
@@ -71,50 +74,100 @@ trait Epsilon {
 }
 
 impl Epsilon for i32 {
-    fn epsilon() -> Self { 0 }
+    fn epsilon() -> Self {
+        0
+    }
 }
 
 impl Epsilon for i64 {
-    fn epsilon() -> Self { 0 }
+    fn epsilon() -> Self {
+        0
+    }
 }
 
 impl Epsilon for f32 {
-    fn epsilon() -> Self { 1.0 / (1024.0 * 1024.0) }
+    fn epsilon() -> Self {
+        1.0 / (1024.0 * 1024.0)
+    }
 }
 
 impl Epsilon for f64 {
-    fn epsilon() -> Self { 1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0) }
+    fn epsilon() -> Self {
+        1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0)
+    }
 }
 
 macro_rules! impl_scalar {
     ($scalar:ident, $float:ident) => {
         impl Scalar for $scalar {
-            fn epsilon() -> $scalar { <$scalar as Epsilon>::epsilon() }
-            fn zero() -> $scalar { 0 as $scalar }
-            fn one() -> $scalar { 1 as $scalar }
-            fn two() -> $scalar { 2 as $scalar }
-            fn half() -> $scalar { 0.5 as $scalar }
-            fn quarter() -> $scalar { 0.25 as $scalar }
-            fn l8192() -> $scalar { 8192 as $scalar }
-            fn min(l: Self, r: Self) -> Self { if l < r { l } else { r } }
-            fn max(l: Self, r: Self) -> Self { if l > r { l } else { r } }
-            fn squared(l: Self) -> Self { l * l }
-            fn tabs(self) -> $scalar { self.abs() }
+            fn epsilon() -> $scalar {
+                <$scalar as Epsilon>::epsilon()
+            }
+            fn zero() -> $scalar {
+                0 as $scalar
+            }
+            fn one() -> $scalar {
+                1 as $scalar
+            }
+            fn two() -> $scalar {
+                2 as $scalar
+            }
+            fn half() -> $scalar {
+                0.5 as $scalar
+            }
+            fn quarter() -> $scalar {
+                0.25 as $scalar
+            }
+            fn l8192() -> $scalar {
+                8192 as $scalar
+            }
+            fn min(l: Self, r: Self) -> Self {
+                if l < r {
+                    l
+                } else {
+                    r
+                }
+            }
+            fn max(l: Self, r: Self) -> Self {
+                if l > r {
+                    l
+                } else {
+                    r
+                }
+            }
+            fn squared(l: Self) -> Self {
+                l * l
+            }
+            fn tabs(self) -> $scalar {
+                self.abs()
+            }
         }
-    }
+    };
 }
 
 macro_rules! impl_float_scalar {
     ($scalar:ident) => {
         impl FloatScalar for $scalar {
-            fn infinity() -> $scalar { core::$scalar::INFINITY }
-            fn tsqrt(self) -> $scalar { self.sqrt() as $scalar }
-            fn tsin(self) -> $scalar { self.sin() as $scalar }
-            fn tcos(self) -> $scalar { self.cos() as $scalar }
-            fn ttan(self) -> $scalar { self.tan() as $scalar }
-            fn tacos(self) -> $scalar { self.acos() as $scalar }
+            fn infinity() -> $scalar {
+                core::$scalar::INFINITY
+            }
+            fn tsqrt(self) -> $scalar {
+                self.sqrt() as $scalar
+            }
+            fn tsin(self) -> $scalar {
+                self.sin() as $scalar
+            }
+            fn tcos(self) -> $scalar {
+                self.cos() as $scalar
+            }
+            fn ttan(self) -> $scalar {
+                self.tan() as $scalar
+            }
+            fn tacos(self) -> $scalar {
+                self.acos() as $scalar
+            }
         }
-    }
+    };
 }
 
 impl_scalar!(i32, f32);
@@ -125,54 +178,6 @@ impl_scalar!(f64, f64);
 impl_float_scalar!(f32);
 impl_float_scalar!(f64);
 
-#[cfg(feature = "fixedpoint")]
-mod fixedpoint {
-    use super::*;
-
-    macro_rules! impl_scalar_for_fixed {
-        ($scalar:ident, $float:ident) => {
-            impl super::Scalar for $scalar {
-                fn epsilon() -> $scalar { Self::zero() }
-                fn zero() -> $scalar    { $scalar::from_num(0   ) }
-                fn one() -> $scalar     { $scalar::from_num(1   ) }
-                fn two() -> $scalar     { $scalar::from_num(2   ) }
-                fn half() -> $scalar    { $scalar::from_num(0.5 ) }
-                fn quarter() -> $scalar { $scalar::from_num(0.25) }
-                fn l8192() -> $scalar   { $scalar::from_num(8192) }
-                fn min(l: Self, r: Self) -> Self { if l < r { l } else { r } }
-                fn max(l: Self, r: Self) -> Self { if l > r { l } else { r } }
-                fn squared(l: Self) -> Self { l * l }
-                fn tabs(self) -> $scalar { self.abs() }
-            }
-        }
-    }
-
-
-    macro_rules! impl_fixed_scalar {
-        ($scalar:ident, $max:path) => {
-            impl super::FloatScalar for $scalar {
-                fn infinity()  -> $scalar { $max }
-                fn tsqrt(self) -> $scalar { $scalar::from_num((self.to_num::<f64>()).sqrt()) }
-                fn tsin(self)  -> $scalar { $scalar::from_num((self.to_num::<f64>()).sin() ) }
-                fn tcos(self)  -> $scalar { $scalar::from_num((self.to_num::<f64>()).cos() ) }
-                fn ttan(self)  -> $scalar { $scalar::from_num((self.to_num::<f64>()).tan() ) }
-                fn tacos(self) -> $scalar { $scalar::from_num((self.to_num::<f64>()).acos()) }
-            }
-        }
-    }
-
-    pub type Hx = fixed::types::I96F32;
-    pub type Lx  = fixed::types::I48F16;
-
-    impl_scalar_for_fixed!(Lx, f64);
-    impl_scalar_for_fixed!(Hx, f64);
-
-    impl_fixed_scalar!(Lx, fixed::FixedI64::MAX);
-    impl_fixed_scalar!(Hx, fixed::FixedI128::MAX);
-}
-
-#[cfg(feature="fixedpoint")]
-pub use fixedpoint::*;
 
 #[cfg(test)]
 mod tests {

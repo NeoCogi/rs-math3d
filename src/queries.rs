@@ -25,9 +25,9 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+use crate::primitives::*;
 use crate::scalar::*;
 use crate::vector::*;
-use crate::primitives::*;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Query Traits
@@ -44,7 +44,6 @@ pub trait Intersection<T, Other> {
     fn intersection(&self, other: &Other) -> Option<T>;
 }
 
-
 ////////////////////////////////////////////////////////////////////////////////
 /// Distance Queries
 ////////////////////////////////////////////////////////////////////////////////
@@ -60,9 +59,9 @@ impl<T: FloatScalar> Distance<T, Vector3<T>> for Plane<T> {
 impl<T: FloatScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
     fn distance(&self, other: &Vector3<T>) -> T {
         let seg_dir = self.e - self.s;
-        let pt_dir  = *other - self.s;
-        let d_sp    = Vector3::dot(&seg_dir, &pt_dir);
-        let d_ss    = Vector3::dot(&seg_dir, &seg_dir);
+        let pt_dir = *other - self.s;
+        let d_sp = Vector3::dot(&seg_dir, &pt_dir);
+        let d_ss = Vector3::dot(&seg_dir, &seg_dir);
 
         if d_sp < T::zero() {
             return Vector3::length(&pt_dir);
@@ -117,19 +116,27 @@ impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
         let c = other.center;
         let r = other.radius;
 
-        if      c.x < self.min.x { dist += T::squared(c.x - self.min.x) }
-        else if c.x > self.max.x { dist += T::squared(c.x - self.max.x) }
+        if c.x < self.min.x {
+            dist += T::squared(c.x - self.min.x)
+        } else if c.x > self.max.x {
+            dist += T::squared(c.x - self.max.x)
+        }
 
-        if      c.y < self.min.y { dist += T::squared(c.y - self.min.y) }
-        else if c.y > self.max.y { dist += T::squared(c.y - self.max.y) }
+        if c.y < self.min.y {
+            dist += T::squared(c.y - self.min.y)
+        } else if c.y > self.max.y {
+            dist += T::squared(c.y - self.max.y)
+        }
 
-        if      c.x < self.min.z { dist += T::squared(c.z - self.min.z) }
-        else if c.x > self.max.z { dist += T::squared(c.z - self.max.z) }
+        if c.x < self.min.z {
+            dist += T::squared(c.z - self.min.z)
+        } else if c.x > self.max.z {
+            dist += T::squared(c.z - self.max.z)
+        }
 
         r * r > dist
     }
 }
-
 
 fn is_in_0_to_1_range<T: FloatScalar>(x: T) -> bool {
     x >= T::zero() && x <= T::one()
@@ -192,7 +199,7 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
         }
 
         // calculate distance from vert0 to ray origin
-        let	tvec = self.start - v0;
+        let tvec = self.start - v0;
 
         let qvec = Vector3::cross(&tvec, &edge1);
 
@@ -224,20 +231,20 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
 /// TODO: do the proof one day!
 ///
 pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
-    let u   = Vector3::normalize(unit);
-    let x   = u.x;
-    let y   = u.y;
-    let z   = u.z;
+    let u = Vector3::normalize(unit);
+    let x = u.x;
+    let y = u.y;
+    let z = u.z;
 
-    let v   =
-        if x.tabs() <= y.tabs() && x.tabs() <= z.tabs() {
-            Vector3::new(T::zero(), -z, y)
-        } else if y.tabs() <= x.tabs() && y.tabs() <= z.tabs() {
-            Vector3::new(-z, T::zero(), x)
-        } else { // z.abs() < x.abs() && z.abs() <= y.abs()
-            Vector3::new(-y, x, T::zero())
-        };
-    let v   = Vector3::normalize(&v);
-    let w   = Vector3::normalize(&Vector3::cross(&u, &v));
+    let v = if x.tabs() <= y.tabs() && x.tabs() <= z.tabs() {
+        Vector3::new(T::zero(), -z, y)
+    } else if y.tabs() <= x.tabs() && y.tabs() <= z.tabs() {
+        Vector3::new(-z, T::zero(), x)
+    } else {
+        // z.abs() < x.abs() && z.abs() <= y.abs()
+        Vector3::new(-y, x, T::zero())
+    };
+    let v = Vector3::normalize(&v);
+    let w = Vector3::normalize(&Vector3::cross(&u, &v));
     [u, w, v]
 }

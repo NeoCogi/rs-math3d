@@ -1,8 +1,11 @@
 [package]
 name = "rs-math3d"
-version = "0.9.21"
+version = "0.9.22"
 license = "BSD-3-Clause"
-authors = ["Raja Lehtihet <raja.lehtihet@gmail.com>", "Wael El Oraiby <wael.eloraiby@gmail.com>"]
+authors = [
+    "Raja Lehtihet <raja.lehtihet@gmail.com>",
+    "Wael El Oraiby <wael.eloraiby@gmail.com>",
+]
 edition = "2018"
 description = "Rust 3D Math (no dependency on std)"
 repository = "https://github.com/NeoCogi/rs-math3d"

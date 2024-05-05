@@ -386,8 +386,14 @@ impl<T: FloatScalar> Tri3<T> {
         let v0 = self.vertices[0];
         let v1 = self.vertices[1];
         let v2 = self.vertices[2];
-        let m = Matrix3::new(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-        m.inverse() * *pt
+        let vv1 = v1 - v0;
+        let vv2 = v2 - v0;
+        let vvc = Vector3::cross(&vv1, &vv2);
+        let m = Matrix3::new(
+            vv1.x, vv1.y, vv1.z, vv2.x, vv2.y, vv2.z, vvc.x, vvc.y, vvc.z,
+        );
+        let lambda = m.inverse() * *pt;
+        Vector3::new(T::one() - lambda.x - lambda.y, lambda.x, lambda.y)
     }
 }
 
@@ -526,4 +532,31 @@ pub fn quad_normal<T: FloatScalar>(
     let v20 = *v2 - *v0;
     let v31 = *v3 - *v1;
     Vector3::normalize(&Vector3::cross(&v20, &v31))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    pub fn test_barycentric() {
+        let v0 = Vector3::new(0.0, 0.0, 0.0);
+        let v1 = Vector3::new(0.0, 1.0, 0.0);
+        let v2 = Vector3::new(0.0, 0.0, 1.0);
+
+        let tri = Tri3::new([v0, v1, v2]);
+        let pp0 = tri.barycentric_coordinates(&v0);
+        assert!(f32::abs(pp0.x - 1.0) < 0.01);
+        assert!(f32::abs(pp0.y) < 0.01);
+        assert!(f32::abs(pp0.z) < 0.01);
+
+        let pp1 = tri.barycentric_coordinates(&v1);
+        assert!(f32::abs(pp1.x) < 0.01);
+        assert!(f32::abs(pp1.y - 1.0) < 0.01);
+        assert!(f32::abs(pp1.z) < 0.01);
+
+        let pp2 = tri.barycentric_coordinates(&v2);
+        assert!(f32::abs(pp2.x) < 0.01);
+        assert!(f32::abs(pp2.y) < 0.01);
+        assert!(f32::abs(pp2.z - 1.0) < 0.01);
+    }
 }

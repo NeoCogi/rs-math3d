@@ -29,6 +29,7 @@
 use crate::matrix::*;
 use crate::scalar::*;
 use crate::vector::*;
+use num_traits::{Zero, One};
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Rect
@@ -294,10 +295,10 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
         let d_sp = V::dot(&dir, &p_dir);
         let d_ss = V::dot(&dir, &dir);
 
-        if d_sp < T::zero() {
-            return (T::zero(), self.s);
+        if d_sp < <T as Zero>::zero() {
+            return (<T as Zero>::zero(), self.s);
         } else if d_sp > d_ss {
-            return (T::one(), self.e);
+            return (<T as One>::one(), self.e);
         }
 
         let t = d_sp / d_ss;
@@ -338,7 +339,7 @@ impl<T: Scalar> Ray<T, Vector3<T>> {
     pub fn intersect_plane(&self, p: &Plane<T>) -> Option<Vector3<T>> {
         let n = p.normal();
         let t: T = -(p.d + Vector3::dot(&n, &self.start)) / Vector3::dot(&n, &self.direction);
-        if t < T::zero() {
+        if t < <T as Zero>::zero() {
             None
         } else {
             Some(self.direction * t + self.start)
@@ -393,7 +394,7 @@ impl<T: FloatScalar> Tri3<T> {
             vv1.x, vv1.y, vv1.z, vv2.x, vv2.y, vv2.z, vvc.x, vvc.y, vvc.z,
         );
         let lambda = m.inverse() * (*pt - v0);
-        Vector3::new(T::one() - lambda.x - lambda.y, lambda.x, lambda.y)
+        Vector3::new(<T as One>::one() - lambda.x - lambda.y, lambda.x, lambda.y)
     }
 }
 

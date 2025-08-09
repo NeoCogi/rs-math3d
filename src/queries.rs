@@ -28,6 +28,7 @@
 use crate::primitives::*;
 use crate::scalar::*;
 use crate::vector::*;
+use num_traits::{Zero, One};
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Query Traits
@@ -63,7 +64,7 @@ impl<T: FloatScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
         let d_sp = Vector3::dot(&seg_dir, &pt_dir);
         let d_ss = Vector3::dot(&seg_dir, &seg_dir);
 
-        if d_sp < T::zero() {
+        if d_sp < <T as Zero>::zero() {
             return Vector3::length(&pt_dir);
         } else if d_sp > d_ss {
             return Vector3::length(&(*other - self.e));
@@ -105,13 +106,13 @@ impl<T: FloatScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
         tmin = T::max(tmin, T::min(t0, t1));
         tmax = T::min(tmax, T::max(t0, t1));
 
-        tmax > T::max(tmin, T::zero())
+        tmax > T::max(tmin, <T as Zero>::zero())
     }
 }
 
 impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
     fn intersect(&self, other: &Sphere3<T>) -> bool {
-        let mut dist = T::zero();
+        let mut dist = <T as Zero>::zero();
 
         let c = other.center;
         let r = other.radius;
@@ -139,7 +140,7 @@ impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
 }
 
 fn is_in_0_to_1_range<T: FloatScalar>(x: T) -> bool {
-    x >= T::zero() && x <= T::one()
+    x >= <T as Zero>::zero() && x <= <T as One>::one()
 }
 
 impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
@@ -205,13 +206,13 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
 
         let u = Vector3::dot(&tvec, &pvec) / det;
 
-        if u < -T::epsilon() || u > T::one() + T::epsilon() {
+        if u < -T::epsilon() || u > <T as One>::one() + T::epsilon() {
             return None; // NoIntersection
         }
 
         // calculate V parameter and test bounds
         let v = Vector3::dot(&self.direction, &qvec) / det;
-        if v < -T::epsilon() || u + v > T::one() + T::two() * T::epsilon() {
+        if v < -T::epsilon() || u + v > <T as One>::one() + T::two() * T::epsilon() {
             return None; // NoIntersection
         }
 
@@ -237,12 +238,12 @@ pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
     let z = u.z;
 
     let v = if x.tabs() <= y.tabs() && x.tabs() <= z.tabs() {
-        Vector3::new(T::zero(), -z, y)
+        Vector3::new(<T as Zero>::zero(), -z, y)
     } else if y.tabs() <= x.tabs() && y.tabs() <= z.tabs() {
-        Vector3::new(-z, T::zero(), x)
+        Vector3::new(-z, <T as Zero>::zero(), x)
     } else {
         // z.abs() < x.abs() && z.abs() <= y.abs()
-        Vector3::new(-y, x, T::zero())
+        Vector3::new(-y, x, <T as Zero>::zero())
     };
     let v = Vector3::normalize(&v);
     let w = Vector3::normalize(&Vector3::cross(&u, &v));

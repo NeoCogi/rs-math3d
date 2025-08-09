@@ -26,6 +26,7 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 use crate::scalar::*;
+use num_traits::{Zero, One};
 use core::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
@@ -84,8 +85,8 @@ macro_rules! implVector {
         }
 
         impl<T: Scalar> Vector<T> for $vecName<T> {
-            fn zero() -> Self { Self { $($field: T::zero()),* } }
-            fn dot  (l: &Self, r: &Self) -> T { $(l.$field * r.$field +)* T::zero() }
+            fn zero() -> Self { Self { $($field: <T as Zero>::zero()),* } }
+            fn dot  (l: &Self, r: &Self) -> T { $(l.$field * r.$field +)* <T as Zero>::zero() }
             fn add_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field + r.$field),*) }
             fn sub_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field - r.$field),*) }
             fn mul_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field * r.$field),*) }
@@ -237,7 +238,7 @@ impl<T: Scalar> Swizzle2<T> for Vector2<T> {
         Vector2::new(self.x, self.y)
     }
     fn xz(&self) -> Vector2<T> {
-        Vector2::new(self.x, T::zero())
+        Vector2::new(self.x, <T as Zero>::zero())
     }
     fn yx(&self) -> Vector2<T> {
         Vector2::new(self.y, self.x)
@@ -246,16 +247,16 @@ impl<T: Scalar> Swizzle2<T> for Vector2<T> {
         Vector2::new(self.y, self.y)
     }
     fn yz(&self) -> Vector2<T> {
-        Vector2::new(self.y, T::zero())
+        Vector2::new(self.y, <T as Zero>::zero())
     }
     fn zx(&self) -> Vector2<T> {
-        Vector2::new(T::zero(), self.x)
+        Vector2::new(<T as Zero>::zero(), self.x)
     }
     fn zy(&self) -> Vector2<T> {
-        Vector2::new(T::zero(), self.y)
+        Vector2::new(<T as Zero>::zero(), self.y)
     }
     fn zz(&self) -> Vector2<T> {
-        Vector2::new(T::zero(), T::zero())
+        Vector2::new(<T as Zero>::zero(), <T as Zero>::zero())
     }
 }
 

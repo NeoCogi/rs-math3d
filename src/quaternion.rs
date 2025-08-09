@@ -29,6 +29,7 @@ use crate::matrix::{Matrix3, Matrix4};
 use crate::scalar::*;
 use crate::vector::{FloatVector, Vector, Vector3};
 use core::ops::*;
+use num_traits::{Zero, One};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
@@ -42,10 +43,10 @@ pub struct Quat<T: Scalar> {
 impl<T: FloatScalar> Quat<T> {
     pub fn identity() -> Self {
         Self {
-            x: T::zero(),
-            y: T::zero(),
-            z: T::zero(),
-            w: T::one(),
+            x: <T as Zero>::zero(),
+            y: <T as Zero>::zero(),
+            z: <T as Zero>::zero(),
+            w: <T as One>::one(),
         }
     }
     pub fn new(x: T, y: T, z: T, w: T) -> Self {
@@ -69,7 +70,7 @@ impl<T: FloatScalar> Quat<T> {
     }
     pub fn normalize(q: &Self) -> Self {
         let ql = q.length();
-        if ql > T::zero() {
+        if ql > <T as Zero>::zero() {
             *q / ql
         } else {
             *q
@@ -119,15 +120,15 @@ impl<T: FloatScalar> Quat<T> {
         let zz = self.z * self.z;
         let zw = self.z * self.w;
 
-        let m00 = T::one() - T::two() * (yy + zz);
+        let m00 = <T as One>::one() - T::two() * (yy + zz);
         let m10 = T::two() * (xy + zw);
         let m20 = T::two() * (xz - yw);
         let m01 = T::two() * (xy - zw);
-        let m11 = T::one() - T::two() * (xx + zz);
+        let m11 = <T as One>::one() - T::two() * (xx + zz);
         let m21 = T::two() * (yz + xw);
         let m02 = T::two() * (xz + yw);
         let m12 = T::two() * (yz - xw);
-        let m22 = T::one() - T::two() * (xx + yy);
+        let m22 = <T as One>::one() - T::two() * (xx + yy);
 
         Matrix3::new(m00, m10, m20, m01, m11, m21, m02, m12, m22)
     }
@@ -143,33 +144,33 @@ impl<T: FloatScalar> Quat<T> {
         let zz = self.z * self.z;
         let zw = self.z * self.w;
 
-        let m00 = T::one() - T::two() * (yy + zz);
+        let m00 = <T as One>::one() - T::two() * (yy + zz);
         let m10 = T::two() * (xy + zw);
         let m20 = T::two() * (xz - yw);
         let m01 = T::two() * (xy - zw);
-        let m11 = T::one() - T::two() * (xx + zz);
+        let m11 = <T as One>::one() - T::two() * (xx + zz);
         let m21 = T::two() * (yz + xw);
         let m02 = T::two() * (xz + yw);
         let m12 = T::two() * (yz - xw);
-        let m22 = T::one() - T::two() * (xx + yy);
+        let m22 = <T as One>::one() - T::two() * (xx + yy);
 
         Matrix4::new(
             m00,
             m10,
             m20,
-            T::zero(),
+            <T as Zero>::zero(),
             m01,
             m11,
             m21,
-            T::zero(),
+            <T as Zero>::zero(),
             m02,
             m12,
             m22,
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::one(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as One>::one(),
         )
     }
 
@@ -177,10 +178,10 @@ impl<T: FloatScalar> Quat<T> {
         let nq = Self::normalize(self);
         let cos_a = nq.w;
         let sin_a = {
-            let sin_a = T::tsqrt(T::one() - cos_a * cos_a);
+            let sin_a = T::tsqrt(<T as One>::one() - cos_a * cos_a);
             // Use epsilon for numerical stability check
             if T::tabs(sin_a) < T::epsilon() {
-                T::one()
+                <T as One>::one()
             } else {
                 sin_a
             }
@@ -204,9 +205,9 @@ impl<T: FloatScalar> Quat<T> {
         let mat9 = m.col[1].z;
         let mat10 = m.col[2].z;
 
-        let t = T::one() + mat0 + mat5 + mat10;
+        let t = <T as One>::one() + mat0 + mat5 + mat10;
 
-        if t > T::zero() {
+        if t > <T as Zero>::zero() {
             let s = T::tsqrt(t) * T::two();
 
             let x = (mat9 - mat6) / s;
@@ -217,7 +218,7 @@ impl<T: FloatScalar> Quat<T> {
         } else {
             if mat0 > mat5 && mat0 > mat10 {
                 // Column 0:
-                let s = T::tsqrt(T::one() + mat0 - mat5 - mat10) * T::two();
+                let s = T::tsqrt(<T as One>::one() + mat0 - mat5 - mat10) * T::two();
                 let x = T::quarter() * s;
                 let y = (mat4 + mat1) / s;
                 let z = (mat2 + mat8) / s;
@@ -225,7 +226,7 @@ impl<T: FloatScalar> Quat<T> {
                 Self::new(x, y, z, w)
             } else if mat5 > mat10 {
                 // Column 1:
-                let s = T::tsqrt(T::one() + mat5 - mat0 - mat10) * T::two();
+                let s = T::tsqrt(<T as One>::one() + mat5 - mat0 - mat10) * T::two();
                 let x = (mat4 + mat1) / s;
                 let y = T::quarter() * s;
                 let z = (mat9 + mat6) / s;
@@ -233,7 +234,7 @@ impl<T: FloatScalar> Quat<T> {
                 Self::new(x, y, z, w)
             } else {
                 // Column 2:
-                let s = T::tsqrt(T::one() + mat10 - mat0 - mat5) * T::two();
+                let s = T::tsqrt(<T as One>::one() + mat10 - mat0 - mat5) * T::two();
                 let x = (mat2 + mat8) / s;
                 let y = (mat9 + mat6) / s;
                 let z = T::quarter() * s;
@@ -256,9 +257,9 @@ impl<T: FloatScalar> Quat<T> {
         let mat9 = m.col[1].z;
         let mat10 = m.col[2].z;
 
-        let t = T::one() + mat0 + mat5 + mat10;
+        let t = <T as One>::one() + mat0 + mat5 + mat10;
 
-        if t > T::zero() {
+        if t > <T as Zero>::zero() {
             let s = T::tsqrt(t) * T::two();
 
             let x = (mat9 - mat6) / s;
@@ -269,7 +270,7 @@ impl<T: FloatScalar> Quat<T> {
         } else {
             if mat0 > mat5 && mat0 > mat10 {
                 // Column 0:
-                let s = T::tsqrt(T::one() + mat0 - mat5 - mat10) * T::two();
+                let s = T::tsqrt(<T as One>::one() + mat0 - mat5 - mat10) * T::two();
                 let x = T::quarter() * s;
                 let y = (mat4 + mat1) / s;
                 let z = (mat2 + mat8) / s;
@@ -277,7 +278,7 @@ impl<T: FloatScalar> Quat<T> {
                 Self::new(x, y, z, w)
             } else if mat5 > mat10 {
                 // Column 1:
-                let s = T::tsqrt(T::one() + mat5 - mat0 - mat10) * T::two();
+                let s = T::tsqrt(<T as One>::one() + mat5 - mat0 - mat10) * T::two();
                 let x = (mat4 + mat1) / s;
                 let y = T::quarter() * s;
                 let z = (mat9 + mat6) / s;
@@ -285,7 +286,7 @@ impl<T: FloatScalar> Quat<T> {
                 Self::new(x, y, z, w)
             } else {
                 // Column 2:
-                let s = T::tsqrt(T::one() + mat10 - mat0 - mat5) * T::two();
+                let s = T::tsqrt(<T as One>::one() + mat10 - mat0 - mat5) * T::two();
                 let x = (mat2 + mat8) / s;
                 let y = (mat9 + mat6) / s;
                 let z = T::quarter() * s;
@@ -300,7 +301,7 @@ impl<T: FloatScalar> Quat<T> {
         let sin_a = T::tsin(half_angle);
         let cos_a = T::tcos(half_angle);
         let len = axis.length();
-        let n: Vector3<T> = (if len > T::zero() {
+        let n: Vector3<T> = (if len > <T as Zero>::zero() {
             Vector3::normalize(&axis)
         } else {
             *axis

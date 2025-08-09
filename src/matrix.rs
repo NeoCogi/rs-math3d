@@ -27,6 +27,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 use crate::scalar::*;
 use crate::vector::*;
+use num_traits::{Zero, One};
 use core::ops::*;
 
 #[repr(C)]
@@ -65,7 +66,7 @@ impl<T: Scalar> Matrix2<T> {
     }
 
     pub fn identity() -> Self {
-        Self::new(T::one(), T::zero(), T::zero(), T::one())
+        Self::new(<T as One>::one(), <T as Zero>::zero(), <T as Zero>::zero(), <T as One>::one())
     }
 
     pub fn determinant(&self) -> T {
@@ -95,7 +96,7 @@ impl<T: Scalar> Matrix2<T> {
         let m01 = self.col[1].x;
         let m11 = self.col[1].y;
 
-        let inv_det = T::one() / (m00 * m11 - m01 * m10);
+        let inv_det = <T as One>::one() / (m00 * m11 - m01 * m10);
 
         let r00 = m11 * inv_det;
         let r01 = -m01 * inv_det;
@@ -176,15 +177,15 @@ impl<T: Scalar> Matrix3<T> {
 
     pub fn identity() -> Self {
         Self::new(
-            T::one(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::one(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::one(),
+            <T as One>::one(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as One>::one(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as One>::one(),
         )
     }
 
@@ -236,7 +237,7 @@ impl<T: Scalar> Matrix3<T> {
         let m12 = self.col[2].y;
         let m22 = self.col[2].z;
 
-        let inv_det = T::one()
+        let inv_det = <T as One>::one()
             / (m00 * m11 * m22 + m01 * m12 * m20 + m02 * m10 * m21
                 - m00 * m12 * m21
                 - m01 * m10 * m22
@@ -349,7 +350,7 @@ impl<T: FloatScalar> Matrix3<T> {
         let uyy = uy * uy;
         let uzz = uz * uz;
 
-        let oc = T::one() - c;
+        let oc = <T as One>::one() - c;
 
         let m0 = c + uxx * oc;
         let m1 = uy * ux * oc + uz * s;
@@ -410,22 +411,22 @@ impl<T: Scalar> Matrix4<T> {
 
     pub fn identity() -> Self {
         Self::new(
-            T::one(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::one(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::one(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::zero(),
-            T::one(),
+            <T as One>::one(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as One>::one(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as One>::one(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as One>::one(),
         )
     }
 
@@ -543,7 +544,7 @@ impl<T: Scalar> Matrix4<T> {
             - m00 * m12 * m21 * m33
             - m01 * m10 * m22 * m33
             + m00 * m11 * m22 * m33;
-        let inv_det = T::one() / denom;
+        let inv_det = <T as One>::one() / denom;
 
         let r00 = (m12 * m23 * m31 - m13 * m22 * m31 + m13 * m21 * m32
             - m11 * m23 * m32
@@ -814,14 +815,14 @@ implMatrixOps!(Matrix4, Vector4);
 impl<T: Scalar> Mul<Matrix4<T>> for Vector3<T> {
     type Output = Vector3<T>;
     fn mul(self, rhs: Matrix4<T>) -> Vector3<T> {
-        Matrix4::mul_vector_matrix(&Vector4::new(self.x, self.y, self.z, T::one()), &rhs).xyz()
+        Matrix4::mul_vector_matrix(&Vector4::new(self.x, self.y, self.z, <T as One>::one()), &rhs).xyz()
     }
 }
 
 impl<T: Scalar> Mul<Vector3<T>> for Matrix4<T> {
     type Output = Vector3<T>;
     fn mul(self, rhs: Vector3<T>) -> Vector3<T> {
-        Matrix4::mul_matrix_vector(&self, &Vector4::new(rhs.x, rhs.y, rhs.z, T::one())).xyz()
+        Matrix4::mul_matrix_vector(&self, &Vector4::new(rhs.x, rhs.y, rhs.z, <T as One>::one())).xyz()
     }
 }
 

@@ -25,159 +25,204 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+
+use num_traits::{Num, NumAssignOps};
 use core::cmp::PartialOrd;
-use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Sub, SubAssign};
+use core::ops::Neg;
 
-extern crate std;
+// Re-export for convenience
+pub use num_traits::{Zero, One};
 
-use std::{f32, f64};
-
-pub trait Scalar<Rhs = Self, Output = Self>:
-    Add<Rhs, Output = Output>
-    + Sub<Rhs, Output = Output>
-    + Mul<Rhs, Output = Output>
-    + Div<Rhs, Output = Output>
-    + Rem<Rhs, Output = Output>
-    + DivAssign<Rhs>
-    + MulAssign<Rhs>
-    + Neg<Output = Output>
-    + AddAssign<Rhs>
-    + SubAssign<Rhs>
+/// Scalar trait that combines num-traits with additional methods needed by this library
+/// The zero() and one() methods come from num_traits::Zero and num_traits::One traits
+pub trait Scalar:
+    Num
+    + NumAssignOps
+    + Neg<Output = Self>
     + PartialOrd
     + Clone
     + Copy
+    + Sized
 {
-    fn zero() -> Self;
-    fn epsilon() -> Self;
-    fn one() -> Self;
+    // Additional methods not provided by num-traits
     fn two() -> Self;
     fn half() -> Self;
     fn quarter() -> Self;
     fn l8192() -> Self;
+    fn epsilon() -> Self;
     fn min(l: Self, r: Self) -> Self;
     fn max(l: Self, r: Self) -> Self;
-    fn squared(l: Self) -> Self;
+    fn squared(self) -> Self {
+        self * self
+    }
     fn tabs(self) -> Self;
 }
 
-pub trait FloatScalar<Rhs = Self, Output = Self>: Scalar<Rhs, Output> {
+/// FloatScalar trait for floating-point specific operations
+/// Uses intrinsic float methods that are available in core without std or libm
+pub trait FloatScalar: Scalar {
     fn infinity() -> Self;
+    fn tsqrt(self) -> Self;
     fn tsin(self) -> Self;
     fn tcos(self) -> Self;
     fn ttan(self) -> Self;
     fn tacos(self) -> Self;
-    fn tsqrt(self) -> Self;
 }
 
-trait Epsilon {
-    fn epsilon() -> Self;
-}
-
-impl Epsilon for i32 {
-    fn epsilon() -> Self {
-        0
+// Implementation for i32
+impl Scalar for i32 {
+    fn two() -> Self { 2 }
+    fn half() -> Self { 0 }  // Integer division
+    fn quarter() -> Self { 0 }  // Integer division
+    fn l8192() -> Self { 8192 }
+    fn epsilon() -> Self { 0 }
+    fn min(l: Self, r: Self) -> Self {
+        if l < r { l } else { r }
+    }
+    fn max(l: Self, r: Self) -> Self {
+        if l > r { l } else { r }
+    }
+    fn tabs(self) -> Self {
+        self.abs()
     }
 }
 
-impl Epsilon for i64 {
-    fn epsilon() -> Self {
-        0
+// Implementation for i64
+impl Scalar for i64 {
+    fn two() -> Self { 2 }
+    fn half() -> Self { 0 }  // Integer division
+    fn quarter() -> Self { 0 }  // Integer division
+    fn l8192() -> Self { 8192 }
+    fn epsilon() -> Self { 0 }
+    fn min(l: Self, r: Self) -> Self {
+        if l < r { l } else { r }
+    }
+    fn max(l: Self, r: Self) -> Self {
+        if l > r { l } else { r }
+    }
+    fn tabs(self) -> Self {
+        self.abs()
     }
 }
 
-impl Epsilon for f32 {
-    fn epsilon() -> Self {
+// Implementation for f32
+impl Scalar for f32 {
+    fn two() -> Self { 2.0 }
+    fn half() -> Self { 0.5 }
+    fn quarter() -> Self { 0.25 }
+    fn l8192() -> Self { 8192.0 }
+    fn epsilon() -> Self { 
         1.0 / (1024.0 * 1024.0)
     }
+    fn min(l: Self, r: Self) -> Self {
+        if l < r { l } else { r }
+    }
+    fn max(l: Self, r: Self) -> Self {
+        if l > r { l } else { r }
+    }
+    fn tabs(self) -> Self {
+        self.abs()
+    }
 }
 
-impl Epsilon for f64 {
+// Implementation for f64
+impl Scalar for f64 {
+    fn two() -> Self { 2.0 }
+    fn half() -> Self { 0.5 }
+    fn quarter() -> Self { 0.25 }
+    fn l8192() -> Self { 8192.0 }
     fn epsilon() -> Self {
         1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0)
     }
+    fn min(l: Self, r: Self) -> Self {
+        if l < r { l } else { r }
+    }
+    fn max(l: Self, r: Self) -> Self {
+        if l > r { l } else { r }
+    }
+    fn tabs(self) -> Self {
+        self.abs()
+    }
 }
 
-macro_rules! impl_scalar {
-    ($scalar:ident, $float:ident) => {
-        impl Scalar for $scalar {
-            fn epsilon() -> $scalar {
-                <$scalar as Epsilon>::epsilon()
-            }
-            fn zero() -> $scalar {
-                0 as $scalar
-            }
-            fn one() -> $scalar {
-                1 as $scalar
-            }
-            fn two() -> $scalar {
-                2 as $scalar
-            }
-            fn half() -> $scalar {
-                0.5 as $scalar
-            }
-            fn quarter() -> $scalar {
-                0.25 as $scalar
-            }
-            fn l8192() -> $scalar {
-                8192 as $scalar
-            }
-            fn min(l: Self, r: Self) -> Self {
-                if l < r {
-                    l
-                } else {
-                    r
-                }
-            }
-            fn max(l: Self, r: Self) -> Self {
-                if l > r {
-                    l
-                } else {
-                    r
-                }
-            }
-            fn squared(l: Self) -> Self {
-                l * l
-            }
-            fn tabs(self) -> $scalar {
-                self.abs()
-            }
+// FloatScalar implementation for f32
+// Note: Without std or libm, we need to provide our own implementations
+// or link to external math libraries
+impl FloatScalar for f32 {
+    fn infinity() -> Self {
+        core::f32::INFINITY
+    }
+    fn tsqrt(self) -> Self {
+        // Use external C math function
+        extern "C" {
+            fn sqrtf(x: f32) -> f32;
         }
-    };
-}
-
-macro_rules! impl_float_scalar {
-    ($scalar:ident) => {
-        impl FloatScalar for $scalar {
-            fn infinity() -> $scalar {
-                core::$scalar::INFINITY
-            }
-            fn tsqrt(self) -> $scalar {
-                self.sqrt() as $scalar
-            }
-            fn tsin(self) -> $scalar {
-                self.sin() as $scalar
-            }
-            fn tcos(self) -> $scalar {
-                self.cos() as $scalar
-            }
-            fn ttan(self) -> $scalar {
-                self.tan() as $scalar
-            }
-            fn tacos(self) -> $scalar {
-                self.acos() as $scalar
-            }
+        unsafe { sqrtf(self) }
+    }
+    fn tsin(self) -> Self {
+        extern "C" {
+            fn sinf(x: f32) -> f32;
         }
-    };
+        unsafe { sinf(self) }
+    }
+    fn tcos(self) -> Self {
+        extern "C" {
+            fn cosf(x: f32) -> f32;
+        }
+        unsafe { cosf(self) }
+    }
+    fn ttan(self) -> Self {
+        extern "C" {
+            fn tanf(x: f32) -> f32;
+        }
+        unsafe { tanf(self) }
+    }
+    fn tacos(self) -> Self {
+        extern "C" {
+            fn acosf(x: f32) -> f32;
+        }
+        unsafe { acosf(self) }
+    }
 }
 
-impl_scalar!(i32, f32);
-impl_scalar!(i64, f64);
-impl_scalar!(f32, f32);
-impl_scalar!(f64, f64);
-
-impl_float_scalar!(f32);
-impl_float_scalar!(f64);
-
+// FloatScalar implementation for f64
+// Note: Without std or libm, we need to provide our own implementations
+// or link to external math libraries
+impl FloatScalar for f64 {
+    fn infinity() -> Self {
+        core::f64::INFINITY
+    }
+    fn tsqrt(self) -> Self {
+        extern "C" {
+            fn sqrt(x: f64) -> f64;
+        }
+        unsafe { sqrt(self) }
+    }
+    fn tsin(self) -> Self {
+        extern "C" {
+            fn sin(x: f64) -> f64;
+        }
+        unsafe { sin(self) }
+    }
+    fn tcos(self) -> Self {
+        extern "C" {
+            fn cos(x: f64) -> f64;
+        }
+        unsafe { cos(self) }
+    }
+    fn ttan(self) -> Self {
+        extern "C" {
+            fn tan(x: f64) -> f64;
+        }
+        unsafe { tan(self) }
+    }
+    fn tacos(self) -> Self {
+        extern "C" {
+            fn acos(x: f64) -> f64;
+        }
+        unsafe { acos(self) }
+    }
+}
 
 #[cfg(test)]
 mod tests {

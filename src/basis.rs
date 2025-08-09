@@ -28,6 +28,7 @@
 use crate::matrix::*;
 use crate::scalar::*;
 use crate::vector::*;
+use num_traits::{Zero, One};
 
 #[derive(Debug, Clone, Copy)]
 pub enum BasisPlane {
@@ -78,19 +79,19 @@ impl<T: Scalar> Basis<T> {
             self.x_axis.x,
             self.x_axis.y,
             self.x_axis.z,
-            T::zero(),
+            <T as Zero>::zero(),
             self.y_axis.x,
             self.y_axis.y,
             self.y_axis.z,
-            T::zero(),
+            <T as Zero>::zero(),
             self.z_axis.x,
             self.z_axis.y,
             self.z_axis.z,
-            T::zero(),
+            <T as Zero>::zero(),
             self.center.x,
             self.center.y,
             self.center.z,
-            T::one(),
+            <T as One>::one(),
         )
     }
 
@@ -109,19 +110,19 @@ impl<T: Scalar> Basis<T> {
 
     pub fn default() -> Self {
         Self {
-            center: Vector3::new(T::zero(), T::zero(), T::zero()),
-            x_axis: Vector3::new(T::one(), T::zero(), T::zero()),
-            y_axis: Vector3::new(T::zero(), T::one(), T::zero()),
-            z_axis: Vector3::new(T::zero(), T::zero(), T::one()),
+            center: Vector3::new(<T as Zero>::zero(), <T as Zero>::zero(), <T as Zero>::zero()),
+            x_axis: Vector3::new(<T as One>::one(), <T as Zero>::zero(), <T as Zero>::zero()),
+            y_axis: Vector3::new(<T as Zero>::zero(), <T as One>::one(), <T as Zero>::zero()),
+            z_axis: Vector3::new(<T as Zero>::zero(), <T as Zero>::zero(), <T as One>::one()),
         }
     }
 
     pub fn default_with_center(center: &Vector3<T>) -> Self {
         Self {
             center: *center,
-            x_axis: Vector3::new(T::one(), T::zero(), T::zero()),
-            y_axis: Vector3::new(T::zero(), T::one(), T::zero()),
-            z_axis: Vector3::new(T::zero(), T::zero(), T::one()),
+            x_axis: Vector3::new(<T as One>::one(), <T as Zero>::zero(), <T as Zero>::zero()),
+            y_axis: Vector3::new(<T as Zero>::zero(), <T as One>::one(), <T as Zero>::zero()),
+            z_axis: Vector3::new(<T as Zero>::zero(), <T as Zero>::zero(), <T as One>::one()),
         }
     }
 

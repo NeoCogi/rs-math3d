@@ -29,46 +29,47 @@ use crate::matrix::*;
 use crate::quaternion::*;
 use crate::scalar::*;
 use crate::vector::*;
+use num_traits::{Zero, One};
 
 pub fn translate<T: Scalar>(trans: Vector3<T>) -> Matrix4<T> {
     Matrix4::new(
-        T::one(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::one(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::one(),
-        T::zero(),
+        <T as One>::one(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as One>::one(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as One>::one(),
+        <T as Zero>::zero(),
         trans.x,
         trans.y,
         trans.z,
-        T::one(),
+        <T as One>::one(),
     )
 }
 
 pub fn scale<T: Scalar>(scale: Vector3<T>) -> Matrix4<T> {
     Matrix4::new(
         scale.x,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         scale.y,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         scale.z,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::one(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as One>::one(),
     )
 }
 
@@ -81,7 +82,7 @@ pub fn rotation_from_axis_angle<T: FloatScalar>(axis: &Vector3<T>, angle: T) -> 
 }
 
 pub fn transform_vec3<T: Scalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
-    let v4 = Vector4::new(v.x, v.y, v.z, T::one());
+    let v4 = Vector4::new(v.x, v.y, v.z, <T as One>::one());
     let vout = *m * v4;
     Vector3::new(vout.x / vout.w, vout.y / vout.w, vout.z / vout.w)
 }
@@ -93,7 +94,7 @@ pub fn project3<T: Scalar>(
     rt: &Vector2<T>,
     pt: &Vector3<T>,
 ) -> Vector3<T> {
-    let inp = Vector4::new(pt.x, pt.y, pt.z, T::one());
+    let inp = Vector4::new(pt.x, pt.y, pt.z, <T as One>::one());
     let pw = *persp * *world;
     let mut out = pw * inp;
 
@@ -101,9 +102,9 @@ pub fn project3<T: Scalar>(
     out.y /= out.w;
     out.z /= out.w;
 
-    let out_x = lb.x + ((rt.x - lb.x) * (out.x + T::one()) * T::half());
-    let out_y = lb.y + ((rt.y - lb.y) * (out.y + T::one()) * T::half());
-    let out_z = (out.z + T::one()) * T::half();
+    let out_x = lb.x + ((rt.x - lb.x) * (out.x + <T as One>::one()) * T::half());
+    let out_y = lb.y + ((rt.y - lb.y) * (out.y + <T as One>::one()) * T::half());
+    let out_z = (out.z + <T as One>::one()) * T::half();
     Vector3::new(out_x, out_y, out_z)
 }
 
@@ -116,10 +117,10 @@ pub fn unproject3<T: Scalar>(
 ) -> Vector3<T> {
     let pw = *persp * *world;
     let inv = pw.inverse();
-    let in_x = (T::two() * (pt.x - lb.x) / (rt.x - lb.x)) - T::one();
-    let in_y = (T::two() * (pt.y - lb.y) / (rt.y - lb.y)) - T::one();
-    let in_z = (T::two() * pt.z) - T::one();
-    let in_w = T::one();
+    let in_x = (T::two() * (pt.x - lb.x) / (rt.x - lb.x)) - <T as One>::one();
+    let in_y = (T::two() * (pt.y - lb.y) / (rt.y - lb.y)) - <T as One>::one();
+    let in_z = (T::two() * pt.z) - <T as One>::one();
+    let in_w = <T as One>::one();
     let inp = Vector4::new(in_x, in_y, in_z, in_w);
     let out = inv * inp;
     let out4 = out / out.w;
@@ -137,21 +138,21 @@ pub fn frustum<T: Scalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
 
     Matrix4::new(
         T::two() * lbn.z / width,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         T::two() * lbn.z / height,
-        T::zero(),
-        T::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         a,
         b,
         c,
-        -T::one(),
-        T::zero(),
-        T::zero(),
+        -<T as One>::one(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         d,
-        T::zero(),
+        <T as Zero>::zero(),
     )
 }
 
@@ -167,47 +168,47 @@ pub fn ortho4<T: Scalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) 
     let r23 = -(far + near) / depth;
     Matrix4::new(
         r00,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         r11,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         r22,
-        T::zero(),
+        <T as Zero>::zero(),
         r03,
         r13,
         r23,
-        T::one(),
+        <T as One>::one(),
     )
 }
 
 pub fn perspective<T: FloatScalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T> {
-    let f = T::one() / T::ttan(fovy * T::half());
+    let f = <T as One>::one() / T::ttan(fovy * T::half());
     let denom = near - far;
     let a = (far + near) / denom;
     let b = (T::two() * far * near) / denom;
 
     Matrix4::new(
         f / aspect,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         f,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         a,
-        -T::one(),
-        T::zero(),
-        T::zero(),
+        -<T as One>::one(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
         b,
-        T::zero(),
+        <T as Zero>::zero(),
     )
 }
 
@@ -222,19 +223,19 @@ pub fn lookat<T: FloatScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<
         s.x,
         u.x,
         -f.x,
-        T::zero(),
+        <T as Zero>::zero(),
         s.y,
         u.y,
         -f.y,
-        T::zero(),
+        <T as Zero>::zero(),
         s.z,
         u.z,
         -f.z,
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::one(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as Zero>::zero(),
+        <T as One>::one(),
     );
     m * trans
 }
@@ -254,23 +255,23 @@ pub fn decompose<T: FloatScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>,
     );
     let trans = Vector3::new(m.col[3].x, m.col[3].y, m.col[3].z);
 
-    if det < T::zero() {
+    if det < <T as Zero>::zero() {
         scale = -scale;
     }
 
-    if scale.x != T::zero() {
+    if scale.x != <T as Zero>::zero() {
         col0 = col0 / scale.x;
     } else {
         return Option::None;
     }
 
-    if scale.y != T::zero() {
+    if scale.y != <T as Zero>::zero() {
         col1 = col1 / scale.y;
     } else {
         return Option::None;
     }
 
-    if scale.z != T::zero() {
+    if scale.z != <T as Zero>::zero() {
         col2 = col2 / scale.z;
     } else {
         return Option::None;

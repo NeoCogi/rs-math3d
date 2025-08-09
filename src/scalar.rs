@@ -1,3 +1,12 @@
+//! Scalar trait definitions for generic numeric operations.
+//!
+//! This module defines traits that extend `num-traits` for use in
+//! mathematical operations throughout the library. It provides a
+//! unified interface for both integer and floating-point types.
+//!
+//! The module leverages the `num-traits` crate for basic numeric
+//! operations while adding specialized methods needed for 3D math.
+
 // Copyright 2020-Present (c) Raja Lehtihet & Wael El Oraiby
 //
 // Redistribution and use in source and binary forms, with or without
@@ -33,8 +42,18 @@ use core::ops::Neg;
 // Re-export for convenience
 pub use num_traits::{Zero, One};
 
-/// Scalar trait that combines num-traits with additional methods needed by this library
-/// The zero() and one() methods come from num_traits::Zero and num_traits::One traits
+/// Core scalar trait for numeric types used in the library.
+///
+/// This trait extends `num-traits` types with additional methods
+/// commonly needed in 3D mathematics. It is implemented for
+/// `i32`, `i64`, `f32`, and `f64`.
+///
+/// # Required Methods
+///
+/// Types implementing this trait must provide:
+/// - Basic arithmetic operations (via `Num` and `NumAssignOps`)
+/// - Comparison operations (via `PartialOrd`)
+/// - Additional constants and utility methods
 pub trait Scalar:
     Num
     + NumAssignOps
@@ -58,8 +77,16 @@ pub trait Scalar:
     fn tabs(self) -> Self;
 }
 
-/// FloatScalar trait for floating-point specific operations
-/// Uses intrinsic float methods that are available in core without std or libm
+/// Trait for floating-point scalars with transcendental functions.
+///
+/// Extends the base `Scalar` trait with operations specific to
+/// floating-point numbers, including trigonometric functions and
+/// square root.
+///
+/// # Implementation Note
+///
+/// These functions link to external C math libraries (libm on Unix,
+/// MSVCRT on Windows) since they're not available in no_std Rust.
 pub trait FloatScalar: Scalar {
     fn infinity() -> Self;
     fn tsqrt(self) -> Self;

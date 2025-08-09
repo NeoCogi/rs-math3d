@@ -25,26 +25,76 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+//! Matrix mathematics module providing 2x2, 3x3, and 4x4 matrices.
+//!
+//! This module provides square matrix types commonly used in computer graphics
+//! and linear algebra. Matrices are stored in column-major order for compatibility
+//! with graphics APIs like OpenGL.
+//!
+//! # Examples
+//!
+//! ```
+//! use rs_math3d::matrix::Matrix4;
+//! use rs_math3d::vector::Vector4;
+//! 
+//! let m = Matrix4::<f32>::identity();
+//! let v = Vector4::new(1.0, 2.0, 3.0, 1.0);
+//! let result = m * v; // Transform vector
+//! ```
+
 use crate::scalar::*;
 use crate::vector::*;
 use num_traits::{Zero, One};
 use core::ops::*;
 
+/// A 2x2 matrix stored in column-major order.
+///
+/// # Layout
+/// ```text
+/// [m₀₀ m₀₁]
+/// [m₁₀ m₁₁]
+/// ```
+/// where `col[j][i]` represents element at row i, column j.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Matrix2<T: Scalar> {
+    /// Column vectors of the matrix
     pub col: [Vector2<T>; 2],
 }
 
+/// A 3x3 matrix stored in column-major order.
+///
+/// Commonly used for 2D transformations (with homogeneous coordinates)
+/// and 3D rotations.
+///
+/// # Layout
+/// ```text
+/// [m₀₀ m₀₁ m₀₂]
+/// [m₁₀ m₁₁ m₁₂]
+/// [m₂₀ m₂₁ m₂₂]
+/// ```
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Matrix3<T: Scalar> {
+    /// Column vectors of the matrix
     pub col: [Vector3<T>; 3],
 }
 
+/// A 4x4 matrix stored in column-major order.
+///
+/// The standard matrix for 3D transformations using homogeneous coordinates.
+///
+/// # Layout
+/// ```text
+/// [m₀₀ m₀₁ m₀₂ m₀₃]
+/// [m₁₀ m₁₁ m₁₂ m₁₃]
+/// [m₂₀ m₂₁ m₂₂ m₂₃]
+/// [m₃₀ m₃₁ m₃₂ m₃₃]
+/// ```
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Matrix4<T: Scalar> {
+    /// Column vectors of the matrix
     pub col: [Vector4<T>; 4],
 }
 
@@ -59,16 +109,35 @@ pub struct Matrix4<T: Scalar> {
  *
  *****************************************************************************/
 impl<T: Scalar> Matrix2<T> {
+    /// Creates a new 2x2 matrix from individual elements.
+    ///
+    /// Elements are provided in column-major order:
+    /// ```text
+    /// [m0 m2]
+    /// [m1 m3]
+    /// ```
     pub fn new(m0: T, m1: T, m2: T, m3: T) -> Self {
         Matrix2 {
             col: [Vector2::new(m0, m1), Vector2::new(m2, m3)],
         }
     }
 
+    /// Returns the 2x2 identity matrix.
+    ///
+    /// ```text
+    /// [1 0]
+    /// [0 1]
+    /// ```
     pub fn identity() -> Self {
         Self::new(<T as One>::one(), <T as Zero>::zero(), <T as Zero>::zero(), <T as One>::one())
     }
 
+    /// Computes the determinant of the matrix.
+    ///
+    /// For a 2x2 matrix:
+    /// ```text
+    /// det(M) = m₀₀m₁₁ - m₀₁m₁₀
+    /// ```
     pub fn determinant(&self) -> T {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -79,6 +148,11 @@ impl<T: Scalar> Matrix2<T> {
         m00 * m11 - m01 * m10
     }
 
+    /// Returns the transpose of the matrix.
+    ///
+    /// ```text
+    /// Mᵀ[i,j] = M[j,i]
+    /// ```
     pub fn transpose(&self) -> Self {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -89,6 +163,16 @@ impl<T: Scalar> Matrix2<T> {
         Self::new(m00, m01, m10, m11)
     }
 
+    /// Computes the inverse of the matrix.
+    ///
+    /// For a 2x2 matrix:
+    /// ```text
+    /// M⁻¹ = (1/det(M)) * [m₁₁  -m₀₁]
+    ///                    [-m₁₀  m₀₀]
+    /// ```
+    ///
+    /// # Note
+    /// Returns NaN or Inf if the matrix is singular (determinant = 0).
     pub fn inverse(&self) -> Self {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -106,13 +190,12 @@ impl<T: Scalar> Matrix2<T> {
         Self::new(r00, r10, r01, r11)
     }
 
-    //
-    //             [b00 b01]
-    //             [b10 b11]
-    //           *   |   |
-    // [a00 a01] - [c00 c01]
-    // [a10 a11] - [c10 c11]
-    //
+    /// Multiplies two 2x2 matrices.
+    ///
+    /// Matrix multiplication follows the rule:
+    /// ```text
+    /// C[i,j] = Σₖ A[i,k] * B[k,j]
+    /// ```
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let a00 = l.col[0].x;
         let a10 = l.col[0].y;
@@ -132,20 +215,41 @@ impl<T: Scalar> Matrix2<T> {
         Self::new(c00, c10, c01, c11)
     }
 
+    /// Multiplies a 2x2 matrix by a 2D vector.
+    ///
+    /// Transforms the vector by the matrix:
+    /// ```text
+    /// v' = M * v
+    /// ```
     pub fn mul_matrix_vector(l: &Self, r: &Vector2<T>) -> Vector2<T> {
         Self::mul_vector_matrix(r, &l.transpose())
     }
 
+    /// Multiplies a 2D vector by a 2x2 matrix (row vector).
+    ///
+    /// ```text
+    /// v' = vᵀ * M
+    /// ```
     pub fn mul_vector_matrix(l: &Vector2<T>, r: &Self) -> Vector2<T> {
         Vector2::new(Vector2::dot(l, &r.col[0]), Vector2::dot(l, &r.col[1]))
     }
 
+    /// Adds two matrices element-wise.
+    ///
+    /// ```text
+    /// C[i,j] = A[i,j] + B[i,j]
+    /// ```
     pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix2 {
             col: [l.col[0] + r.col[0], l.col[1] + r.col[1]],
         }
     }
 
+    /// Subtracts two matrices element-wise.
+    ///
+    /// ```text
+    /// C[i,j] = A[i,j] - B[i,j]
+    /// ```
     pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix2 {
             col: [l.col[0] - r.col[0], l.col[1] - r.col[1]],
@@ -208,6 +312,11 @@ impl<T: Scalar> Matrix3<T> {
             - m02 * m11 * m20
     }
 
+    /// Returns the transpose of the matrix.
+    ///
+    /// ```text
+    /// Mᵀ[i,j] = M[j,i]
+    /// ```
     pub fn transpose(&self) -> Self {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -224,6 +333,15 @@ impl<T: Scalar> Matrix3<T> {
         Self::new(m00, m01, m02, m10, m11, m12, m20, m21, m22)
     }
 
+    /// Computes the inverse of the matrix.
+    ///
+    /// Uses the adjugate matrix method:
+    /// ```text
+    /// M⁻¹ = (1/det(M)) * adj(M)
+    /// ```
+    ///
+    /// # Note
+    /// Returns NaN or Inf if the matrix is singular (determinant = 0).
     pub fn inverse(&self) -> Self {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -256,15 +374,12 @@ impl<T: Scalar> Matrix3<T> {
         Self::new(r00, r10, r20, r01, r11, r21, r02, r12, r22)
     }
 
-    //
-    //                 [b00 b01 b02]
-    //                 [b10 b11 b12]
-    //                 [b20 b21 b22]
-    //               *   |   |   |
-    // [a00 a01 a02] - [c00 c01 c02]
-    // [a10 a11 a12] - [c10 c11 c12]
-    // [a20 a21 a22] - [c10 c11 c22]
-    //
+    /// Multiplies two 3x3 matrices.
+    ///
+    /// Matrix multiplication follows the rule:
+    /// ```text
+    /// C[i,j] = Σₖ A[i,k] * B[k,j]
+    /// ```
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let a00 = l.col[0].x;
         let a10 = l.col[0].y;
@@ -305,10 +420,21 @@ impl<T: Scalar> Matrix3<T> {
         Self::new(c00, c10, c20, c01, c11, c21, c02, c12, c22)
     }
 
+    /// Multiplies a 3x3 matrix by a 3D vector.
+    ///
+    /// Transforms the vector by the matrix:
+    /// ```text
+    /// v' = M * v
+    /// ```
     pub fn mul_matrix_vector(l: &Self, r: &Vector3<T>) -> Vector3<T> {
         Self::mul_vector_matrix(r, &l.transpose())
     }
 
+    /// Multiplies a 3D vector by a 3x3 matrix (row vector).
+    ///
+    /// ```text
+    /// v' = vᵀ * M
+    /// ```
     pub fn mul_vector_matrix(l: &Vector3<T>, r: &Self) -> Vector3<T> {
         Vector3::new(
             Vector3::dot(l, &r.col[0]),
@@ -317,6 +443,11 @@ impl<T: Scalar> Matrix3<T> {
         )
     }
 
+    /// Adds two matrices element-wise.
+    ///
+    /// ```text
+    /// C[i,j] = A[i,j] + B[i,j]
+    /// ```
     pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix3 {
             col: [
@@ -327,6 +458,11 @@ impl<T: Scalar> Matrix3<T> {
         }
     }
 
+    /// Subtracts two matrices element-wise.
+    ///
+    /// ```text
+    /// C[i,j] = A[i,j] - B[i,j]
+    /// ```
     pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix3 {
             col: [
@@ -339,6 +475,17 @@ impl<T: Scalar> Matrix3<T> {
 }
 
 impl<T: FloatScalar> Matrix3<T> {
+    /// Creates a 3x3 rotation matrix from an axis and angle.
+    ///
+    /// Uses Rodrigues' rotation formula:
+    /// ```text
+    /// R = I + sin(θ)K + (1 - cos(θ))K²
+    /// ```
+    /// where K is the cross-product matrix of the normalized axis.
+    ///
+    /// # Parameters
+    /// - `axis`: The rotation axis (will be normalized)
+    /// - `angle`: The rotation angle in radians
     pub fn of_axis_angle(axis: &Vector3<T>, angle: T) -> Self {
         let c = T::tcos(angle);
         let s = T::tsin(angle);
@@ -430,6 +577,10 @@ impl<T: Scalar> Matrix4<T> {
         )
     }
 
+    /// Computes the determinant of the matrix.
+    ///
+    /// Uses Laplace expansion along the first column.
+    /// A non-zero determinant indicates the matrix is invertible.
     pub fn determinant(&self) -> T {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -475,6 +626,11 @@ impl<T: Scalar> Matrix4<T> {
             + m00 * m11 * m22 * m33
     }
 
+    /// Returns the transpose of the matrix.
+    ///
+    /// ```text
+    /// Mᵀ[i,j] = M[j,i]
+    /// ```
     pub fn transpose(&self) -> Self {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -501,6 +657,15 @@ impl<T: Scalar> Matrix4<T> {
         )
     }
 
+    /// Computes the inverse of the matrix.
+    ///
+    /// Uses the adjugate matrix method:
+    /// ```text
+    /// M⁻¹ = (1/det(M)) * adj(M)
+    /// ```
+    ///
+    /// # Note
+    /// Returns NaN or Inf if the matrix is singular (determinant = 0).
     pub fn inverse(&self) -> Self {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -647,17 +812,12 @@ impl<T: Scalar> Matrix4<T> {
         )
     }
 
-    //
-    //                     [b00 b01 b02 b03]
-    //                     [b10 b11 b12 b13]
-    //                     [b20 b21 b22 b23]
-    //                     [b20 b21 b22 b33]
-    //                   *   |   |   |   |
-    // [a00 a01 a02 a03] - [c00 c01 c02 c03]
-    // [a10 a11 a12 a13] - [c10 c11 c12 c13]
-    // [a20 a21 a22 a23] - [c10 c11 c22 c23]
-    // [a20 a21 a22 a33] - [c10 c11 c22 c33]
-    //
+    /// Multiplies two 4x4 matrices.
+    ///
+    /// Matrix multiplication follows the rule:
+    /// ```text
+    /// C[i,j] = Σₖ A[i,k] * B[k,j]
+    /// ```
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let a00 = l.col[0].x;
         let a10 = l.col[0].y;
@@ -743,6 +903,11 @@ impl<T: Scalar> Matrix4<T> {
         )
     }
 
+    /// Adds two matrices element-wise.
+    ///
+    /// ```text
+    /// C[i,j] = A[i,j] + B[i,j]
+    /// ```
     pub fn add_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix4 {
             col: [
@@ -754,6 +919,11 @@ impl<T: Scalar> Matrix4<T> {
         }
     }
 
+    /// Subtracts two matrices element-wise.
+    ///
+    /// ```text
+    /// C[i,j] = A[i,j] - B[i,j]
+    /// ```
     pub fn sub_matrix_matrix(l: &Self, r: &Self) -> Self {
         Matrix4 {
             col: [

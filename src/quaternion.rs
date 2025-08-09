@@ -58,16 +58,40 @@ impl<T: FloatScalar> Quat<T> {
         }
     }
 
+    /// Computes the dot product of two quaternions.
+    ///
+    /// ```text
+    /// q₁ · q₂ = x₁x₂ + y₁y₂ + z₁z₂ + w₁w₂
+    /// ```
     pub fn dot(l: &Self, r: &Self) -> T {
         l.x * r.x + l.y * r.y + l.z * r.z + l.w * r.w
     }
 
+    /// Computes the length (magnitude) of the quaternion.
+    ///
+    /// ```text
+    /// ||q|| = √(x² + y² + z² + w²)
+    /// ```
     pub fn length(&self) -> T {
         T::tsqrt(Self::dot(self, self))
     }
+    
+    /// Returns the conjugate of the quaternion.
+    ///
+    /// The conjugate inverts the rotation:
+    /// ```text
+    /// q* = -xi - yj - zk + w
+    /// ```
     pub fn conjugate(q: &Self) -> Self {
         Self::new(-q.x, -q.y, -q.z, q.w)
     }
+    
+    /// Normalizes the quaternion to unit length.
+    ///
+    /// Unit quaternions represent valid rotations:
+    /// ```text
+    /// q̂ = q / ||q||
+    /// ```
     pub fn normalize(q: &Self) -> Self {
         let ql = q.length();
         if ql > <T as Zero>::zero() {
@@ -76,6 +100,10 @@ impl<T: FloatScalar> Quat<T> {
             *q
         }
     }
+    
+    /// Negates all components of the quaternion.
+    ///
+    /// Note: -q and q represent the same rotation (double cover property).
     pub fn neg(q: &Self) -> Self {
         Self::new(-q.x, -q.y, -q.z, -q.w)
     }
@@ -109,6 +137,13 @@ impl<T: FloatScalar> Quat<T> {
         Self::normalize(&Self::conjugate(q))
     }
 
+    /// Converts the quaternion to a 3x3 rotation matrix.
+    ///
+    /// The conversion formula:
+    /// ```text
+    /// R = I + 2s(q×) + 2(q×)²
+    /// ```
+    /// where q× is the cross-product matrix of the vector part.
     pub fn mat3(&self) -> Matrix3<T> {
         let xx = self.x * self.x;
         let xy = self.x * self.y;
@@ -133,6 +168,10 @@ impl<T: FloatScalar> Quat<T> {
         Matrix3::new(m00, m10, m20, m01, m11, m21, m02, m12, m22)
     }
 
+    /// Converts the quaternion to a 4x4 transformation matrix.
+    ///
+    /// The resulting matrix represents a pure rotation with no translation.
+    /// The bottom-right element is 1 for homogeneous coordinates.
     pub fn mat4(&self) -> Matrix4<T> {
         let xx = self.x * self.x;
         let xy = self.x * self.y;
@@ -174,6 +213,15 @@ impl<T: FloatScalar> Quat<T> {
         )
     }
 
+    /// Converts the quaternion to axis-angle representation.
+    ///
+    /// Returns:
+    /// - `axis`: The normalized rotation axis
+    /// - `angle`: The rotation angle in radians
+    ///
+    /// For a quaternion q = cos(θ/2) + sin(θ/2)(xi + yj + zk):
+    /// - axis = normalize(x, y, z)
+    /// - angle = 2 * acos(w)
     pub fn to_axis_angle(&self) -> (Vector3<T>, T) {
         let nq = Self::normalize(self);
         let cos_a = nq.w;
@@ -296,6 +344,16 @@ impl<T: FloatScalar> Quat<T> {
         }
     }
 
+    /// Creates a quaternion from an axis and angle.
+    ///
+    /// # Parameters
+    /// - `axis`: The rotation axis (will be normalized)
+    /// - `angle`: The rotation angle in radians
+    ///
+    /// The quaternion is constructed as:
+    /// ```text
+    /// q = cos(θ/2) + sin(θ/2) * normalize(axis)
+    /// ```
     pub fn of_axis_angle(axis: &Vector3<T>, angle: T) -> Self {
         let half_angle = angle * T::half();
         let sin_a = T::tsin(half_angle);

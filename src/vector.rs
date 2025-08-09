@@ -25,10 +25,46 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+//! Vector mathematics module providing 2D, 3D, and 4D vector operations.
+//!
+//! This module provides generic vector types and operations for computer graphics
+//! and linear algebra applications. All vectors support standard arithmetic operations,
+//! dot products, and component-wise operations.
+//!
+//! # Examples
+//!
+//! ```
+//! use rs_math3d::vector::{Vector3, FloatVector};
+//! 
+//! let v1 = Vector3::new(1.0, 2.0, 3.0);
+//! let v2 = Vector3::new(4.0, 5.0, 6.0);
+//! 
+//! // Vector addition
+//! let sum = v1 + v2;
+//! 
+//! // Dot product
+//! let dot = Vector3::dot(&v1, &v2);
+//! 
+//! // Normalization
+//! let normalized = v1.normalize();
+//! ```
+
 use crate::scalar::*;
 use num_traits::{Zero, One};
 use core::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+/// Generic vector trait defining common vector operations.
+///
+/// This trait provides the foundation for all vector types, defining
+/// operations like addition, subtraction, dot product, and component-wise operations.
+///
+/// # Mathematical Operations
+///
+/// For vectors **v** and **w**, and scalar `s`:
+/// - Addition: **v** + **w** = (v₁ + w₁, v₂ + w₂, ...)
+/// - Subtraction: **v** - **w** = (v₁ - w₁, v₂ - w₂, ...)
+/// - Scalar multiplication: s**v** = (sv₁, sv₂, ...)
+/// - Dot product: **v** · **w** = v₁w₁ + v₂w₂ + ...
 pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
     Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output>
@@ -40,25 +76,75 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
     + Clone
     + Copy
 {
+    /// Returns the zero vector (all components are zero).
     fn zero() -> Self;
 
+    /// Adds two vectors component-wise.
     fn add_vv(l: &Self, r: &Self) -> Self;
+    
+    /// Subtracts two vectors component-wise.
     fn sub_vv(l: &Self, r: &Self) -> Self;
+    
+    /// Multiplies two vectors component-wise (Hadamard product).
     fn mul_vv(l: &Self, r: &Self) -> Self;
+    
+    /// Divides two vectors component-wise.
     fn div_vv(l: &Self, r: &Self) -> Self;
+    
+    /// Multiplies a vector by a scalar.
     fn mul_vs(l: &Self, r: T) -> Self;
+    
+    /// Divides a vector by a scalar.
     fn div_vs(l: &Self, r: T) -> Self;
+    
+    /// Computes the remainder of component-wise division.
     fn rem_vv(l: &Self, r: &Self) -> Self;
 
+    /// Computes the dot product of two vectors.
+    ///
+    /// For vectors **v** and **w**:
+    /// ```text
+    /// v · w = Σᵢ vᵢwᵢ
+    /// ```
     fn dot(l: &Self, r: &Self) -> T;
 
+    /// Returns a vector with the minimum components from both vectors.
     fn min(l: &Self, r: &Self) -> Self;
+    
+    /// Returns a vector with the maximum components from both vectors.
     fn max(l: &Self, r: &Self) -> Self;
 }
 
+/// Trait for vectors with floating-point components.
+///
+/// Extends the base `Vector` trait with operations that require
+/// floating-point arithmetic, such as length calculation and normalization.
 pub trait FloatVector<T: FloatScalar>: Vector<T> {
+    /// Computes the Euclidean length (magnitude) of the vector.
+    ///
+    /// For vector **v**:
+    /// ```text
+    /// ||v|| = √(v₁² + v₂² + ... + vₙ²)
+    /// ```
     fn length(&self) -> T;
+    
+    /// Returns a unit vector in the same direction.
+    ///
+    /// For vector **v**:
+    /// ```text
+    /// v̂ = v / ||v||
+    /// ```
+    ///
+    /// # Note
+    /// Returns NaN or Inf components if the vector has zero length.
     fn normalize(&self) -> Self;
+    
+    /// Computes the Euclidean distance between two vectors.
+    ///
+    /// For vectors **v** and **w**:
+    /// ```text
+    /// d(v, w) = ||v - w||
+    /// ```
     fn distance(l: &Self, r: &Self) -> T;
 }
 
@@ -193,12 +279,59 @@ macro_rules! implFloatVector {
     };
 }
 
+/// Trait for computing the cross product of 3D vectors.
+///
+/// The cross product is only defined for 3D vectors and produces
+/// a vector perpendicular to both input vectors.
 pub trait CrossProduct {
+    /// Computes the cross product of two vectors.
+    ///
+    /// For 3D vectors **v** and **w**:
+    /// ```text
+    /// v × w = (v₂w₃ - v₃w₂, v₃w₁ - v₁w₃, v₁w₂ - v₂w₁)
+    /// ```
+    ///
+    /// The resulting vector is perpendicular to both input vectors,
+    /// with magnitude ||v|| ||w|| sin(θ), where θ is the angle between them.
     fn cross(l: &Self, r: &Self) -> Self;
 }
 
+/// A 2D vector with x and y components.
+///
+/// # Examples
+/// ```
+/// use rs_math3d::vector::Vector2;
+/// 
+/// let v = Vector2::new(3.0, 4.0);
+/// assert_eq!(v.x, 3.0);
+/// assert_eq!(v.y, 4.0);
+/// ```
 implVector!(Vector2, x y);
+
+/// A 3D vector with x, y, and z components.
+///
+/// # Examples
+/// ```
+/// use rs_math3d::vector::{Vector3, CrossProduct};
+/// 
+/// let v1 = Vector3::new(1.0, 0.0, 0.0);
+/// let v2 = Vector3::new(0.0, 1.0, 0.0);
+/// let cross = Vector3::cross(&v1, &v2);
+/// // Result is (0, 0, 1) - the z-axis
+/// ```
 implVector!(Vector3, x y z);
+
+/// A 4D vector with x, y, z, and w components.
+///
+/// Often used for homogeneous coordinates in 3D graphics.
+///
+/// # Examples
+/// ```
+/// use rs_math3d::vector::Vector4;
+/// 
+/// let v = Vector4::new(1.0, 2.0, 3.0, 1.0);
+/// // w=1 for positions, w=0 for directions
+/// ```
 implVector!(Vector4, x y z w);
 
 implFloatVector!(Vector2);
@@ -209,6 +342,15 @@ impl<T> CrossProduct for Vector3<T>
 where
     T: Scalar,
 {
+    /// Computes the cross product of two 3D vectors.
+    ///
+    /// The cross product **v** × **w** produces a vector perpendicular
+    /// to both **v** and **w**, following the right-hand rule.
+    ///
+    /// # Properties
+    /// - Anti-commutative: **v** × **w** = -(**w** × **v**)
+    /// - Distributive: **v** × (**w** + **u**) = **v** × **w** + **v** × **u**
+    /// - **v** × **v** = **0**
     fn cross(l: &Vector3<T>, r: &Vector3<T>) -> Vector3<T> {
         Vector3::new(
             l.y * r.z - l.z * r.y,
@@ -218,6 +360,10 @@ where
     }
 }
 
+/// Trait for 2D swizzle operations on vectors.
+///
+/// Provides methods to rearrange and duplicate vector components
+/// into 2D vectors using familiar shader-style syntax.
 pub trait Swizzle2<T: Scalar> {
     fn xx(&self) -> Vector2<T>;
     fn xy(&self) -> Vector2<T>;
@@ -320,6 +466,10 @@ impl<T: Scalar> Swizzle2<T> for Vector4<T> {
     }
 }
 
+/// Trait for 3D swizzle operations on vectors.
+///
+/// Provides methods to rearrange and duplicate vector components
+/// into 3D vectors using familiar shader-style syntax.
 pub trait Swizzle3<T: Scalar> {
     fn xxx(&self) -> Vector3<T>;
     fn xxy(&self) -> Vector3<T>;
@@ -524,22 +674,66 @@ impl<T: Scalar> Swizzle3<T> for Vector4<T> {
     }
 }
 
+/// Computes the length (magnitude) of a vector.
+///
+/// # Mathematical Definition
+/// ```text
+/// ||v|| = √(v · v)
+/// ```
 pub fn length<T: FloatScalar, V: Vector<T>>(v: &V) -> T {
     V::dot(v, v).tsqrt()
 }
+
+/// Computes the dot product of two vectors.
+///
+/// # Mathematical Definition
+/// ```text
+/// v · w = Σᵢ vᵢwᵢ
+/// ```
 pub fn dot<T: Scalar, V: Vector<T>>(l: &V, r: &V) -> T {
     V::dot(l, r)
 }
+
+/// Normalizes a vector to unit length.
+///
+/// # Mathematical Definition
+/// ```text
+/// v̂ = v / ||v||
+/// ```
+///
+/// # Note
+/// Returns NaN or Inf components if the vector has zero length.
 pub fn normalize<T: FloatScalar, V: FloatVector<T>>(v: &V) -> V {
     let len = v.length();
     *v / len
 }
+
+/// Computes the Euclidean distance between two points.
+///
+/// # Mathematical Definition
+/// ```text
+/// d(v, w) = ||v - w||
+/// ```
 pub fn distance<T: FloatScalar, V: FloatVector<T>>(l: &V, r: &V) -> T {
     (*r - *l).length()
 }
+
+/// Returns a vector with the minimum components from both input vectors.
+///
+/// Performs component-wise minimum:
+/// ```text
+/// min(v, w) = (min(v₁, w₁), min(v₂, w₂), ...)
+/// ```
 pub fn min<T: Scalar, V: Vector<T>>(l: &V, r: &V) -> V {
     V::min(l, r)
 }
+
+/// Returns a vector with the maximum components from both input vectors.
+///
+/// Performs component-wise maximum:
+/// ```text
+/// max(v, w) = (max(v₁, w₁), max(v₂, w₂), ...)
+/// ```
 pub fn max<T: Scalar, V: Vector<T>>(l: &V, r: &V) -> V {
     V::max(l, r)
 }

@@ -25,11 +25,32 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+//! Coordinate basis and reference frame utilities.
+//!
+//! This module provides types and functions for working with coordinate systems
+//! and reference frames in 3D space. A basis represents a local coordinate system
+//! with its own origin and axis orientations.
+//!
+//! # Examples
+//!
+//! ```
+//! use rs_math3d::basis::{Basis, BasisPlane};
+//! use rs_math3d::vector::Vector3;
+//! 
+//! // Create a basis at origin with default axes
+//! let basis = Basis::<f32>::default();
+//! 
+//! // Create a basis with custom center
+//! let center = Vector3::new(10.0, 5.0, 0.0);
+//! let basis = Basis::default_with_center(&center);
+//! ```
+
 use crate::matrix::*;
 use crate::scalar::*;
 use crate::vector::*;
 use num_traits::{Zero, One};
 
+/// Represents one of the three coordinate planes.
 #[derive(Debug, Clone, Copy)]
 pub enum BasisPlane {
     YZ,
@@ -38,6 +59,7 @@ pub enum BasisPlane {
 }
 
 impl BasisPlane {
+    /// Converts the plane to a numeric ID (0=YZ, 1=ZX, 2=XY).
     pub fn to_id(&self) -> usize {
         match self {
             BasisPlane::YZ => 0,
@@ -46,6 +68,10 @@ impl BasisPlane {
         }
     }
 
+    /// Creates a plane from a numeric ID.
+    ///
+    /// # Panics
+    /// Panics if id is not 0, 1, or 2.
     pub fn of_id(id: usize) -> Self {
         match id {
             0 => BasisPlane::YZ,
@@ -56,6 +82,11 @@ impl BasisPlane {
     }
 }
 
+/// A 3D coordinate basis (reference frame).
+///
+/// Represents a local coordinate system with three orthogonal axes
+/// and an origin point. This is useful for transformations between
+/// different coordinate spaces.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Basis<T: Scalar> {
@@ -66,14 +97,21 @@ pub struct Basis<T: Scalar> {
 }
 
 impl<T: Scalar> Basis<T> {
+    /// Returns the center (origin) of the basis.
     pub fn center(&self) -> &Vector3<T> {
         &self.center
     }
 
+    /// Returns a mutable reference to the center.
     pub fn center_mut(&mut self) -> &mut Vector3<T> {
         &mut self.center
     }
 
+    /// Converts the basis to a 4x4 transformation matrix.
+    ///
+    /// The resulting matrix transforms from local basis space to world space:
+    /// - Columns 0-2: The basis axes (rotation/scale)
+    /// - Column 3: The center point (translation)
     pub fn to_mat4(&self) -> Matrix4<T> {
         Matrix4::new(
             self.x_axis.x,
@@ -95,6 +133,9 @@ impl<T: Scalar> Basis<T> {
         )
     }
 
+    /// Creates a basis from a 4x4 transformation matrix.
+    ///
+    /// Extracts the axes from columns 0-2 and center from column 3.
     pub fn of_mat4(mat: &Matrix4<T>) -> Self {
         let col0 = mat.col[0];
         let col1 = mat.col[1];
@@ -142,6 +183,9 @@ impl<T: Scalar> Basis<T> {
         }
     }
 
+    /// Converts the basis axes to a 3x3 rotation matrix.
+    ///
+    /// The matrix contains only the rotation part, without translation.
     pub fn to_mat3(&self) -> Matrix3<T> {
         Matrix3::new(
             self.x_axis.x,
@@ -156,6 +200,9 @@ impl<T: Scalar> Basis<T> {
         )
     }
 
+    /// Creates a basis from a center point and a 3x3 rotation matrix.
+    ///
+    /// The matrix columns become the basis axes.
     pub fn of_center_mat3(center: &Vector3<T>, m: Matrix3<T>) -> Self {
         Self {
             center: *center,

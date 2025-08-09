@@ -26,14 +26,36 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! Geometric primitives for 3D graphics and collision detection.
+//!
+//! This module provides common geometric shapes and primitives used in
+//! 3D graphics, physics simulations, and collision detection systems.
+//!
+//! # Examples
+//!
+//! ```
+//! use rs_math3d::primitives::{Ray, Plane, Tri3};
+//! use rs_math3d::vector::Vector3;
+//! 
+//! // Create a ray from origin pointing along +X axis
+//! let ray = Ray::new(
+//!     Vector3::new(0.0, 0.0, 0.0),
+//!     Vector3::new(1.0, 0.0, 0.0)
+//! );
+//! 
+//! // Create a plane at z=5 facing down
+//! let plane = Plane::new(
+//!     Vector3::new(0.0, 0.0, 1.0),
+//!     -5.0
+//! );
+//! ```
+
 use crate::matrix::*;
 use crate::scalar::*;
 use crate::vector::*;
 use num_traits::{Zero, One};
 
-////////////////////////////////////////////////////////////////////////////////
-/// Rect
-////////////////////////////////////////////////////////////////////////////////
+/// A 2D dimension with width and height.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Dimension<T: Scalar> {
@@ -42,14 +64,15 @@ pub struct Dimension<T: Scalar> {
 }
 
 impl<T: Scalar> Dimension<T> {
+    /// Creates a new dimension with the specified width and height.
     pub fn new(width: T, height: T) -> Self {
         Self { width, height }
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Rect
-////////////////////////////////////////////////////////////////////////////////
+/// A 2D axis-aligned rectangle.
+///
+/// Defined by its top-left corner position (x, y) and dimensions (width, height).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Rect<T: Scalar> {
@@ -60,6 +83,7 @@ pub struct Rect<T: Scalar> {
 }
 
 impl<T: Scalar> Rect<T> {
+    /// Creates a new rectangle from position and dimensions.
     pub fn new(x: T, y: T, width: T, height: T) -> Self {
         Self {
             x,
@@ -68,6 +92,9 @@ impl<T: Scalar> Rect<T> {
             height,
         }
     }
+    /// Creates a rectangle from two corner points.
+    ///
+    /// The points don't need to be min/max - they will be sorted.
     pub fn from(min_vec: &Vector2<T>, max_vec: &Vector2<T>) -> Self {
         let min_x = T::min(min_vec.x, max_vec.x);
         let min_y = T::min(min_vec.y, max_vec.y);
@@ -81,12 +108,17 @@ impl<T: Scalar> Rect<T> {
         }
     }
 
+    /// Returns the minimum corner (top-left) of the rectangle.
     pub fn min(&self) -> Vector2<T> {
         Vector2::new(self.x, self.y)
     }
+    /// Returns the maximum corner (bottom-right) of the rectangle.
     pub fn max(&self) -> Vector2<T> {
         Vector2::new(self.x + self.width, self.y + self.height)
     }
+    /// Computes the intersection of two rectangles.
+    ///
+    /// Returns `None` if the rectangles don't overlap.
     pub fn intersect(&self, other: &Self) -> Option<Self> {
         let smx = self.max();
         let smn = self.min();
@@ -102,14 +134,15 @@ impl<T: Scalar> Rect<T> {
         Some(Self::from(&min_vec, &max_vec))
     }
 
+    /// Checks if a point is inside the rectangle.
     pub fn contains(&self, p: &Vector2<T>) -> bool {
         p.x >= self.x && p.y >= self.y && p.x <= self.x + self.width && p.y <= self.y + self.height
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Box3
-////////////////////////////////////////////////////////////////////////////////
+/// A 3D axis-aligned bounding box (AABB).
+///
+/// Defined by its minimum and maximum corners.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Box3<T: Scalar> {
@@ -118,18 +151,24 @@ pub struct Box3<T: Scalar> {
 }
 
 impl<T: Scalar> Box3<T> {
+    /// Creates a new box from two corner points.
+    ///
+    /// The points are automatically sorted to find min/max.
     pub fn new(v0: &Vector3<T>, v1: &Vector3<T>) -> Self {
         Self {
             min: Vector3::min(v0, v1),
             max: Vector3::max(v0, v1),
         }
     }
+    /// Returns the center point of the box.
     pub fn center(&self) -> Vector3<T> {
         (self.max + self.min) * T::half()
     }
+    /// Returns the half-extents of the box from center to max.
     pub fn extent(&self) -> Vector3<T> {
         self.max - self.center()
     }
+    /// Checks if two boxes overlap.
     pub fn overlap(&self, other: &Self) -> bool {
         if self.max.x < other.min.x {
             return false;
@@ -153,6 +192,7 @@ impl<T: Scalar> Box3<T> {
         return true;
     }
 
+    /// Expands the box to include a point.
     pub fn add(&self, p: &Vector3<T>) -> Self {
         Self {
             min: Vector3::min(&p, &self.min),
@@ -160,6 +200,9 @@ impl<T: Scalar> Box3<T> {
         }
     }
 
+    /// Subdivides the box into 8 octants.
+    ///
+    /// Returns an array of 8 boxes representing the octree subdivision.
     pub fn subdivide(&self) -> [Self; 8] {
         let cube_table: [Vector3<i32>; 8] = [
             Vector3::new(0, 1, 0),
@@ -194,9 +237,9 @@ impl<T: Scalar> Box3<T> {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Line
-////////////////////////////////////////////////////////////////////////////////
+/// An infinite line in 2D or 3D space.
+///
+/// Defined by a point on the line and a direction vector.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Line<T: Scalar, V: Vector<T>> {
@@ -206,6 +249,7 @@ pub struct Line<T: Scalar, V: Vector<T>> {
 }
 
 impl<T: Scalar, V: Vector<T>> Line<T, V> {
+    /// Creates a new line from a point and direction.
     pub fn new(p: &V, d: &V) -> Self {
         Self {
             p: *p,
@@ -213,6 +257,9 @@ impl<T: Scalar, V: Vector<T>> Line<T, V> {
             t: core::marker::PhantomData,
         }
     }
+    /// Creates a line from two points.
+    ///
+    /// The line passes through both points, with direction from s to e.
     pub fn from_start_end(s: &V, e: &V) -> Self {
         Self {
             p: *s,
@@ -220,6 +267,11 @@ impl<T: Scalar, V: Vector<T>> Line<T, V> {
             t: core::marker::PhantomData,
         }
     }
+    /// Finds the closest point on the line to a given point.
+    ///
+    /// Returns:
+    /// - `t`: Parameter value where the closest point occurs
+    /// - Point: The closest point on the line
     pub fn closest_point_on_line(&self, p: &V) -> (T, V) {
         let p_dir = *p - self.p;
 
@@ -233,6 +285,7 @@ impl<T: Scalar, V: Vector<T>> Line<T, V> {
 }
 
 impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
+    /// Returns a line with normalized direction vector.
     pub fn normalize(&self) -> Self {
         Self {
             p: self.p,
@@ -242,6 +295,9 @@ impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
     }
 }
 
+/// Finds the shortest segment connecting two 3D lines.
+///
+/// Returns `None` if the lines are parallel (within epsilon tolerance).
 pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
     line0: &Line<T, Vector3<T>>,
     line1: &Line<T, Vector3<T>>,
@@ -269,9 +325,7 @@ pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Segment
-////////////////////////////////////////////////////////////////////////////////
+/// A line segment with defined start and end points.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Segment<T: Scalar, V: Vector<T>> {
@@ -281,6 +335,7 @@ pub struct Segment<T: Scalar, V: Vector<T>> {
 }
 
 impl<T: Scalar, V: Vector<T>> Segment<T, V> {
+    /// Creates a new segment from start to end point.
     pub fn new(s: &V, e: &V) -> Self {
         Self {
             s: *s,
@@ -288,6 +343,11 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
             t: core::marker::PhantomData,
         }
     }
+    /// Finds the closest point on the segment to a given point.
+    ///
+    /// Returns:
+    /// - `t`: Parameter value \[0,1\] where 0=start, 1=end
+    /// - Point: The closest point on the segment
     pub fn closest_point_on_segment(&self, p: &V) -> (T, V) {
         let dir = self.e - self.s;
         let p_dir = *p - self.s;
@@ -308,15 +368,16 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
 }
 
 impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
+    /// Computes the distance from a point to the segment.
     pub fn distance(&self, p: &V) -> T {
         let (_, p_on_seg) = self.closest_point_on_segment(p);
         V::length(&(p_on_seg - *p))
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Ray
-////////////////////////////////////////////////////////////////////////////////
+/// A ray with an origin and direction.
+///
+/// Commonly used for ray casting and intersection tests.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Ray<T: Scalar, V: Vector<T>> {
@@ -326,6 +387,7 @@ pub struct Ray<T: Scalar, V: Vector<T>> {
 }
 
 impl<T: FloatScalar, V: FloatVector<T>> Ray<T, V> {
+    /// Creates a new ray with normalized direction.
     pub fn new(start: &V, direction: &V) -> Self {
         Self {
             start: *start,
@@ -336,6 +398,10 @@ impl<T: FloatScalar, V: FloatVector<T>> Ray<T, V> {
 }
 
 impl<T: Scalar> Ray<T, Vector3<T>> {
+    /// Computes ray-plane intersection.
+    ///
+    /// Returns the intersection point, or `None` if the ray doesn't hit the plane
+    /// (parallel or pointing away).
     pub fn intersect_plane(&self, p: &Plane<T>) -> Option<Vector3<T>> {
         let n = p.normal();
         let t: T = -(p.d + Vector3::dot(&n, &self.start)) / Vector3::dot(&n, &self.direction);
@@ -422,6 +488,9 @@ impl<T: Scalar> Plane<T> {
         r.intersect_plane(self)
     }
 
+    /// Computes line-plane intersection.
+    ///
+    /// Returns the parameter t and intersection point, or `None` if parallel.
     pub fn intersect_line(
         &self,
         line: &Line<T, Vector3<T>>,
@@ -488,6 +557,7 @@ impl<T: FloatScalar> ParametricPlane<T> {
         Plane::new(&self.normal(), &self.center)
     }
 
+    /// Computes the normal vector (cross product of axes).
     pub fn normal(&self) -> Vector3<T> {
         Vector3::cross(&self.x_axis, &self.y_axis).normalize()
     }
@@ -521,9 +591,9 @@ pub fn tri_normal<T: FloatScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3
     Vector3::normalize(&Vector3::cross(&v10, &v20))
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Tri
-////////////////////////////////////////////////////////////////////////////////
+/// Computes the normal vector of a quadrilateral.
+///
+/// Uses the cross product of the two diagonals for a more stable result.
 pub fn quad_normal<T: FloatScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,

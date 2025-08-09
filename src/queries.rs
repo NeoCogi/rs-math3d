@@ -176,7 +176,7 @@ impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
 /// Ray-Triangle Intersection Test Routines
 /// Different optimizations of my and Ben Trumbore's
 /// code from journals of graphics tools (JGT)
-/// http://www.acm.org/jgt/
+/// <http://www.acm.org/jgt/>
 /// by Tomas Moller, May 2000
 ///
 impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>> {

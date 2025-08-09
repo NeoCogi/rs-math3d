@@ -25,12 +25,48 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+//! 3D transformation functions for computer graphics.
+//!
+//! This module provides functions to create and manipulate transformation
+//! matrices commonly used in 3D graphics, including translation, rotation,
+//! scaling, and projection matrices.
+//!
+//! # Examples
+//!
+//! ```
+//! use rs_math3d::transforms;
+//! use rs_math3d::vector::Vector3;
+//! 
+//! // Create a translation matrix
+//! let translation = transforms::translate(Vector3::new(10.0, 5.0, 0.0));
+//! 
+//! // Create a perspective projection matrix
+//! let projection = transforms::perspective(
+//!     45.0f32.to_radians(),  // Field of view
+//!     16.0 / 9.0,            // Aspect ratio
+//!     0.1,                   // Near plane
+//!     100.0                  // Far plane
+//! );
+//! ```
+
 use crate::matrix::*;
 use crate::quaternion::*;
 use crate::scalar::*;
 use crate::vector::*;
 use num_traits::{Zero, One};
 
+/// Creates a 4x4 translation matrix.
+///
+/// The translation matrix has the form:
+/// ```text
+/// [1  0  0  tx]
+/// [0  1  0  ty]
+/// [0  0  1  tz]
+/// [0  0  0  1 ]
+/// ```
+///
+/// # Parameters
+/// - `trans`: Translation vector (tx, ty, tz)
 pub fn translate<T: Scalar>(trans: Vector3<T>) -> Matrix4<T> {
     Matrix4::new(
         <T as One>::one(),
@@ -52,6 +88,18 @@ pub fn translate<T: Scalar>(trans: Vector3<T>) -> Matrix4<T> {
     )
 }
 
+/// Creates a 4x4 scaling matrix.
+///
+/// The scaling matrix has the form:
+/// ```text
+/// [sx 0  0  0]
+/// [0  sy 0  0]
+/// [0  0  sz 0]
+/// [0  0  0  1]
+/// ```
+///
+/// # Parameters
+/// - `scale`: Scale factors for each axis
 pub fn scale<T: Scalar>(scale: Vector3<T>) -> Matrix4<T> {
     Matrix4::new(
         scale.x,
@@ -73,20 +121,42 @@ pub fn scale<T: Scalar>(scale: Vector3<T>) -> Matrix4<T> {
     )
 }
 
+/// Creates a 4x4 rotation matrix from a quaternion.
+///
+/// Converts a unit quaternion to its equivalent rotation matrix.
 pub fn rotation_from_quat<T: FloatScalar>(q: &Quat<T>) -> Matrix4<T> {
     Quat::mat4(q)
 }
 
+/// Creates a 4x4 rotation matrix from an axis and angle.
+///
+/// # Parameters
+/// - `axis`: The rotation axis (will be normalized)
+/// - `angle`: The rotation angle in radians
 pub fn rotation_from_axis_angle<T: FloatScalar>(axis: &Vector3<T>, angle: T) -> Matrix4<T> {
     Quat::mat4(&Quat::of_axis_angle(axis, angle))
 }
 
+/// Transforms a 3D vector by a 4x4 matrix with perspective division.
+///
+/// The vector is treated as a point (w=1) and the result is divided by w.
 pub fn transform_vec3<T: Scalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
     let v4 = Vector4::new(v.x, v.y, v.z, <T as One>::one());
     let vout = *m * v4;
     Vector3::new(vout.x / vout.w, vout.y / vout.w, vout.z / vout.w)
 }
 
+/// Projects a 3D point to screen coordinates.
+///
+/// # Parameters
+/// - `world`: World transformation matrix
+/// - `persp`: Perspective projection matrix
+/// - `lb`: Screen left-bottom corner
+/// - `rt`: Screen right-top corner
+/// - `pt`: Point to project
+///
+/// # Returns
+/// Screen coordinates with z in \[0,1\] (0=near, 1=far)
 pub fn project3<T: Scalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
@@ -108,6 +178,17 @@ pub fn project3<T: Scalar>(
     Vector3::new(out_x, out_y, out_z)
 }
 
+/// Unprojects screen coordinates back to 3D world space.
+///
+/// # Parameters
+/// - `world`: World transformation matrix
+/// - `persp`: Perspective projection matrix
+/// - `lb`: Screen left-bottom corner
+/// - `rt`: Screen right-top corner
+/// - `pt`: Screen point with z-depth
+///
+/// # Returns
+/// The corresponding 3D world point
 pub fn unproject3<T: Scalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
@@ -127,6 +208,13 @@ pub fn unproject3<T: Scalar>(
     Vector3::new(out4.x, out4.y, out4.z)
 }
 
+/// Creates a perspective projection matrix from frustum bounds.
+///
+/// # Parameters
+/// - `lbn`: Left-bottom-near corner (x, y, z)
+/// - `rtf`: Right-top-far corner (x, y, z)
+///
+/// The frustum is defined by the near and far clipping planes.
 pub fn frustum<T: Scalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
     let width = rtf.x - lbn.x;
     let height = rtf.y - lbn.y;
@@ -156,6 +244,14 @@ pub fn frustum<T: Scalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
     )
 }
 
+/// Creates an orthographic projection matrix.
+///
+/// # Parameters
+/// - `left`, `right`: X-axis bounds
+/// - `bottom`, `top`: Y-axis bounds
+/// - `near`, `far`: Z-axis bounds (depth)
+///
+/// Objects maintain their size regardless of depth in orthographic projection.
 pub fn ortho4<T: Scalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) -> Matrix4<T> {
     let width = right - left;
     let height = top - bottom;
@@ -186,6 +282,15 @@ pub fn ortho4<T: Scalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) 
     )
 }
 
+/// Creates a perspective projection matrix.
+///
+/// # Parameters
+/// - `fovy`: Field of view angle in radians (vertical)
+/// - `aspect`: Aspect ratio (width / height)
+/// - `near`: Near clipping plane distance
+/// - `far`: Far clipping plane distance
+///
+/// Uses the standard OpenGL perspective projection formula.
 pub fn perspective<T: FloatScalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T> {
     let f = <T as One>::one() / T::ttan(fovy * T::half());
     let denom = near - far;
@@ -212,6 +317,14 @@ pub fn perspective<T: FloatScalar>(fovy: T, aspect: T, near: T, far: T) -> Matri
     )
 }
 
+/// Creates a view matrix looking from eye position to target.
+///
+/// # Parameters
+/// - `eye`: Camera position
+/// - `dest`: Target position to look at
+/// - `up`: Up vector (typically (0, 1, 0))
+///
+/// The resulting matrix transforms from world space to view space.
 pub fn lookat<T: FloatScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
     let f = Vector3::normalize(&(*dest - *eye));
     let s = Vector3::normalize(&Vector3::cross(&f, up));
@@ -240,7 +353,14 @@ pub fn lookat<T: FloatScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<
     m * trans
 }
 
-// decompose a matrix into scale, rotation and translation
+/// Decomposes a transformation matrix into scale, rotation, and translation.
+///
+/// # Returns
+/// - `Some((scale, rotation, translation))` if successful
+/// - `None` if the matrix is singular or has zero scale
+///
+/// # Note
+/// This assumes the matrix represents a valid affine transformation.
 pub fn decompose<T: FloatScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
     let mut col0 = Vector3::new(m.col[0].x, m.col[0].y, m.col[0].z);
     let mut col1 = Vector3::new(m.col[1].x, m.col[1].y, m.col[1].z);

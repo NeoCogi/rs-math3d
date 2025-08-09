@@ -178,7 +178,8 @@ impl<T: FloatScalar> Quat<T> {
         let cos_a = nq.w;
         let sin_a = {
             let sin_a = T::tsqrt(T::one() - cos_a * cos_a);
-            if T::tabs(sin_a) < (T::one() / (T::l8192())) {
+            // Use epsilon for numerical stability check
+            if T::tabs(sin_a) < T::epsilon() {
                 T::one()
             } else {
                 sin_a
@@ -683,5 +684,192 @@ mod tests {
         assert_eq!((v.y - v2.y).abs() < f64::epsilon(), true);
         assert_eq!((v.z - v2.z).abs() < f64::epsilon(), true);
         assert_eq!((a - 3.0).abs() < f64::epsilon(), true);
+    }
+
+    #[test]
+    fn test_quaternion_normalization() {
+        // Test normalizing a non-unit quaternion
+        let q = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let nq = Quat::normalize(&q);
+        let len = nq.length();
+        assert!((len - 1.0).abs() < f32::epsilon());
+        
+        // Test normalizing zero quaternion (edge case)
+        let q_zero = Quat::<f32>::new(0.0, 0.0, 0.0, 0.0);
+        let nq_zero = Quat::normalize(&q_zero);
+        assert_eq!(nq_zero.x, 0.0);
+        assert_eq!(nq_zero.y, 0.0);
+        assert_eq!(nq_zero.z, 0.0);
+        assert_eq!(nq_zero.w, 0.0);
+        
+        // Test already normalized quaternion
+        let q_unit = Quat::<f32>::identity();
+        let nq_unit = Quat::normalize(&q_unit);
+        assert!((nq_unit.length() - 1.0).abs() < f32::epsilon());
+    }
+
+    #[test]
+    fn test_quaternion_inverse() {
+        let q = Quat::<f32>::of_axis_angle(&Vector3::new(0.0, 1.0, 0.0), 1.57079632);
+        let q_inv = Quat::inverse(&q);
+        let product = q * q_inv;
+        
+        // Quaternion times its inverse should be identity
+        assert!((product.x).abs() < 0.001);
+        assert!((product.y).abs() < 0.001);
+        assert!((product.z).abs() < 0.001);
+        assert!((product.w - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_quaternion_multiplication() {
+        // Test multiplication properties
+        let q1 = Quat::<f32>::of_axis_angle(&Vector3::new(1.0, 0.0, 0.0), 0.5);
+        let q2 = Quat::<f32>::of_axis_angle(&Vector3::new(0.0, 1.0, 0.0), 0.5);
+        let q3 = Quat::<f32>::of_axis_angle(&Vector3::new(0.0, 0.0, 1.0), 0.5);
+        
+        // Test associativity: (q1 * q2) * q3 == q1 * (q2 * q3)
+        let left = (q1 * q2) * q3;
+        let right = q1 * (q2 * q3);
+        assert!((left.x - right.x).abs() < f32::epsilon());
+        assert!((left.y - right.y).abs() < f32::epsilon());
+        assert!((left.z - right.z).abs() < f32::epsilon());
+        assert!((left.w - right.w).abs() < f32::epsilon());
+        
+        // Test identity multiplication
+        let identity = Quat::<f32>::identity();
+        let result = q1 * identity;
+        assert!((result.x - q1.x).abs() < f32::epsilon());
+        assert!((result.y - q1.y).abs() < f32::epsilon());
+        assert!((result.z - q1.z).abs() < f32::epsilon());
+        assert!((result.w - q1.w).abs() < f32::epsilon());
+    }
+
+    #[test]
+    fn test_quaternion_addition_subtraction() {
+        let q1 = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let q2 = Quat::<f32>::new(5.0, 6.0, 7.0, 8.0);
+        
+        let sum = q1 + q2;
+        assert_eq!(sum.x, 6.0);
+        assert_eq!(sum.y, 8.0);
+        assert_eq!(sum.z, 10.0);
+        assert_eq!(sum.w, 12.0);
+        
+        let diff = q2 - q1;
+        assert_eq!(diff.x, 4.0);
+        assert_eq!(diff.y, 4.0);
+        assert_eq!(diff.z, 4.0);
+        assert_eq!(diff.w, 4.0);
+    }
+
+    #[test]
+    fn test_quaternion_scalar_multiplication() {
+        let q = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let scalar = 2.0;
+        
+        let result1 = q * scalar;
+        assert_eq!(result1.x, 2.0);
+        assert_eq!(result1.y, 4.0);
+        assert_eq!(result1.z, 6.0);
+        assert_eq!(result1.w, 8.0);
+        
+        let result2 = scalar * q;
+        assert_eq!(result2.x, 2.0);
+        assert_eq!(result2.y, 4.0);
+        assert_eq!(result2.z, 6.0);
+        assert_eq!(result2.w, 8.0);
+        
+        let result3 = q / scalar;
+        assert_eq!(result3.x, 0.5);
+        assert_eq!(result3.y, 1.0);
+        assert_eq!(result3.z, 1.5);
+        assert_eq!(result3.w, 2.0);
+    }
+
+    #[test]
+    fn test_to_axis_angle_edge_cases() {
+        // Test near-zero rotation (identity quaternion)
+        let q_identity = Quat::<f32>::identity();
+        let (axis, angle) = q_identity.to_axis_angle();
+        assert!((angle).abs() < 0.001);
+        
+        // Test 180-degree rotation
+        let q_180 = Quat::<f32>::of_axis_angle(&Vector3::new(0.0, 1.0, 0.0), 3.14159265);
+        let (axis_180, angle_180) = q_180.to_axis_angle();
+        assert!((angle_180 - 3.14159265).abs() < 0.001);
+        assert!((axis_180.y - 1.0).abs() < 0.001);
+        
+        // Test very small rotation
+        let small_angle = 0.001;
+        let q_small = Quat::<f32>::of_axis_angle(&Vector3::new(1.0, 0.0, 0.0), small_angle);
+        let (axis_small, angle_small) = q_small.to_axis_angle();
+        assert!((angle_small - small_angle).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_matrix_quaternion_conversion() {
+        // Test round-trip conversion: quaternion -> matrix -> quaternion
+        let angles = [0.0, 0.5, 1.0, 1.57, 3.14159];
+        let axes = [
+            Vector3::<f32>::new(1.0, 0.0, 0.0),
+            Vector3::<f32>::new(0.0, 1.0, 0.0),
+            Vector3::<f32>::new(0.0, 0.0, 1.0),
+            Vector3::<f32>::normalize(&Vector3::new(1.0, 1.0, 1.0)),
+        ];
+        
+        for angle in &angles {
+            for axis in &axes {
+                let q1 = Quat::of_axis_angle(axis, *angle);
+                let mat = q1.mat3();
+                let q2 = Quat::of_matrix3(&mat);
+                
+                // Account for quaternion double cover (q and -q represent same rotation)
+                let dot_product = Quat::dot(&q1, &q2);
+                let q2_adjusted = if dot_product < 0.0 {
+                    Quat::neg(&q2)
+                } else {
+                    q2
+                };
+                
+                assert!((q1.x - q2_adjusted.x).abs() < 0.001);
+                assert!((q1.y - q2_adjusted.y).abs() < 0.001);
+                assert!((q1.z - q2_adjusted.z).abs() < 0.001);
+                assert!((q1.w - q2_adjusted.w).abs() < 0.001);
+            }
+        }
+    }
+
+    #[test]
+    fn test_quaternion_conjugate() {
+        let q = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let conj = Quat::conjugate(&q);
+        
+        assert_eq!(conj.x, -1.0);
+        assert_eq!(conj.y, -2.0);
+        assert_eq!(conj.z, -3.0);
+        assert_eq!(conj.w, 4.0);
+        
+        // Test that conjugate of conjugate is original
+        let conj_conj = Quat::conjugate(&conj);
+        assert_eq!(conj_conj.x, q.x);
+        assert_eq!(conj_conj.y, q.y);
+        assert_eq!(conj_conj.z, q.z);
+        assert_eq!(conj_conj.w, q.w);
+    }
+
+    #[test]
+    fn test_quaternion_dot_product() {
+        let q1 = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let q2 = Quat::<f32>::new(5.0, 6.0, 7.0, 8.0);
+        
+        let dot = Quat::dot(&q1, &q2);
+        let expected = 1.0*5.0 + 2.0*6.0 + 3.0*7.0 + 4.0*8.0;
+        assert_eq!(dot, expected);
+        
+        // Test dot product with itself equals length squared
+        let self_dot = Quat::dot(&q1, &q1);
+        let length_squared = q1.length() * q1.length();
+        assert!((self_dot - length_squared).abs() < 0.0001);
     }
 }

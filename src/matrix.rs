@@ -844,3 +844,276 @@ impl<T: Scalar> Matrix4Extension<T> for Matrix4<T> {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vector::*;
+
+    #[test]
+    fn test_matrix2_identity() {
+        let m = Matrix2::<f32>::identity();
+        assert_eq!(m.col[0].x, 1.0);
+        assert_eq!(m.col[0].y, 0.0);
+        assert_eq!(m.col[1].x, 0.0);
+        assert_eq!(m.col[1].y, 1.0);
+    }
+
+    #[test]
+    fn test_matrix2_determinant() {
+        let m = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let det = m.determinant();
+        assert_eq!(det, -2.0); // 1*4 - 3*2 = -2
+        
+        // Test singular matrix
+        let m_singular = Matrix2::<f32>::new(1.0, 2.0, 2.0, 4.0);
+        let det_singular = m_singular.determinant();
+        assert_eq!(det_singular, 0.0);
+    }
+
+    #[test]
+    fn test_matrix2_inverse() {
+        let m = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let m_inv = m.inverse();
+        let product = Matrix2::mul_matrix_matrix(&m, &m_inv);
+        
+        // Check if product is identity
+        assert!((product.col[0].x - 1.0).abs() < 0.001);
+        assert!((product.col[0].y).abs() < 0.001);
+        assert!((product.col[1].x).abs() < 0.001);
+        assert!((product.col[1].y - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_matrix2_transpose() {
+        let m = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let mt = m.transpose();
+        assert_eq!(mt.col[0].x, 1.0);
+        assert_eq!(mt.col[0].y, 3.0);
+        assert_eq!(mt.col[1].x, 2.0);
+        assert_eq!(mt.col[1].y, 4.0);
+        
+        // Transpose of transpose should be original
+        let mtt = mt.transpose();
+        assert_eq!(mtt.col[0].x, m.col[0].x);
+        assert_eq!(mtt.col[0].y, m.col[0].y);
+        assert_eq!(mtt.col[1].x, m.col[1].x);
+        assert_eq!(mtt.col[1].y, m.col[1].y);
+    }
+
+    #[test]
+    fn test_matrix3_identity() {
+        let m = Matrix3::<f32>::identity();
+        assert_eq!(m.col[0].x, 1.0);
+        assert_eq!(m.col[1].y, 1.0);
+        assert_eq!(m.col[2].z, 1.0);
+        assert_eq!(m.col[0].y, 0.0);
+        assert_eq!(m.col[0].z, 0.0);
+    }
+
+    #[test]
+    fn test_matrix3_determinant() {
+        let m = Matrix3::<f32>::new(
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0
+        );
+        assert_eq!(m.determinant(), 1.0);
+        
+        let m2 = Matrix3::<f32>::new(
+            2.0, 3.0, 1.0,
+            1.0, 0.0, 2.0,
+            1.0, 2.0, 1.0
+        );
+        let det = m2.determinant();
+        assert!((det - -3.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_matrix3_inverse() {
+        let m = Matrix3::<f32>::new(
+            2.0, 3.0, 1.0,
+            1.0, 0.0, 2.0,
+            1.0, 2.0, 1.0
+        );
+        let m_inv = m.inverse();
+        let product = Matrix3::mul_matrix_matrix(&m, &m_inv);
+        
+        // Check if product is close to identity
+        for i in 0..3 {
+            for j in 0..3 {
+                let val = match (i, j) {
+                    (0, 0) => product.col[0].x,
+                    (1, 0) => product.col[0].y,
+                    (2, 0) => product.col[0].z,
+                    (0, 1) => product.col[1].x,
+                    (1, 1) => product.col[1].y,
+                    (2, 1) => product.col[1].z,
+                    (0, 2) => product.col[2].x,
+                    (1, 2) => product.col[2].y,
+                    (2, 2) => product.col[2].z,
+                    _ => 0.0,
+                };
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!((val - expected).abs() < 0.001);
+            }
+        }
+    }
+
+    #[test]
+    fn test_matrix4_identity() {
+        let m = Matrix4::<f32>::identity();
+        for i in 0..4 {
+            for j in 0..4 {
+                let val = match j {
+                    0 => match i {
+                        0 => m.col[0].x,
+                        1 => m.col[0].y,
+                        2 => m.col[0].z,
+                        3 => m.col[0].w,
+                        _ => 0.0,
+                    },
+                    1 => match i {
+                        0 => m.col[1].x,
+                        1 => m.col[1].y,
+                        2 => m.col[1].z,
+                        3 => m.col[1].w,
+                        _ => 0.0,
+                    },
+                    2 => match i {
+                        0 => m.col[2].x,
+                        1 => m.col[2].y,
+                        2 => m.col[2].z,
+                        3 => m.col[2].w,
+                        _ => 0.0,
+                    },
+                    3 => match i {
+                        0 => m.col[3].x,
+                        1 => m.col[3].y,
+                        2 => m.col[3].z,
+                        3 => m.col[3].w,
+                        _ => 0.0,
+                    },
+                    _ => 0.0,
+                };
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert_eq!(val, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_matrix_vector_multiplication() {
+        // Test Matrix2 * Vector2
+        let m2 = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let v2 = Vector2::<f32>::new(5.0, 6.0);
+        let result2 = m2 * v2;
+        assert_eq!(result2.x, 23.0); // 1*5 + 3*6 = 23
+        assert_eq!(result2.y, 34.0); // 2*5 + 4*6 = 34
+        
+        // Test Matrix3 * Vector3
+        let m3 = Matrix3::<f32>::identity();
+        let v3 = Vector3::<f32>::new(1.0, 2.0, 3.0);
+        let result3 = m3 * v3;
+        assert_eq!(result3.x, 1.0);
+        assert_eq!(result3.y, 2.0);
+        assert_eq!(result3.z, 3.0);
+        
+        // Test Matrix4 * Vector4
+        let m4 = Matrix4::<f32>::identity();
+        let v4 = Vector4::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let result4 = m4 * v4;
+        assert_eq!(result4.x, 1.0);
+        assert_eq!(result4.y, 2.0);
+        assert_eq!(result4.z, 3.0);
+        assert_eq!(result4.w, 4.0);
+    }
+
+    #[test]
+    fn test_matrix_multiplication() {
+        // Test associativity: (A * B) * C == A * (B * C)
+        let a = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let b = Matrix2::<f32>::new(5.0, 6.0, 7.0, 8.0);
+        let c = Matrix2::<f32>::new(9.0, 10.0, 11.0, 12.0);
+        
+        let left = (a * b) * c;
+        let right = a * (b * c);
+        
+        assert!((left.col[0].x - right.col[0].x).abs() < 0.001);
+        assert!((left.col[0].y - right.col[0].y).abs() < 0.001);
+        assert!((left.col[1].x - right.col[1].x).abs() < 0.001);
+        assert!((left.col[1].y - right.col[1].y).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_matrix_addition_subtraction() {
+        let m1 = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let m2 = Matrix2::<f32>::new(5.0, 6.0, 7.0, 8.0);
+        
+        let sum = m1 + m2;
+        assert_eq!(sum.col[0].x, 6.0);
+        assert_eq!(sum.col[0].y, 8.0);
+        assert_eq!(sum.col[1].x, 10.0);
+        assert_eq!(sum.col[1].y, 12.0);
+        
+        let diff = m2 - m1;
+        assert_eq!(diff.col[0].x, 4.0);
+        assert_eq!(diff.col[0].y, 4.0);
+        assert_eq!(diff.col[1].x, 4.0);
+        assert_eq!(diff.col[1].y, 4.0);
+    }
+
+    #[test]
+    fn test_matrix4_inverse() {
+        // Test with a known invertible matrix
+        let m = Matrix4::<f32>::new(
+            2.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 0.5, 0.0,
+            1.0, 2.0, 3.0, 1.0
+        );
+        
+        let m_inv = m.inverse();
+        let product = m * m_inv;
+        
+        // Check if product is close to identity
+        for i in 0..4 {
+            for j in 0..4 {
+                let expected = if i == j { 1.0 } else { 0.0 };
+                let val = match j {
+                    0 => match i {
+                        0 => product.col[0].x,
+                        1 => product.col[0].y,
+                        2 => product.col[0].z,
+                        3 => product.col[0].w,
+                        _ => 0.0,
+                    },
+                    1 => match i {
+                        0 => product.col[1].x,
+                        1 => product.col[1].y,
+                        2 => product.col[1].z,
+                        3 => product.col[1].w,
+                        _ => 0.0,
+                    },
+                    2 => match i {
+                        0 => product.col[2].x,
+                        1 => product.col[2].y,
+                        2 => product.col[2].z,
+                        3 => product.col[2].w,
+                        _ => 0.0,
+                    },
+                    3 => match i {
+                        0 => product.col[3].x,
+                        1 => product.col[3].y,
+                        2 => product.col[3].z,
+                        3 => product.col[3].w,
+                        _ => 0.0,
+                    },
+                    _ => 0.0,
+                };
+                assert!((val - expected).abs() < 0.001, 
+                    "Matrix inverse failed at [{}, {}]: expected {}, got {}", i, j, expected, val);
+            }
+        }
+    }
+}

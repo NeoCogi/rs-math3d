@@ -14,7 +14,4 @@ readme = "README.md"
 
 [dependencies]
 
-[features]
-default = []
-
 [lib]

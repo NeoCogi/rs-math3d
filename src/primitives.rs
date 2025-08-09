@@ -392,7 +392,7 @@ impl<T: FloatScalar> Tri3<T> {
         let m = Matrix3::new(
             vv1.x, vv1.y, vv1.z, vv2.x, vv2.y, vv2.z, vvc.x, vvc.y, vvc.z,
         );
-        let lambda = m.inverse() * *pt;
+        let lambda = m.inverse() * (*pt - v0);
         Vector3::new(T::one() - lambda.x - lambda.y, lambda.x, lambda.y)
     }
 }
@@ -558,5 +558,92 @@ mod tests {
         assert!(f32::abs(pp2.x) < 0.01);
         assert!(f32::abs(pp2.y) < 0.01);
         assert!(f32::abs(pp2.z - 1.0) < 0.01);
+    }
+
+    #[test]
+    pub fn test_barycentric_translated() {
+        // Test with a triangle not at the origin
+        let v0 = Vector3::new(1.0, 2.0, 3.0);
+        let v1 = Vector3::new(4.0, 2.0, 3.0);
+        let v2 = Vector3::new(1.0, 5.0, 3.0);
+
+        let tri = Tri3::new([v0, v1, v2]);
+        
+        // Test vertices
+        let pp0 = tri.barycentric_coordinates(&v0);
+        assert!(f32::abs(pp0.x - 1.0) < 0.001);
+        assert!(f32::abs(pp0.y) < 0.001);
+        assert!(f32::abs(pp0.z) < 0.001);
+
+        let pp1 = tri.barycentric_coordinates(&v1);
+        assert!(f32::abs(pp1.x) < 0.001);
+        assert!(f32::abs(pp1.y - 1.0) < 0.001);
+        assert!(f32::abs(pp1.z) < 0.001);
+
+        let pp2 = tri.barycentric_coordinates(&v2);
+        assert!(f32::abs(pp2.x) < 0.001);
+        assert!(f32::abs(pp2.y) < 0.001);
+        assert!(f32::abs(pp2.z - 1.0) < 0.001);
+
+        // Test center point
+        let center = (v0 + v1 + v2) / 3.0;
+        let pp_center = tri.barycentric_coordinates(&center);
+        assert!(f32::abs(pp_center.x - 1.0/3.0) < 0.001);
+        assert!(f32::abs(pp_center.y - 1.0/3.0) < 0.001);
+        assert!(f32::abs(pp_center.z - 1.0/3.0) < 0.001);
+        
+        // Verify barycentric coordinates sum to 1
+        assert!(f32::abs((pp_center.x + pp_center.y + pp_center.z) - 1.0) < 0.001);
+    }
+
+    #[test]
+    pub fn test_barycentric_edge_midpoints() {
+        let v0 = Vector3::new(0.0, 0.0, 0.0);
+        let v1 = Vector3::new(2.0, 0.0, 0.0);
+        let v2 = Vector3::new(0.0, 2.0, 0.0);
+
+        let tri = Tri3::new([v0, v1, v2]);
+        
+        // Midpoint of edge v0-v1
+        let mid01 = (v0 + v1) / 2.0;
+        let pp_mid01 = tri.barycentric_coordinates(&mid01);
+        assert!(f32::abs(pp_mid01.x - 0.5) < 0.001);
+        assert!(f32::abs(pp_mid01.y - 0.5) < 0.001);
+        assert!(f32::abs(pp_mid01.z) < 0.001);
+
+        // Midpoint of edge v0-v2
+        let mid02 = (v0 + v2) / 2.0;
+        let pp_mid02 = tri.barycentric_coordinates(&mid02);
+        assert!(f32::abs(pp_mid02.x - 0.5) < 0.001);
+        assert!(f32::abs(pp_mid02.y) < 0.001);
+        assert!(f32::abs(pp_mid02.z - 0.5) < 0.001);
+
+        // Midpoint of edge v1-v2
+        let mid12 = (v1 + v2) / 2.0;
+        let pp_mid12 = tri.barycentric_coordinates(&mid12);
+        assert!(f32::abs(pp_mid12.x) < 0.001);
+        assert!(f32::abs(pp_mid12.y - 0.5) < 0.001);
+        assert!(f32::abs(pp_mid12.z - 0.5) < 0.001);
+    }
+
+    #[test]
+    pub fn test_barycentric_interpolation() {
+        // Test that we can reconstruct points using barycentric coordinates
+        let v0 = Vector3::new(1.0, 0.0, 0.0);
+        let v1 = Vector3::new(0.0, 1.0, 0.0);
+        let v2 = Vector3::new(0.0, 0.0, 1.0);
+
+        let tri = Tri3::new([v0, v1, v2]);
+        
+        // Test arbitrary point inside triangle
+        let test_point = Vector3::new(0.2, 0.3, 0.5);
+        let bary = tri.barycentric_coordinates(&test_point);
+        
+        // Reconstruct the point using barycentric coordinates
+        let reconstructed = v0 * bary.x + v1 * bary.y + v2 * bary.z;
+        
+        assert!(f32::abs(reconstructed.x - test_point.x) < 0.001);
+        assert!(f32::abs(reconstructed.y - test_point.y) < 0.001);
+        assert!(f32::abs(reconstructed.z - test_point.z) < 0.001);
     }
 }

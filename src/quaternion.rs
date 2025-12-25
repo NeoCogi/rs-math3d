@@ -349,27 +349,32 @@ impl<T: FloatScalar> Quat<T> {
     /// # Parameters
     /// - `axis`: The rotation axis (will be normalized)
     /// - `angle`: The rotation angle in radians
+    /// - `epsilon`: Minimum axis length to treat as valid
     ///
     /// The quaternion is constructed as:
     /// ```text
     /// q = cos(θ/2) + sin(θ/2) * normalize(axis)
     /// ```
-    pub fn of_axis_angle(axis: &Vector3<T>, angle: T) -> Self {
+    ///
+    /// # Returns
+    /// - `Some(quaternion)` for a valid axis
+    /// - `None` if the axis length is too small
+    pub fn of_axis_angle(axis: &Vector3<T>, angle: T, epsilon: T) -> Option<Self> {
+        let len_sq = Vector3::dot(axis, axis);
+        if len_sq <= epsilon * epsilon {
+            return None;
+        }
         let half_angle = angle * T::half();
         let sin_a = T::tsin(half_angle);
         let cos_a = T::tcos(half_angle);
-        let len = axis.length();
-        let n: Vector3<T> = (if len > <T as Zero>::zero() {
-            Vector3::normalize(&axis)
-        } else {
-            *axis
-        }) * sin_a;
+        let inv_len = <T as One>::one() / len_sq.tsqrt();
+        let n = *axis * inv_len * sin_a;
 
         let x = n.x;
         let y = n.y;
         let z = n.z;
         let w = cos_a;
-        Self::new(x, y, z, w)
+        Some(Self::new(x, y, z, w))
     }
 }
 
@@ -432,6 +437,18 @@ mod tests {
     use crate::Quat;
     use crate::*;
 
+    fn quat_axis_angle_f32(axis: &Vector3<f32>, angle: f32) -> Quat<f32> {
+        Quat::of_axis_angle(axis, angle, EPS_F32).expect("axis length too small")
+    }
+
+    fn quat_axis_angle_f64(axis: &Vector3<f64>, angle: f64) -> Quat<f64> {
+        Quat::of_axis_angle(axis, angle, EPS_F64).expect("axis length too small")
+    }
+
+    fn mat3_axis_angle_f32(axis: &Vector3<f32>, angle: f32) -> Matrix3<f32> {
+        Matrix3::of_axis_angle(axis, angle, EPS_F32).expect("axis length too small")
+    }
+
     #[test]
     fn test_identity() {
         let q = Quat::<f32>::identity();
@@ -483,7 +500,7 @@ mod tests {
         let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
         let a = 3.14159265;
 
-        let q = Quat::of_axis_angle(&v, a);
+        let q = quat_axis_angle_f32(&v, a);
         let m = q.mat3();
 
         let x_axis = m.col[0];
@@ -503,7 +520,7 @@ mod tests {
             true
         );
 
-        let m2 = Matrix3::of_axis_angle(&v, a);
+        let m2 = mat3_axis_angle_f32(&v, a);
 
         let x2_axis = m2.col[0];
         let y2_axis = m2.col[1];
@@ -519,7 +536,7 @@ mod tests {
         let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
         let a = 3.14159265 / 2.0;
 
-        let q = Quat::of_axis_angle(&v, a);
+        let q = quat_axis_angle_f32(&v, a);
         let m = q.mat3();
 
         let x_axis = m.col[0];
@@ -539,7 +556,7 @@ mod tests {
             true
         );
 
-        let m2 = Matrix3::of_axis_angle(&v, a);
+        let m2 = mat3_axis_angle_f32(&v, a);
 
         let x2_axis = m2.col[0];
         let y2_axis = m2.col[1];
@@ -555,7 +572,7 @@ mod tests {
         let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
         let a = 3.14159265 / 4.0;
 
-        let q = Quat::of_axis_angle(&v, a);
+        let q = quat_axis_angle_f32(&v, a);
         let m = q.mat3();
 
         let x_axis = m.col[0];
@@ -577,7 +594,7 @@ mod tests {
             true
         );
 
-        let m2 = Matrix3::of_axis_angle(&v, a);
+        let m2 = mat3_axis_angle_f32(&v, a);
 
         let x2_axis = m2.col[0];
         let y2_axis = m2.col[1];
@@ -594,8 +611,8 @@ mod tests {
         let a_u = 3.14159265 / 4.0;
         let a_f = 3.14159265;
 
-        let q_u = Quat::of_axis_angle(&v, a_u);
-        let q_f = Quat::of_axis_angle(&v, a_f);
+        let q_u = quat_axis_angle_f32(&v, a_u);
+        let q_f = quat_axis_angle_f32(&v, a_f);
 
         let m = q_f.mat3();
 
@@ -622,9 +639,9 @@ mod tests {
         let a_u2 = 3.14159265 / 6.0;
         let a_f = 3.14159265 / 2.0 + 3.14159265 / 6.0;
 
-        let q_u1 = Quat::of_axis_angle(&v, a_u1);
-        let q_u2 = Quat::of_axis_angle(&v, a_u2);
-        let q_f = Quat::of_axis_angle(&v, a_f);
+        let q_u1 = quat_axis_angle_f32(&v, a_u1);
+        let q_u2 = quat_axis_angle_f32(&v, a_u2);
+        let q_f = quat_axis_angle_f32(&v, a_f);
 
         let m = q_f.mat3();
 
@@ -656,9 +673,9 @@ mod tests {
 
         let a = 3.14159265 / 2.0;
 
-        let q_ux = Quat::of_axis_angle(&vx, a);
-        let q_uy = Quat::of_axis_angle(&vy, a);
-        let q_uz = Quat::of_axis_angle(&vz, a);
+        let q_ux = quat_axis_angle_f32(&vx, a);
+        let q_uy = quat_axis_angle_f32(&vy, a);
+        let q_uz = quat_axis_angle_f32(&vz, a);
 
         let mx = q_ux.mat3();
         let m4x = q_ux.mat4();
@@ -726,7 +743,7 @@ mod tests {
     #[test]
     fn test_axis_angle_f32() {
         let v = Vector3::normalize(&Vector3::<f32>::new(1.0, 2.0, 3.0));
-        let q0 = Quat::of_axis_angle(&v, 3.0);
+        let q0 = quat_axis_angle_f32(&v, 3.0);
         let (v2, a) = q0.to_axis_angle();
         assert_eq!((v.x - v2.x).abs() < f32::epsilon(), true);
         assert_eq!((v.y - v2.y).abs() < f32::epsilon(), true);
@@ -737,12 +754,18 @@ mod tests {
     #[test]
     fn test_axis_angle_f64() {
         let v = Vector3::normalize(&Vector3::<f64>::new(1.0, 2.0, 3.0));
-        let q0 = Quat::of_axis_angle(&v, 3.0);
+        let q0 = quat_axis_angle_f64(&v, 3.0);
         let (v2, a) = q0.to_axis_angle();
         assert_eq!((v.x - v2.x).abs() < f64::epsilon(), true);
         assert_eq!((v.y - v2.y).abs() < f64::epsilon(), true);
         assert_eq!((v.z - v2.z).abs() < f64::epsilon(), true);
         assert_eq!((a - 3.0).abs() < f64::epsilon(), true);
+    }
+
+    #[test]
+    fn test_axis_angle_zero_axis_none() {
+        let axis = Vector3::<f32>::new(0.0, 0.0, 0.0);
+        assert!(Quat::of_axis_angle(&axis, 1.0, EPS_F32).is_none());
     }
 
     #[test]
@@ -769,7 +792,7 @@ mod tests {
 
     #[test]
     fn test_quaternion_inverse() {
-        let q = Quat::<f32>::of_axis_angle(&Vector3::new(0.0, 1.0, 0.0), 1.57079632);
+        let q = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 1.57079632);
         let q_inv = Quat::inverse(&q);
         let product = q * q_inv;
         
@@ -783,9 +806,9 @@ mod tests {
     #[test]
     fn test_quaternion_multiplication() {
         // Test multiplication properties
-        let q1 = Quat::<f32>::of_axis_angle(&Vector3::new(1.0, 0.0, 0.0), 0.5);
-        let q2 = Quat::<f32>::of_axis_angle(&Vector3::new(0.0, 1.0, 0.0), 0.5);
-        let q3 = Quat::<f32>::of_axis_angle(&Vector3::new(0.0, 0.0, 1.0), 0.5);
+        let q1 = quat_axis_angle_f32(&Vector3::new(1.0, 0.0, 0.0), 0.5);
+        let q2 = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 0.5);
+        let q3 = quat_axis_angle_f32(&Vector3::new(0.0, 0.0, 1.0), 0.5);
         
         // Test associativity: (q1 * q2) * q3 == q1 * (q2 * q3)
         let left = (q1 * q2) * q3;
@@ -854,14 +877,14 @@ mod tests {
         assert!((angle).abs() < 0.001);
         
         // Test 180-degree rotation
-        let q_180 = Quat::<f32>::of_axis_angle(&Vector3::new(0.0, 1.0, 0.0), 3.14159265);
+        let q_180 = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 3.14159265);
         let (axis_180, angle_180) = q_180.to_axis_angle();
         assert!((angle_180 - 3.14159265).abs() < 0.001);
         assert!((axis_180.y - 1.0).abs() < 0.001);
         
         // Test very small rotation
         let small_angle = 0.001;
-        let q_small = Quat::<f32>::of_axis_angle(&Vector3::new(1.0, 0.0, 0.0), small_angle);
+        let q_small = quat_axis_angle_f32(&Vector3::new(1.0, 0.0, 0.0), small_angle);
         let (axis_small, angle_small) = q_small.to_axis_angle();
         assert!((angle_small - small_angle).abs() < 0.0001);
     }
@@ -879,7 +902,7 @@ mod tests {
         
         for angle in &angles {
             for axis in &axes {
-                let q1 = Quat::of_axis_angle(axis, *angle);
+                let q1 = quat_axis_angle_f32(axis, *angle);
                 let mat = q1.mat3();
                 let q2 = Quat::of_matrix3(&mat);
                 

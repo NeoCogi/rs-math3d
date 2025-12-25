@@ -34,7 +34,7 @@ use num_traits::{Zero, One};
 /// Query Traits
 ////////////////////////////////////////////////////////////////////////////////
 pub trait Distance<T, Other> {
-    fn distance(&self, other: &Other) -> T;
+    fn distance(&self, other: &Other) -> Option<T>;
 }
 
 pub trait Intersect<T> {
@@ -49,29 +49,20 @@ pub trait Intersection<T, Other> {
 /// Distance Queries
 ////////////////////////////////////////////////////////////////////////////////
 impl<T: FloatScalar> Distance<T, Vector3<T>> for Plane<T> {
-    fn distance(&self, other: &Vector3<T>) -> T {
+    fn distance(&self, other: &Vector3<T>) -> Option<T> {
         let n = self.normal();
         let nom = Vector3::dot(other, &n) + self.constant();
         let denom = Vector3::dot(&n, &n);
-        T::tabs(nom) / denom
+        if denom <= T::epsilon() {
+            return None;
+        }
+        Some(T::tabs(nom) / denom)
     }
 }
 
 impl<T: FloatScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
-    fn distance(&self, other: &Vector3<T>) -> T {
-        let seg_dir = self.e - self.s;
-        let pt_dir = *other - self.s;
-        let d_sp = Vector3::dot(&seg_dir, &pt_dir);
-        let d_ss = Vector3::dot(&seg_dir, &seg_dir);
-
-        if d_sp < <T as Zero>::zero() {
-            return Vector3::length(&pt_dir);
-        } else if d_sp > d_ss {
-            return Vector3::length(&(*other - self.e));
-        }
-
-        let t = d_sp / d_ss;
-        Vector3::length(&(*other - (self.s + seg_dir * t)))
+    fn distance(&self, other: &Vector3<T>) -> Option<T> {
+        Segment::distance(self, other, T::epsilon())
     }
 }
 
@@ -152,21 +143,28 @@ impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
         let v2 = verts[2];
         if is_in_0_to_1_range(uvw.x) && is_in_0_to_1_range(uvw.y) && is_in_0_to_1_range(uvw.z) {
             let p = Plane::from_tri(&v0, &v1, &v2);
-            if p.distance(&self.center) <= self.radius {
+            if p.distance(&self.center)
+                .map_or(false, |dist| dist <= self.radius)
+            {
                 true
             } else {
                 false
             }
         } else {
-            let d0 = Segment::new(&v0, &v1).distance(&self.center);
-            let d1 = Segment::new(&v1, &v2).distance(&self.center);
-            let d2 = Segment::new(&v2, &v0).distance(&self.center);
+            let d0 = Segment::new(&v0, &v1).distance(&self.center, T::epsilon());
+            let d1 = Segment::new(&v1, &v2).distance(&self.center, T::epsilon());
+            let d2 = Segment::new(&v2, &v0).distance(&self.center, T::epsilon());
 
-            let m = T::min(d0, T::min(d1, d2));
-            if m <= self.radius {
-                true
-            } else {
-                false
+            match (d0, d1, d2) {
+                (Some(d0), Some(d1), Some(d2)) => {
+                    let m = T::min(d0, T::min(d1, d2));
+                    if m <= self.radius {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
             }
         }
     }

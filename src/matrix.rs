@@ -486,10 +486,20 @@ impl<T: FloatScalar> Matrix3<T> {
     /// # Parameters
     /// - `axis`: The rotation axis (will be normalized)
     /// - `angle`: The rotation angle in radians
-    pub fn of_axis_angle(axis: &Vector3<T>, angle: T) -> Self {
+    /// - `epsilon`: Minimum axis length to treat as valid
+    ///
+    /// # Returns
+    /// - `Some(matrix)` for a valid axis
+    /// - `None` if the axis length is too small
+    pub fn of_axis_angle(axis: &Vector3<T>, angle: T, epsilon: T) -> Option<Self> {
+        let len_sq = Vector3::dot(axis, axis);
+        if len_sq <= epsilon * epsilon {
+            return None;
+        }
+        let inv_len = <T as One>::one() / len_sq.tsqrt();
+        let n = *axis * inv_len;
         let c = T::tcos(angle);
         let s = T::tsin(angle);
-        let n = Vector3::normalize(axis);
         let ux = n.x;
         let uy = n.y;
         let uz = n.z;
@@ -511,7 +521,7 @@ impl<T: FloatScalar> Matrix3<T> {
         let m7 = uy * uz * oc - ux * s;
         let m8 = c + uzz * oc;
 
-        Self::new(m0, m1, m2, m3, m4, m5, m6, m7, m8)
+        Some(Self::new(m0, m1, m2, m3, m4, m5, m6, m7, m8))
     }
 }
 
@@ -1129,6 +1139,12 @@ mod tests {
                 assert!((val - expected).abs() < 0.001);
             }
         }
+    }
+
+    #[test]
+    fn test_matrix3_axis_angle_zero_axis() {
+        let axis = Vector3::<f32>::new(0.0, 0.0, 0.0);
+        assert!(Matrix3::of_axis_angle(&axis, 1.0, EPS_F32).is_none());
     }
 
     #[test]

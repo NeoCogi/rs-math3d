@@ -133,8 +133,17 @@ pub fn rotation_from_quat<T: FloatScalar>(q: &Quat<T>) -> Matrix4<T> {
 /// # Parameters
 /// - `axis`: The rotation axis (will be normalized)
 /// - `angle`: The rotation angle in radians
-pub fn rotation_from_axis_angle<T: FloatScalar>(axis: &Vector3<T>, angle: T) -> Matrix4<T> {
-    Quat::mat4(&Quat::of_axis_angle(axis, angle))
+/// - `epsilon`: Minimum axis length to treat as valid
+///
+/// # Returns
+/// - `Some(matrix)` for a valid axis
+/// - `None` if the axis length is too small
+pub fn rotation_from_axis_angle<T: FloatScalar>(
+    axis: &Vector3<T>,
+    angle: T,
+    epsilon: T,
+) -> Option<Matrix4<T>> {
+    Quat::of_axis_angle(axis, angle, epsilon).map(|q| q.mat4())
 }
 
 /// Transforms a 3D vector by a 4x4 matrix with perspective division.
@@ -413,7 +422,8 @@ mod tests {
     pub fn test_decompose() {
         let ms = scale(Vector3::<f32>::new(4.0, 5.0, 6.0));
         let mt = translate(Vector3::<f32>::new(1.0, 2.0, 3.0));
-        let q = Quat::<f32>::of_axis_angle(&Vector3::new(1.0, 1.0, 1.0), 1.0);
+        let q = Quat::<f32>::of_axis_angle(&Vector3::new(1.0, 1.0, 1.0), 1.0, EPS_F32)
+            .expect("axis length too small");
         let mr = rotation_from_quat(&q);
 
         let m = mt * mr * ms;
@@ -436,5 +446,11 @@ mod tests {
                 assert_eq!((t.z - 3.0) < f32::epsilon(), true);
             }
         }
+    }
+
+    #[test]
+    fn test_rotation_from_axis_angle_zero_axis() {
+        let axis = Vector3::<f32>::new(0.0, 0.0, 0.0);
+        assert!(rotation_from_axis_angle(&axis, 1.0, EPS_F32).is_none());
     }
 }

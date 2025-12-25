@@ -42,7 +42,7 @@
 //! ## Quick Start
 //!
 //! ```
-//! use rs_math3d::{Vector, Vector3, Matrix4, Quat};
+//! use rs_math3d::{Vector, Vector3, Matrix4, Quat, EPS_F32};
 //! use rs_math3d::transforms;
 //!
 //! // Create vectors
@@ -54,14 +54,16 @@
 //! let translation = transforms::translate(Vector3::new(10.0, 0.0, 0.0));
 //! let rotation = transforms::rotation_from_axis_angle(
 //!     &Vector3::new(0.0, 1.0, 0.0),
-//!     std::f32::consts::PI / 4.0
-//! );
+//!     std::f32::consts::PI / 4.0,
+//!     EPS_F32,
+//! ).unwrap();
 //!
 //! // Use quaternions for rotations
 //! let q = Quat::of_axis_angle(
 //!     &Vector3::new(0.0, 0.0, 1.0),
-//!     std::f32::consts::PI / 2.0
-//! );
+//!     std::f32::consts::PI / 2.0,
+//!     EPS_F32,
+//! ).unwrap();
 //! let rotation_matrix = q.mat4();
 //! ```
 //!
@@ -92,7 +94,7 @@ pub use matrix::{Matrix2, Matrix3, Matrix4};
 pub use primitives::*;
 pub use quaternion::Quat;
 pub use queries::*;
-pub use scalar::{FloatScalar, Scalar};
+pub use scalar::{FloatScalar, Scalar, EPS_F32, EPS_F64};
 pub use transforms::*;
 pub use vector::{
     CrossProduct, FloatVector, Swizzle2, Swizzle3, Vector, Vector2, Vector3, Vector4,

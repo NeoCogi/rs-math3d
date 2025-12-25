@@ -36,16 +36,18 @@
 //! ```
 //! use rs_math3d::primitives::{Ray, Plane, Tri3};
 //! use rs_math3d::vector::Vector3;
+//! use rs_math3d::EPS_F32;
 //! 
 //! // Create a ray from origin pointing along +X axis
 //! let ray = Ray::new(
-//!     &Vector3::new(0.0, 0.0, 0.0),
-//!     &Vector3::new(1.0, 0.0, 0.0)
-//! );
+//!     &Vector3::new(0.0f32, 0.0, 0.0),
+//!     &Vector3::new(1.0, 0.0, 0.0),
+//!     EPS_F32,
+//! ).unwrap();
 //! 
 //! // Create a plane at z=5 facing down
 //! let plane = Plane::new(
-//!     &Vector3::new(0.0, 0.0, -1.0),
+//!     &Vector3::new(0.0f32, 0.0, -1.0),
 //!     &Vector3::new(0.0, 0.0, 5.0)
 //! );
 //! ```
@@ -250,48 +252,66 @@ pub struct Line<T: Scalar, V: Vector<T>> {
 
 impl<T: Scalar, V: Vector<T>> Line<T, V> {
     /// Creates a new line from a point and direction.
-    pub fn new(p: &V, d: &V) -> Self {
-        Self {
+    ///
+    /// Returns `None` if the direction is too small.
+    pub fn new(p: &V, d: &V, epsilon: T) -> Option<Self> {
+        let d_ss = V::dot(d, d);
+        if d_ss <= epsilon * epsilon {
+            return None;
+        }
+        Some(Self {
             p: *p,
             d: *d,
             t: core::marker::PhantomData,
-        }
+        })
     }
     /// Creates a line from two points.
     ///
     /// The line passes through both points, with direction from s to e.
-    pub fn from_start_end(s: &V, e: &V) -> Self {
-        Self {
-            p: *s,
-            d: *e - *s,
-            t: core::marker::PhantomData,
-        }
+    ///
+    /// Returns `None` if the points are too close.
+    pub fn from_start_end(s: &V, e: &V, epsilon: T) -> Option<Self> {
+        let dir = *e - *s;
+        Self::new(s, &dir, epsilon)
     }
     /// Finds the closest point on the line to a given point.
     ///
     /// Returns:
     /// - `t`: Parameter value where the closest point occurs
     /// - Point: The closest point on the line
-    pub fn closest_point_on_line(&self, p: &V) -> (T, V) {
+    ///
+    /// Returns `None` if the line direction is too small.
+    pub fn closest_point_on_line(&self, p: &V, epsilon: T) -> Option<(T, V)> {
         let p_dir = *p - self.p;
 
         let d_sp = V::dot(&self.d, &p_dir);
         let d_ss = V::dot(&self.d, &self.d);
 
+        if d_ss <= epsilon * epsilon {
+            return None;
+        }
+
         let t = d_sp / d_ss;
 
-        (t, self.p + self.d * t)
+        Some((t, self.p + self.d * t))
     }
 }
 
 impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
     /// Returns a line with normalized direction vector.
-    pub fn normalize(&self) -> Self {
-        Self {
-            p: self.p,
-            d: FloatVector::normalize(&self.d),
-            t: core::marker::PhantomData,
+    ///
+    /// Returns `None` if the direction is too small.
+    pub fn normalize(&self, epsilon: T) -> Option<Self> {
+        let d_ss = V::dot(&self.d, &self.d);
+        if d_ss <= epsilon * epsilon {
+            return None;
         }
+        let inv_len = <T as One>::one() / d_ss.tsqrt();
+        Some(Self {
+            p: self.p,
+            d: self.d * inv_len,
+            t: core::marker::PhantomData,
+        })
     }
 }
 
@@ -309,7 +329,20 @@ pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
     let d1 = line1.d;
     let d0 = line0.d;
 
-    let normal = Vector3::normalize(&Vector3::cross(&d1, &d0));
+    let eps_sq = epsilon * epsilon;
+    let d0_len_sq = Vector3::dot(&d0, &d0);
+    let d1_len_sq = Vector3::dot(&d1, &d1);
+    if d0_len_sq <= eps_sq || d1_len_sq <= eps_sq {
+        return None;
+    }
+
+    let cross = Vector3::cross(&d1, &d0);
+    let cross_len_sq = Vector3::dot(&cross, &cross);
+    if cross_len_sq <= eps_sq {
+        return None;
+    }
+
+    let normal = Vector3::normalize(&cross);
     let n0 = Vector3::normalize(&Vector3::cross(&normal, &d0));
     let n1 = Vector3::normalize(&Vector3::cross(&normal, &d1));
 
@@ -348,30 +381,38 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
     /// Returns:
     /// - `t`: Parameter value \[0,1\] where 0=start, 1=end
     /// - Point: The closest point on the segment
-    pub fn closest_point_on_segment(&self, p: &V) -> (T, V) {
+    ///
+    /// Returns `None` if the segment is too small.
+    pub fn closest_point_on_segment(&self, p: &V, epsilon: T) -> Option<(T, V)> {
         let dir = self.e - self.s;
         let p_dir = *p - self.s;
 
         let d_sp = V::dot(&dir, &p_dir);
         let d_ss = V::dot(&dir, &dir);
 
+        if d_ss <= epsilon * epsilon {
+            return None;
+        }
+
         if d_sp < <T as Zero>::zero() {
-            return (<T as Zero>::zero(), self.s);
+            return Some((<T as Zero>::zero(), self.s));
         } else if d_sp > d_ss {
-            return (<T as One>::one(), self.e);
+            return Some((<T as One>::one(), self.e));
         }
 
         let t = d_sp / d_ss;
 
-        (t, self.s + dir * t)
+        Some((t, self.s + dir * t))
     }
 }
 
 impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
     /// Computes the distance from a point to the segment.
-    pub fn distance(&self, p: &V) -> T {
-        let (_, p_on_seg) = self.closest_point_on_segment(p);
-        V::length(&(p_on_seg - *p))
+    ///
+    /// Returns `None` if the segment is too small.
+    pub fn distance(&self, p: &V, epsilon: T) -> Option<T> {
+        self.closest_point_on_segment(p, epsilon)
+            .map(|(_, p_on_seg)| V::length(&(p_on_seg - *p)))
     }
 }
 
@@ -388,12 +429,19 @@ pub struct Ray<T: Scalar, V: Vector<T>> {
 
 impl<T: FloatScalar, V: FloatVector<T>> Ray<T, V> {
     /// Creates a new ray with normalized direction.
-    pub fn new(start: &V, direction: &V) -> Self {
-        Self {
-            start: *start,
-            direction: V::normalize(direction),
-            t: core::marker::PhantomData,
+    ///
+    /// Returns `None` if the direction is too small.
+    pub fn new(start: &V, direction: &V, epsilon: T) -> Option<Self> {
+        let d_ss = V::dot(direction, direction);
+        if d_ss <= epsilon * epsilon {
+            return None;
         }
+        let inv_len = <T as One>::one() / d_ss.tsqrt();
+        Some(Self {
+            start: *start,
+            direction: *direction * inv_len,
+            t: core::marker::PhantomData,
+        })
     }
 }
 
@@ -753,5 +801,59 @@ mod tests {
             &Vector3::new(2.0, 1.0, 1.0),
         );
         assert!(a.overlap(&f));
+    }
+
+    #[test]
+    fn test_line_new_zero_direction() {
+        let p = Vector3::new(0.0f32, 0.0, 0.0);
+        let d = Vector3::new(0.0f32, 0.0, 0.0);
+        assert!(Line::new(&p, &d, EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_line_from_start_end_zero_direction() {
+        let p = Vector3::new(1.0f32, 2.0, 3.0);
+        assert!(Line::from_start_end(&p, &p, EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_line_closest_point_valid() {
+        let p = Vector3::new(0.0f32, 0.0, 0.0);
+        let d = Vector3::new(1.0f32, 0.0, 0.0);
+        let line = Line::new(&p, &d, EPS_F32).expect("line should be valid");
+        let target = Vector3::new(2.0f32, 1.0, 0.0);
+        let (t, closest) = line
+            .closest_point_on_line(&target, EPS_F32)
+            .expect("closest point should exist");
+        assert!((t - 2.0).abs() < 0.001);
+        assert!((closest.x - 2.0).abs() < 0.001);
+        assert!(closest.y.abs() < 0.001);
+        assert!(closest.z.abs() < 0.001);
+    }
+
+    #[test]
+    fn test_segment_distance_zero_length() {
+        let p = Vector3::new(0.0f32, 0.0, 0.0);
+        let seg = Segment::new(&p, &p);
+        let target = Vector3::new(1.0f32, 0.0, 0.0);
+        assert!(seg.distance(&target, EPS_F32).is_none());
+        assert!(seg.closest_point_on_segment(&target, EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_ray_new_zero_direction() {
+        let p = Vector3::new(0.0f32, 0.0, 0.0);
+        let d = Vector3::new(0.0f32, 0.0, 0.0);
+        assert!(Ray::new(&p, &d, EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_shortest_segment_parallel_lines() {
+        let p0 = Vector3::new(0.0f32, 0.0, 0.0);
+        let p1 = Vector3::new(0.0f32, 1.0, 0.0);
+        let d = Vector3::new(1.0f32, 0.0, 0.0);
+        let l0 = Line::new(&p0, &d, EPS_F32).expect("line should be valid");
+        let l1 = Line::new(&p1, &d, EPS_F32).expect("line should be valid");
+        assert!(shortest_segment3d_between_lines3d(&l0, &l1, EPS_F32).is_none());
     }
 }

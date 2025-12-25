@@ -42,6 +42,11 @@ use core::ops::Neg;
 // Re-export for convenience
 pub use num_traits::{Zero, One};
 
+/// Default epsilon for f32 comparisons.
+pub const EPS_F32: f32 = 1.0 / (1024.0 * 1024.0);
+/// Default epsilon for f64 comparisons.
+pub const EPS_F64: f64 = 1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0);
+
 /// Core scalar trait for numeric types used in the library.
 ///
 /// This trait extends `num-traits` types with additional methods
@@ -138,9 +143,7 @@ impl Scalar for f32 {
     fn half() -> Self { 0.5 }
     fn quarter() -> Self { 0.25 }
     fn l8192() -> Self { 8192.0 }
-    fn epsilon() -> Self { 
-        1.0 / (1024.0 * 1024.0)
-    }
+    fn epsilon() -> Self { EPS_F32 }
     fn min(l: Self, r: Self) -> Self {
         if l < r { l } else { r }
     }
@@ -158,9 +161,7 @@ impl Scalar for f64 {
     fn half() -> Self { 0.5 }
     fn quarter() -> Self { 0.25 }
     fn l8192() -> Self { 8192.0 }
-    fn epsilon() -> Self {
-        1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0)
-    }
+    fn epsilon() -> Self { EPS_F64 }
     fn min(l: Self, r: Self) -> Self {
         if l < r { l } else { r }
     }

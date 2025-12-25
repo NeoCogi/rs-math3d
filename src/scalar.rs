@@ -92,6 +92,7 @@ pub trait Scalar:
 ///
 /// These functions link to external C math libraries (libm on Unix,
 /// MSVCRT on Windows) since they're not available in no_std Rust.
+/// When the `std` feature or tests are enabled, intrinsic std methods are used.
 pub trait FloatScalar: Scalar {
     fn infinity() -> Self;
     fn tsqrt(self) -> Self;
@@ -181,35 +182,69 @@ impl FloatScalar for f32 {
         core::f32::INFINITY
     }
     fn tsqrt(self) -> Self {
-        // Use external C math function
-        extern "C" {
-            fn sqrtf(x: f32) -> f32;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.sqrt()
         }
-        unsafe { sqrtf(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn sqrtf(x: f32) -> f32;
+            }
+            unsafe { sqrtf(self) }
+        }
     }
     fn tsin(self) -> Self {
-        extern "C" {
-            fn sinf(x: f32) -> f32;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.sin()
         }
-        unsafe { sinf(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn sinf(x: f32) -> f32;
+            }
+            unsafe { sinf(self) }
+        }
     }
     fn tcos(self) -> Self {
-        extern "C" {
-            fn cosf(x: f32) -> f32;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.cos()
         }
-        unsafe { cosf(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn cosf(x: f32) -> f32;
+            }
+            unsafe { cosf(self) }
+        }
     }
     fn ttan(self) -> Self {
-        extern "C" {
-            fn tanf(x: f32) -> f32;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.tan()
         }
-        unsafe { tanf(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn tanf(x: f32) -> f32;
+            }
+            unsafe { tanf(self) }
+        }
     }
     fn tacos(self) -> Self {
-        extern "C" {
-            fn acosf(x: f32) -> f32;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.acos()
         }
-        unsafe { acosf(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn acosf(x: f32) -> f32;
+            }
+            unsafe { acosf(self) }
+        }
     }
 }
 
@@ -221,34 +256,69 @@ impl FloatScalar for f64 {
         core::f64::INFINITY
     }
     fn tsqrt(self) -> Self {
-        extern "C" {
-            fn sqrt(x: f64) -> f64;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.sqrt()
         }
-        unsafe { sqrt(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn sqrt(x: f64) -> f64;
+            }
+            unsafe { sqrt(self) }
+        }
     }
     fn tsin(self) -> Self {
-        extern "C" {
-            fn sin(x: f64) -> f64;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.sin()
         }
-        unsafe { sin(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn sin(x: f64) -> f64;
+            }
+            unsafe { sin(self) }
+        }
     }
     fn tcos(self) -> Self {
-        extern "C" {
-            fn cos(x: f64) -> f64;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.cos()
         }
-        unsafe { cos(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn cos(x: f64) -> f64;
+            }
+            unsafe { cos(self) }
+        }
     }
     fn ttan(self) -> Self {
-        extern "C" {
-            fn tan(x: f64) -> f64;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.tan()
         }
-        unsafe { tan(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn tan(x: f64) -> f64;
+            }
+            unsafe { tan(self) }
+        }
     }
     fn tacos(self) -> Self {
-        extern "C" {
-            fn acos(x: f64) -> f64;
+        #[cfg(any(test, feature = "std"))]
+        {
+            self.acos()
         }
-        unsafe { acos(self) }
+        #[cfg(not(any(test, feature = "std")))]
+        {
+            extern "C" {
+                fn acos(x: f64) -> f64;
+            }
+            unsafe { acos(self) }
+        }
     }
 }
 
@@ -260,5 +330,25 @@ mod tests {
         let out = -1.0;
         let f = out.tabs();
         assert_eq!(f, 1.0);
+    }
+
+    #[test]
+    fn test_float_scalar_ops_f32() {
+        let v = 4.0f32;
+        assert!((v.tsqrt() - 2.0).abs() < 0.0001);
+        assert!(0.0f32.tsin().abs() < 0.0001);
+        assert!((0.0f32.tcos() - 1.0).abs() < 0.0001);
+        assert!(0.0f32.ttan().abs() < 0.0001);
+        assert!(1.0f32.tacos().abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_float_scalar_ops_f64() {
+        let v = 4.0f64;
+        assert!((v.tsqrt() - 2.0).abs() < 0.0000001);
+        assert!(0.0f64.tsin().abs() < 0.0000001);
+        assert!((0.0f64.tcos() - 1.0).abs() < 0.0000001);
+        assert!(0.0f64.ttan().abs() < 0.0000001);
+        assert!(1.0f64.tacos().abs() < 0.0000001);
     }
 }

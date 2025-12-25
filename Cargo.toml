@@ -16,3 +16,7 @@ readme = "README.md"
 num-traits = { version = "0.2", default-features = false }
 
 [lib]
+
+[features]
+default = []
+std = ["num-traits/std"]

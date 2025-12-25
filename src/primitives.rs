@@ -510,14 +510,20 @@ impl<T: FloatScalar> Tri3<T> {
         let v0 = self.vertices[0];
         let v1 = self.vertices[1];
         let v2 = self.vertices[2];
-        let vv1 = v1 - v0;
-        let vv2 = v2 - v0;
-        let vvc = Vector3::cross(&vv1, &vv2);
-        let m = Matrix3::new(
-            vv1.x, vv1.y, vv1.z, vv2.x, vv2.y, vv2.z, vvc.x, vvc.y, vvc.z,
-        );
-        let lambda = m.inverse() * (*pt - v0);
-        Vector3::new(<T as One>::one() - lambda.x - lambda.y, lambda.x, lambda.y)
+        let e0 = v1 - v0;
+        let e1 = v2 - v0;
+        let vp = *pt - v0;
+
+        let d00 = Vector3::dot(&e0, &e0);
+        let d01 = Vector3::dot(&e0, &e1);
+        let d11 = Vector3::dot(&e1, &e1);
+        let d20 = Vector3::dot(&vp, &e0);
+        let d21 = Vector3::dot(&vp, &e1);
+        let denom = d00 * d11 - d01 * d01;
+        let v = (d11 * d20 - d01 * d21) / denom;
+        let w = (d00 * d21 - d01 * d20) / denom;
+        let u = <T as One>::one() - v - w;
+        Vector3::new(u, v, w)
     }
 }
 
@@ -752,6 +758,20 @@ mod tests {
         assert!(f32::abs(pp_mid12.x) < 0.001);
         assert!(f32::abs(pp_mid12.y - 0.5) < 0.001);
         assert!(f32::abs(pp_mid12.z - 0.5) < 0.001);
+    }
+
+    #[test]
+    pub fn test_barycentric_degenerate_triangle() {
+        let v0 = Vector3::new(0.0f32, 0.0, 0.0);
+        let v1 = Vector3::new(1.0f32, 0.0, 0.0);
+        let v2 = Vector3::new(2.0f32, 0.0, 0.0);
+
+        let tri = Tri3::new([v0, v1, v2]);
+        let test_point = Vector3::new(0.5f32, 0.0, 0.0);
+        let bary = tri.barycentric_coordinates(&test_point);
+        assert!(!bary.x.is_finite());
+        assert!(!bary.y.is_finite());
+        assert!(!bary.z.is_finite());
     }
 
     #[test]

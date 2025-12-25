@@ -149,7 +149,7 @@ pub fn rotation_from_axis_angle<T: FloatScalar>(
 /// Transforms a 3D vector by a 4x4 matrix with perspective division.
 ///
 /// The vector is treated as a point (w=1) and the result is divided by w.
-pub fn transform_vec3<T: Scalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
+pub fn transform_vec3<T: FloatScalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
     let v4 = Vector4::new(v.x, v.y, v.z, <T as One>::one());
     let vout = *m * v4;
     Vector3::new(vout.x / vout.w, vout.y / vout.w, vout.z / vout.w)
@@ -166,7 +166,7 @@ pub fn transform_vec3<T: Scalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
 ///
 /// # Returns
 /// Screen coordinates with z in \[0,1\] (0=near, 1=far)
-pub fn project3<T: Scalar>(
+pub fn project3<T: FloatScalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
     lb: &Vector2<T>,
@@ -198,7 +198,7 @@ pub fn project3<T: Scalar>(
 ///
 /// # Returns
 /// The corresponding 3D world point
-pub fn unproject3<T: Scalar>(
+pub fn unproject3<T: FloatScalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
     lb: &Vector2<T>,
@@ -224,7 +224,7 @@ pub fn unproject3<T: Scalar>(
 /// - `rtf`: Right-top-far corner (x, y, z)
 ///
 /// The frustum is defined by the near and far clipping planes.
-pub fn frustum<T: Scalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
+pub fn frustum<T: FloatScalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
     let width = rtf.x - lbn.x;
     let height = rtf.y - lbn.y;
     let depth = rtf.z - lbn.z;
@@ -261,7 +261,14 @@ pub fn frustum<T: Scalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
 /// - `near`, `far`: Z-axis bounds (depth)
 ///
 /// Objects maintain their size regardless of depth in orthographic projection.
-pub fn ortho4<T: Scalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) -> Matrix4<T> {
+pub fn ortho4<T: FloatScalar>(
+    left: T,
+    right: T,
+    bottom: T,
+    top: T,
+    near: T,
+    far: T,
+) -> Matrix4<T> {
     let width = right - left;
     let height = top - bottom;
     let depth = far - near;
@@ -452,5 +459,21 @@ mod tests {
     fn test_rotation_from_axis_angle_zero_axis() {
         let axis = Vector3::<f32>::new(0.0, 0.0, 0.0);
         assert!(rotation_from_axis_angle(&axis, 1.0, EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_project_unproject_roundtrip() {
+        let world = Matrix4::<f32>::identity();
+        let proj = ortho4(-1.0, 1.0, -1.0, 1.0, 0.1, 10.0);
+        let lb = Vector2::new(-1.0, -1.0);
+        let rt = Vector2::new(1.0, 1.0);
+        let pt = Vector3::new(0.2, -0.4, 1.0);
+
+        let screen = project3(&world, &proj, &lb, &rt, &pt);
+        let out = unproject3(&world, &proj, &lb, &rt, &screen);
+
+        assert!((out.x - pt.x).abs() < 0.001);
+        assert!((out.y - pt.y).abs() < 0.001);
+        assert!((out.z - pt.z).abs() < 0.001);
     }
 }

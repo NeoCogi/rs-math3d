@@ -162,14 +162,6 @@ impl<T: Scalar> Box3<T> {
             max: Vector3::max(v0, v1),
         }
     }
-    /// Returns the center point of the box.
-    pub fn center(&self) -> Vector3<T> {
-        (self.max + self.min) * T::half()
-    }
-    /// Returns the half-extents of the box from center to max.
-    pub fn extent(&self) -> Vector3<T> {
-        self.max - self.center()
-    }
     /// Checks if two boxes overlap.
     pub fn overlap(&self, other: &Self) -> bool {
         if self.max.x < other.min.x {
@@ -200,6 +192,17 @@ impl<T: Scalar> Box3<T> {
             min: Vector3::min(&p, &self.min),
             max: Vector3::max(&p, &self.max),
         }
+    }
+}
+
+impl<T: FloatScalar> Box3<T> {
+    /// Returns the center point of the box.
+    pub fn center(&self) -> Vector3<T> {
+        (self.max + self.min) * T::half()
+    }
+    /// Returns the half-extents of the box from center to max.
+    pub fn extent(&self) -> Vector3<T> {
+        self.max - self.center()
     }
 
     /// Subdivides the box into 8 octants.
@@ -893,5 +896,28 @@ mod tests {
         );
         let hit = ray.intersect_plane(&plane, EPS_F32).expect("should hit");
         assert!(hit.y.abs() < 0.001);
+    }
+
+    #[test]
+    fn test_box3_center_extent_subdivide() {
+        let b = Box3::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(2.0, 2.0, 2.0),
+        );
+        let center = b.center();
+        let extent = b.extent();
+        assert!((center.x - 1.0).abs() < 0.001);
+        assert!((center.y - 1.0).abs() < 0.001);
+        assert!((center.z - 1.0).abs() < 0.001);
+        assert!((extent.x - 1.0).abs() < 0.001);
+        assert!((extent.y - 1.0).abs() < 0.001);
+        assert!((extent.z - 1.0).abs() < 0.001);
+
+        let subs = b.subdivide();
+        assert_eq!(subs.len(), 8);
+        for sub in subs.iter() {
+            assert!(sub.min.x >= 0.0 && sub.min.y >= 0.0 && sub.min.z >= 0.0);
+            assert!(sub.max.x <= 2.0 && sub.max.y <= 2.0 && sub.max.z <= 2.0);
+        }
     }
 }

@@ -146,6 +146,35 @@ pub trait FloatVector<T: FloatScalar>: Vector<T> {
     /// d(v, w) = ||v - w||
     /// ```
     fn distance(l: &Self, r: &Self) -> T;
+
+    /// Computes the squared length (avoids a square root).
+    ///
+    /// ```text
+    /// ||v||² = v · v
+    /// ```
+    fn length_squared(&self) -> T {
+        Self::dot(self, self)
+    }
+
+    /// Returns a normalized vector or `None` when the length is too small.
+    fn try_normalize(&self, epsilon: T) -> Option<Self> {
+        let len_sq = self.length_squared();
+        if len_sq <= epsilon * epsilon {
+            None
+        } else {
+            Some(*self / len_sq.tsqrt())
+        }
+    }
+
+    /// Returns a normalized vector or the zero vector when too small.
+    fn normalize_or_zero(&self, epsilon: T) -> Self {
+        self.try_normalize(epsilon).unwrap_or_else(Self::zero)
+    }
+
+    /// Normalizes using a precomputed inverse length (e.g., from rsqrt).
+    fn normalize_with_inv_len(&self, inv_len: T) -> Self {
+        *self * inv_len
+    }
 }
 
 macro_rules! implVecScalar {
@@ -561,7 +590,7 @@ impl_swizzle3!(Vector4, x, y, z);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scalar::FloatScalar;
+    use crate::scalar::{FloatScalar, EPS_F32};
     
     #[test]
     pub fn test() {
@@ -601,6 +630,25 @@ mod tests {
         assert!((nv_unit.x - 1.0).abs() < f32::epsilon());
         assert!((nv_unit.y).abs() < f32::epsilon());
         assert!((nv_unit.z).abs() < f32::epsilon());
+    }
+
+    #[test]
+    fn test_vector_try_normalize() {
+        let v = Vector3::<f32>::new(3.0, 4.0, 0.0);
+        let nv = v.try_normalize(EPS_F32).expect("should normalize");
+        assert!((nv.length() - 1.0).abs() < 0.001);
+
+        let zero = Vector3::<f32>::zero();
+        assert!(zero.try_normalize(EPS_F32).is_none());
+        let zero_norm = zero.normalize_or_zero(EPS_F32);
+        assert_eq!(zero_norm.x, 0.0);
+        assert_eq!(zero_norm.y, 0.0);
+        assert_eq!(zero_norm.z, 0.0);
+
+        let len_sq = v.length_squared();
+        let inv_len = 1.0f32 / len_sq.tsqrt();
+        let nv_fast = v.normalize_with_inv_len(inv_len);
+        assert!((nv_fast.length() - 1.0).abs() < 0.001);
     }
 
     #[test]

@@ -85,7 +85,9 @@ extern crate std;
 pub mod basis;
 pub mod matrix;
 pub mod primitives;
+/// Quaternion operations and conversions.
 pub mod quaternion;
+/// Intersection and distance query traits and helpers.
 pub mod queries;
 pub mod scalar;
 pub mod transforms;
@@ -190,12 +192,17 @@ pub type Box3f = Box3<f32>;
 /// 3D double-precision axis-aligned bounding box.
 pub type Box3d = Box3<f64>;
 
+/// Single-precision basis.
 pub type Basisf = Basis<f32>;
+/// Double-precision basis.
 pub type Basisd = Basis<f64>;
 
+/// Single-precision parametric plane.
 pub type ParametricPlanef = ParametricPlane<f32>;
+/// Double-precision parametric plane.
 pub type ParametricPlaned = ParametricPlane<f64>;
 
+/// Creates an RGBA color from byte components.
 pub fn color4b(r: u8, g: u8, b: u8, a: u8) -> Color4b {
     Color4b {
         x: r,

@@ -61,7 +61,9 @@ use num_traits::{Zero, One};
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Dimension<T: Scalar> {
+    /// Width component.
     pub width: T,
+    /// Height component.
     pub height: T,
 }
 
@@ -78,9 +80,13 @@ impl<T: Scalar> Dimension<T> {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Rect<T: Scalar> {
+    /// X coordinate of the top-left corner.
     pub x: T,
+    /// Y coordinate of the top-left corner.
     pub y: T,
+    /// Rectangle width.
     pub width: T,
+    /// Rectangle height.
     pub height: T,
 }
 
@@ -148,7 +154,9 @@ impl<T: Scalar> Rect<T> {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Box3<T: Scalar> {
+    /// Minimum corner.
     pub min: Vector3<T>,
+    /// Maximum corner.
     pub max: Vector3<T>,
 }
 
@@ -248,8 +256,10 @@ impl<T: FloatScalar> Box3<T> {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Line<T: Scalar, V: Vector<T>> {
-    pub p: V, // point on the line
-    pub d: V, // direction of the line
+    /// Point on the line.
+    pub p: V,
+    /// Direction of the line.
+    pub d: V,
     t: core::marker::PhantomData<T>,
 }
 
@@ -365,8 +375,10 @@ pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Segment<T: Scalar, V: Vector<T>> {
-    pub s: V, // start
-    pub e: V, // end
+    /// Start point.
+    pub s: V,
+    /// End point.
+    pub e: V,
     t: core::marker::PhantomData<T>,
 }
 
@@ -425,7 +437,9 @@ impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Ray<T: Scalar, V: Vector<T>> {
+    /// Ray origin.
     pub start: V,
+    /// Ray direction (typically normalized).
     pub direction: V,
     t: core::marker::PhantomData<T>,
 }
@@ -471,16 +485,19 @@ impl<T: Scalar> Ray<T, Vector3<T>> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Sphere3
+/// A sphere defined by center and radius.
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Sphere3<T: FloatScalar> {
+    /// Sphere center.
     pub center: Vector3<T>,
+    /// Sphere radius.
     pub radius: T,
 }
 
 impl<T: FloatScalar> Sphere3<T> {
+    /// Creates a sphere from center and radius.
     pub fn new(center: Vector3<T>, radius: T) -> Self {
         Self {
             center: center,
@@ -490,7 +507,7 @@ impl<T: FloatScalar> Sphere3<T> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Triangle
+/// A triangle defined by three vertices.
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -499,13 +516,16 @@ pub struct Tri3<T: FloatScalar> {
 }
 
 impl<T: FloatScalar> Tri3<T> {
+    /// Creates a triangle from three vertices.
     pub fn new(vertices: [Vector3<T>; 3]) -> Self {
         Self { vertices: vertices }
     }
+    /// Returns the triangle vertices.
     pub fn vertices(&self) -> &[Vector3<T>; 3] {
         &self.vertices
     }
 
+    /// Computes barycentric coordinates of a point in the triangle plane.
     pub fn barycentric_coordinates(&self, pt: &Vector3<T>) -> Vector3<T> {
         let v0 = self.vertices[0];
         let v1 = self.vertices[1];
@@ -528,7 +548,7 @@ impl<T: FloatScalar> Tri3<T> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Plane
+/// A plane defined by ax + by + cz + d = 0.
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -540,13 +560,16 @@ pub struct Plane<T: Scalar> {
 }
 
 impl<T: Scalar> Plane<T> {
+    /// Returns the plane normal vector.
     pub fn normal(&self) -> Vector3<T> {
         Vector3::new(self.a, self.b, self.c)
     }
+    /// Returns the plane constant term (d).
     pub fn constant(&self) -> T {
         self.d
     }
 
+    /// Intersects the plane with a ray.
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
         r.intersect_plane(self, epsilon)
     }
@@ -574,6 +597,7 @@ impl<T: Scalar> Plane<T> {
 }
 
 impl<T: FloatScalar> Plane<T> {
+    /// Creates a plane from a normal and a point on the plane.
     pub fn new(n: &Vector3<T>, p: &Vector3<T>) -> Self {
         let norm = Vector3::normalize(n);
         let d = Vector3::dot(&norm, p);
@@ -585,10 +609,12 @@ impl<T: FloatScalar> Plane<T> {
         }
     }
 
+    /// Creates a plane from triangle vertices.
     pub fn from_tri(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Self {
         let n = tri_normal(v0, v1, v2);
         Self::new(&n, v0)
     }
+    /// Creates a plane from quad vertices.
     pub fn from_quad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
         let n = quad_normal(v0, v1, v2, v3);
         let c = (*v0 + *v1 + *v2 + *v3) * T::quarter();
@@ -597,17 +623,21 @@ impl<T: FloatScalar> Plane<T> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Parametric Plane
+/// A parametric plane defined by center and axis vectors.
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct ParametricPlane<T: Scalar> {
+    /// Plane center point.
     pub center: Vector3<T>,
+    /// Plane X axis direction.
     pub x_axis: Vector3<T>,
+    /// Plane Y axis direction.
     pub y_axis: Vector3<T>,
 }
 
 impl<T: FloatScalar> ParametricPlane<T> {
+    /// Creates a parametric plane from center and axes.
     pub fn new(center: &Vector3<T>, x_axis: &Vector3<T>, y_axis: &Vector3<T>) -> Self {
         Self {
             center: *center,
@@ -616,6 +646,7 @@ impl<T: FloatScalar> ParametricPlane<T> {
         }
     }
 
+    /// Converts the parametric plane to an infinite plane.
     pub fn plane(&self) -> Plane<T> {
         Plane::new(&self.normal(), &self.center)
     }
@@ -625,10 +656,12 @@ impl<T: FloatScalar> ParametricPlane<T> {
         Vector3::cross(&self.x_axis, &self.y_axis).normalize()
     }
 
+    /// Intersects the plane with a ray.
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
         r.intersect_plane(&self.plane(), epsilon)
     }
 
+    /// Intersects the plane with a line.
     pub fn intersect_line(
         &self,
         line: &Line<T, Vector3<T>>,
@@ -637,6 +670,7 @@ impl<T: FloatScalar> ParametricPlane<T> {
         self.plane().intersect_line(line, epsilon)
     }
 
+    /// Projects a 3D point onto the plane's 2D coordinates.
     pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
         let p = *v - self.center;
         let x_coord = Vector3::dot(&p, &self.x_axis) / Vector3::dot(&self.x_axis, &self.x_axis);
@@ -646,7 +680,7 @@ impl<T: FloatScalar> ParametricPlane<T> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Tri
+/// Computes the normal vector of a triangle.
 ////////////////////////////////////////////////////////////////////////////////
 pub fn tri_normal<T: FloatScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
     let v10 = *v1 - *v0;

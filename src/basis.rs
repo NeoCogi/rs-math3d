@@ -53,8 +53,11 @@ use num_traits::{Zero, One};
 /// Represents one of the three coordinate planes.
 #[derive(Debug, Clone, Copy)]
 pub enum BasisPlane {
+    /// Plane spanned by the Y and Z axes.
     YZ,
+    /// Plane spanned by the Z and X axes.
     ZX,
+    /// Plane spanned by the X and Y axes.
     XY,
 }
 
@@ -90,9 +93,13 @@ impl BasisPlane {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Basis<T: Scalar> {
+    /// Basis X axis.
     pub x_axis: Vector3<T>,
+    /// Basis Y axis.
     pub y_axis: Vector3<T>,
+    /// Basis Z axis.
     pub z_axis: Vector3<T>,
+    /// Basis origin (center).
     pub center: Vector3<T>,
 }
 
@@ -149,6 +156,7 @@ impl<T: Scalar> Basis<T> {
         }
     }
 
+    /// Returns the default right-handed basis at the origin.
     pub fn default() -> Self {
         Self {
             center: Vector3::new(<T as Zero>::zero(), <T as Zero>::zero(), <T as Zero>::zero()),
@@ -158,6 +166,7 @@ impl<T: Scalar> Basis<T> {
         }
     }
 
+    /// Returns the default right-handed basis with a custom center.
     pub fn default_with_center(center: &Vector3<T>) -> Self {
         Self {
             center: *center,
@@ -167,6 +176,7 @@ impl<T: Scalar> Basis<T> {
         }
     }
 
+    /// Returns the two axes spanning the given plane.
     pub fn plane_axis(&self, plane: BasisPlane) -> (&Vector3<T>, &Vector3<T>) {
         match plane {
             BasisPlane::YZ => (&self.y_axis, &self.z_axis),
@@ -175,6 +185,7 @@ impl<T: Scalar> Basis<T> {
         }
     }
 
+    /// Returns mutable references to the two axes spanning the given plane.
     pub fn plane_axis_mut(&mut self, plane: BasisPlane) -> (&mut Vector3<T>, &mut Vector3<T>) {
         match plane {
             BasisPlane::YZ => (&mut self.y_axis, &mut self.z_axis),

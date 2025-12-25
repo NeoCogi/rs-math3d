@@ -25,6 +25,8 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+//! Intersection and distance query traits and implementations.
+
 use crate::primitives::*;
 use crate::scalar::*;
 use crate::vector::*;
@@ -34,14 +36,19 @@ use num_traits::{Zero, One};
 /// Query Traits
 ////////////////////////////////////////////////////////////////////////////////
 pub trait Distance<T, Other> {
+    /// Computes the distance to another value, or `None` if undefined.
     fn distance(&self, other: &Other) -> Option<T>;
 }
 
+/// Trait for boolean intersection tests.
 pub trait Intersect<T> {
+    /// Returns `true` when two objects intersect.
     fn intersect(&self, other: &T) -> bool;
 }
 
+/// Trait for producing intersection results.
 pub trait Intersection<T, Other> {
+    /// Returns the intersection result, or `None` if there is no intersection.
     fn intersection(&self, other: &Other) -> Option<T>;
 }
 

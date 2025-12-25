@@ -198,14 +198,22 @@ macro_rules! implVecScalar {
     };
 }
 
+macro_rules! vector_field_doc {
+    (x) => { "X component." };
+    (y) => { "Y component." };
+    (z) => { "Z component." };
+    (w) => { "W component." };
+}
+
 macro_rules! implVector {
     ($(#[$meta:meta])* $vecName:ident, $($field:ident)*) => {
         $(#[$meta])*
         #[repr(C)]
         #[derive(Copy, Clone, Debug, Default)]
-        pub struct $vecName<T> { $(pub $field: T),* }
+        pub struct $vecName<T> { $(#[doc = vector_field_doc!($field)] pub $field: T),* }
 
         impl<T: Scalar> $vecName<T> {
+            /// Creates a vector from components.
             pub fn new($($field:T),*) -> Self { Self { $($field: $field),* } }
         }
 
@@ -413,14 +421,23 @@ where
 /// Provides methods to rearrange and duplicate vector components
 /// into 2D vectors using familiar shader-style syntax.
 pub trait Swizzle2<T: Scalar> {
+    /// Returns a vector with components (x, x).
     fn xx(&self) -> Vector2<T>;
+    /// Returns a vector with components (x, y).
     fn xy(&self) -> Vector2<T>;
+    /// Returns a vector with components (x, z).
     fn xz(&self) -> Vector2<T>;
+    /// Returns a vector with components (y, x).
     fn yx(&self) -> Vector2<T>;
+    /// Returns a vector with components (y, y).
     fn yy(&self) -> Vector2<T>;
+    /// Returns a vector with components (y, z).
     fn yz(&self) -> Vector2<T>;
+    /// Returns a vector with components (z, x).
     fn zx(&self) -> Vector2<T>;
+    /// Returns a vector with components (z, y).
     fn zy(&self) -> Vector2<T>;
+    /// Returns a vector with components (z, z).
     fn zz(&self) -> Vector2<T>;
 }
 
@@ -482,34 +499,61 @@ impl_swizzle2!(Vector4, x, y, z);
 /// Provides methods to rearrange and duplicate vector components
 /// into 3D vectors using familiar shader-style syntax.
 pub trait Swizzle3<T: Scalar> {
+    /// Returns a vector with components (x, x, x).
     fn xxx(&self) -> Vector3<T>;
+    /// Returns a vector with components (x, x, y).
     fn xxy(&self) -> Vector3<T>;
+    /// Returns a vector with components (x, x, z).
     fn xxz(&self) -> Vector3<T>;
+    /// Returns a vector with components (x, y, x).
     fn xyx(&self) -> Vector3<T>;
+    /// Returns a vector with components (x, y, y).
     fn xyy(&self) -> Vector3<T>;
+    /// Returns a vector with components (x, y, z).
     fn xyz(&self) -> Vector3<T>;
+    /// Returns a vector with components (x, z, x).
     fn xzx(&self) -> Vector3<T>;
+    /// Returns a vector with components (x, z, y).
     fn xzy(&self) -> Vector3<T>;
+    /// Returns a vector with components (x, z, z).
     fn xzz(&self) -> Vector3<T>;
 
+    /// Returns a vector with components (y, x, x).
     fn yxx(&self) -> Vector3<T>;
+    /// Returns a vector with components (y, x, y).
     fn yxy(&self) -> Vector3<T>;
+    /// Returns a vector with components (y, x, z).
     fn yxz(&self) -> Vector3<T>;
+    /// Returns a vector with components (y, y, x).
     fn yyx(&self) -> Vector3<T>;
+    /// Returns a vector with components (y, y, y).
     fn yyy(&self) -> Vector3<T>;
+    /// Returns a vector with components (y, y, z).
     fn yyz(&self) -> Vector3<T>;
+    /// Returns a vector with components (y, z, x).
     fn yzx(&self) -> Vector3<T>;
+    /// Returns a vector with components (y, z, y).
     fn yzy(&self) -> Vector3<T>;
+    /// Returns a vector with components (y, z, z).
     fn yzz(&self) -> Vector3<T>;
 
+    /// Returns a vector with components (z, x, x).
     fn zxx(&self) -> Vector3<T>;
+    /// Returns a vector with components (z, x, y).
     fn zxy(&self) -> Vector3<T>;
+    /// Returns a vector with components (z, x, z).
     fn zxz(&self) -> Vector3<T>;
+    /// Returns a vector with components (z, y, x).
     fn zyx(&self) -> Vector3<T>;
+    /// Returns a vector with components (z, y, y).
     fn zyy(&self) -> Vector3<T>;
+    /// Returns a vector with components (z, y, z).
     fn zyz(&self) -> Vector3<T>;
+    /// Returns a vector with components (z, z, x).
     fn zzx(&self) -> Vector3<T>;
+    /// Returns a vector with components (z, z, y).
     fn zzy(&self) -> Vector3<T>;
+    /// Returns a vector with components (z, z, z).
     fn zzz(&self) -> Vector3<T>;
 }
 

@@ -69,16 +69,25 @@ pub trait Scalar:
     + Sized
 {
     // Additional methods not provided by num-traits
+    /// Returns the constant 2 for the scalar type.
     fn two() -> Self;
+    /// Returns 1/2 for the scalar type.
     fn half() -> Self;
+    /// Returns 1/4 for the scalar type.
     fn quarter() -> Self;
+    /// Returns the constant 8192 for the scalar type.
     fn l8192() -> Self;
+    /// Returns a reasonable epsilon for comparisons.
     fn epsilon() -> Self;
+    /// Returns the minimum of two values.
     fn min(l: Self, r: Self) -> Self;
+    /// Returns the maximum of two values.
     fn max(l: Self, r: Self) -> Self;
+    /// Returns the squared value (self * self).
     fn squared(self) -> Self {
         self * self
     }
+    /// Returns the absolute value.
     fn tabs(self) -> Self;
 }
 
@@ -94,11 +103,17 @@ pub trait Scalar:
 /// MSVCRT on Windows) since they're not available in no_std Rust.
 /// When the `std` feature or tests are enabled, intrinsic std methods are used.
 pub trait FloatScalar: Scalar {
+    /// Returns positive infinity.
     fn infinity() -> Self;
+    /// Returns the square root.
     fn tsqrt(self) -> Self;
+    /// Returns the sine (radians).
     fn tsin(self) -> Self;
+    /// Returns the cosine (radians).
     fn tcos(self) -> Self;
+    /// Returns the tangent (radians).
     fn ttan(self) -> Self;
+    /// Returns the arc cosine (radians).
     fn tacos(self) -> Self;
 }
 

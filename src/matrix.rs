@@ -269,6 +269,7 @@ impl<T: Scalar> Matrix2<T> {
  *
  *****************************************************************************/
 impl<T: Scalar> Matrix3<T> {
+    /// Creates a new 3x3 matrix from column-major elements.
     pub fn new(m0: T, m1: T, m2: T, m3: T, m4: T, m5: T, m6: T, m7: T, m8: T) -> Self {
         Matrix3 {
             col: [
@@ -279,6 +280,13 @@ impl<T: Scalar> Matrix3<T> {
         }
     }
 
+    /// Returns the 3x3 identity matrix.
+    ///
+    /// ```text
+    /// [1 0 0]
+    /// [0 1 0]
+    /// [0 0 1]
+    /// ```
     pub fn identity() -> Self {
         Self::new(
             <T as One>::one(),
@@ -293,6 +301,7 @@ impl<T: Scalar> Matrix3<T> {
         )
     }
 
+    /// Computes the determinant of the matrix.
     pub fn determinant(&self) -> T {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -538,6 +547,7 @@ impl<T: FloatScalar> Matrix3<T> {
  *
  *****************************************************************************/
 impl<T: Scalar> Matrix4<T> {
+    /// Creates a new 4x4 matrix from column-major elements.
     pub fn new(
         m0: T,
         m1: T,
@@ -566,6 +576,7 @@ impl<T: Scalar> Matrix4<T> {
         }
     }
 
+    /// Returns the 4x4 identity matrix.
     pub fn identity() -> Self {
         Self::new(
             <T as One>::one(),
@@ -941,6 +952,11 @@ impl<T: Scalar> Matrix4<T> {
         )
     }
 
+    /// Multiplies a 4x4 matrix by a 4D vector.
+    ///
+    /// ```text
+    /// v' = M * v
+    /// ```
     pub fn mul_matrix_vector(l: &Self, r: &Vector4<T>) -> Vector4<T> {
         Self::mul_vector_matrix(r, &l.transpose())
     }
@@ -951,6 +967,11 @@ impl<T: Scalar> Matrix4<T> {
     //                     [m2 = c0_z | m6 = c1_z | m10= c2_z | m14= c3_z]
     //                     [m3 = c0_w | m7 = c1_w | m11= c2_w | m15= c3_w]
     //
+    /// Multiplies a 4D vector by a 4x4 matrix (row vector).
+    ///
+    /// ```text
+    /// v' = vᵀ * M
+    /// ```
     pub fn mul_vector_matrix(l: &Vector4<T>, r: &Self) -> Vector4<T> {
         Vector4::new(
             Vector4::dot(l, &r.col[0]),
@@ -1053,7 +1074,9 @@ impl<T: Scalar> Mul<Vector3<T>> for Matrix4<T> {
     }
 }
 
+/// Convenience extension for extracting a 3x3 submatrix.
 pub trait Matrix4Extension<T: Scalar> {
+    /// Returns the upper-left 3x3 rotation/scale submatrix.
     fn mat3(&self) -> Matrix3<T>;
 }
 

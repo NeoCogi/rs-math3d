@@ -25,6 +25,8 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+//! Quaternion math for rotations and orientation.
+
 use crate::matrix::{Matrix3, Matrix4};
 use crate::scalar::*;
 use crate::vector::{FloatVector, Vector, Vector3};
@@ -33,10 +35,15 @@ use num_traits::{Zero, One};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
+/// A quaternion representing rotation or orientation.
 pub struct Quat<T: Scalar> {
+    /// X component (imaginary).
     pub x: T,
+    /// Y component (imaginary).
     pub y: T,
+    /// Z component (imaginary).
     pub z: T,
+    /// W component (real).
     pub w: T,
 }
 
@@ -86,6 +93,7 @@ impl<T: FloatScalar> Quat<T> {
         }
     }
 
+    /// Returns the identity quaternion (no rotation).
     pub fn identity() -> Self {
         Self {
             x: <T as Zero>::zero(),
@@ -94,6 +102,7 @@ impl<T: FloatScalar> Quat<T> {
             w: <T as One>::one(),
         }
     }
+    /// Creates a quaternion from components.
     pub fn new(x: T, y: T, z: T, w: T) -> Self {
         Self {
             x: x,
@@ -152,12 +161,15 @@ impl<T: FloatScalar> Quat<T> {
     pub fn neg(q: &Self) -> Self {
         Self::new(-q.x, -q.y, -q.z, -q.w)
     }
+    /// Adds two quaternions component-wise.
     pub fn add(l: &Self, r: &Self) -> Self {
         Self::new(l.x + r.x, l.y + r.y, l.z + r.z, l.w + r.w)
     }
+    /// Subtracts two quaternions component-wise.
     pub fn sub(l: &Self, r: &Self) -> Self {
         Self::new(l.x - r.x, l.y - r.y, l.z - r.z, l.w - r.w)
     }
+    /// Multiplies two quaternions (Hamilton product).
     pub fn mul(l: &Self, r: &Self) -> Self {
         let x = l.w * r.x + l.x * r.w + l.y * r.z - l.z * r.y;
         let y = l.w * r.y + l.y * r.w + l.z * r.x - l.x * r.z;
@@ -166,15 +178,19 @@ impl<T: FloatScalar> Quat<T> {
         Self::new(x, y, z, w)
     }
 
+    /// Multiplies a quaternion by a scalar.
     pub fn mulf(l: &Self, r: T) -> Self {
         Self::new(l.x * r, l.y * r, l.z * r, l.w * r)
     }
+    /// Multiplies a scalar by a quaternion.
     pub fn fmul(l: T, r: &Self) -> Self {
         Self::new(l * r.x, l * r.y, l * r.z, l * r.w)
     }
+    /// Divides a quaternion by a scalar.
     pub fn divf(l: &Self, r: T) -> Self {
         Self::new(l.x / r, l.y / r, l.z / r, l.w / r)
     }
+    /// Divides a scalar by a quaternion component-wise.
     pub fn fdiv(l: T, r: &Self) -> Self {
         Self::new(l / r.x, l / r.y, l / r.z, l / r.w)
     }
@@ -296,6 +312,7 @@ impl<T: FloatScalar> Quat<T> {
         }
     }
 
+    /// Creates a quaternion from a 3x3 rotation matrix.
     pub fn of_matrix3(m: &Matrix3<T>) -> Self {
         Self::from_rotation_matrix(
             m.col[0].x,
@@ -310,6 +327,7 @@ impl<T: FloatScalar> Quat<T> {
         )
     }
 
+    /// Creates a quaternion from a 4x4 rotation matrix.
     pub fn of_matrix4(m: &Matrix4<T>) -> Self {
         Self::from_rotation_matrix(
             m.col[0].x,

@@ -958,6 +958,20 @@ mod tests {
     }
 
     #[test]
+    fn test_quaternion_matrix_roundtrip() {
+        let q = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 1.234);
+        let mat = q.mat3();
+        let q2 = Quat::of_matrix3(&mat);
+        let dot = Quat::dot(&q, &q2);
+        let q2 = if dot < 0.0 { Quat::neg(&q2) } else { q2 };
+
+        assert!((q.x - q2.x).abs() < 0.001);
+        assert!((q.y - q2.y).abs() < 0.001);
+        assert!((q.z - q2.z).abs() < 0.001);
+        assert!((q.w - q2.w).abs() < 0.001);
+    }
+
+    #[test]
     fn test_quaternion_conjugate() {
         let q = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let conj = Quat::conjugate(&q);

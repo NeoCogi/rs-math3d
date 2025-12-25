@@ -267,4 +267,18 @@ mod tests {
         let touching_z = Sphere3::new(Vector3::new(0.5, 0.5, 2.0), 1.1);
         assert!(b.intersect(&touching_z));
     }
+
+    #[test]
+    fn test_box3_sphere_intersect_on_edge() {
+        let b = Box3::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 1.0, 1.0),
+        );
+
+        let touching = Sphere3::new(Vector3::new(2.0, 0.5, 0.5), 1.0);
+        assert!(!b.intersect(&touching));
+
+        let just_inside = Sphere3::new(Vector3::new(2.0, 0.5, 0.5), 1.0001);
+        assert!(b.intersect(&just_inside));
+    }
 }

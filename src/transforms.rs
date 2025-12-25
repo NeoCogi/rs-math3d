@@ -476,4 +476,19 @@ mod tests {
         assert!((out.y - pt.y).abs() < 0.001);
         assert!((out.z - pt.z).abs() < 0.001);
     }
+
+    #[test]
+    fn test_lookat_identity() {
+        let eye = Vector3::new(0.0f32, 0.0, 0.0);
+        let dest = Vector3::new(0.0f32, 0.0, -1.0);
+        let up = Vector3::new(0.0f32, 1.0, 0.0);
+        let view = lookat(&eye, &dest, &up);
+        let v = Vector4::new(1.0f32, 2.0, 3.0, 1.0);
+        let out = view * v;
+
+        assert!((out.x - v.x).abs() < 0.001);
+        assert!((out.y - v.y).abs() < 0.001);
+        assert!((out.z - v.z).abs() < 0.001);
+        assert!((out.w - v.w).abs() < 0.001);
+    }
 }

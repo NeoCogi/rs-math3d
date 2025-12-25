@@ -175,6 +175,15 @@ pub trait FloatVector<T: FloatScalar>: Vector<T> {
     fn normalize_with_inv_len(&self, inv_len: T) -> Self {
         *self * inv_len
     }
+
+    /// Normalizes with precomputed length squared and inverse length.
+    fn try_normalize_with_inv_len(&self, len_sq: T, inv_len: T, epsilon: T) -> Option<Self> {
+        if len_sq <= epsilon * epsilon {
+            None
+        } else {
+            Some(*self * inv_len)
+        }
+    }
 }
 
 macro_rules! implVecScalar {
@@ -190,7 +199,8 @@ macro_rules! implVecScalar {
 }
 
 macro_rules! implVector {
-    ($vecName:ident, $($field:ident)*) => {
+    ($(#[$meta:meta])* $vecName:ident, $($field:ident)*) => {
+        $(#[$meta])*
         #[repr(C)]
         #[derive(Copy, Clone, Debug, Default)]
         pub struct $vecName<T> { $(pub $field: T),* }
@@ -325,43 +335,52 @@ pub trait CrossProduct {
     fn cross(l: &Self, r: &Self) -> Self;
 }
 
-/// A 2D vector with x and y components.
-///
-/// # Examples
-/// ```
-/// use rs_math3d::vector::Vector2;
-/// 
-/// let v = Vector2::new(3.0, 4.0);
-/// assert_eq!(v.x, 3.0);
-/// assert_eq!(v.y, 4.0);
-/// ```
-implVector!(Vector2, x y);
+implVector!(
+    /// A 2D vector with x and y components.
+    ///
+    /// # Examples
+    /// ```
+    /// use rs_math3d::vector::Vector2;
+    /// 
+    /// let v = Vector2::new(3.0, 4.0);
+    /// assert_eq!(v.x, 3.0);
+    /// assert_eq!(v.y, 4.0);
+    /// ```
+    Vector2,
+    x y
+);
 
-/// A 3D vector with x, y, and z components.
-///
-/// # Examples
-/// ```
-/// use rs_math3d::vector::{Vector3, CrossProduct};
-/// 
-/// let v1 = Vector3::new(1.0, 0.0, 0.0);
-/// let v2 = Vector3::new(0.0, 1.0, 0.0);
-/// let cross = Vector3::cross(&v1, &v2);
-/// // Result is (0, 0, 1) - the z-axis
-/// ```
-implVector!(Vector3, x y z);
+implVector!(
+    /// A 3D vector with x, y, and z components.
+    ///
+    /// # Examples
+    /// ```
+    /// use rs_math3d::vector::{Vector3, CrossProduct};
+    /// 
+    /// let v1 = Vector3::new(1.0, 0.0, 0.0);
+    /// let v2 = Vector3::new(0.0, 1.0, 0.0);
+    /// let cross = Vector3::cross(&v1, &v2);
+    /// // Result is (0, 0, 1) - the z-axis
+    /// ```
+    Vector3,
+    x y z
+);
 
-/// A 4D vector with x, y, z, and w components.
-///
-/// Often used for homogeneous coordinates in 3D graphics.
-///
-/// # Examples
-/// ```
-/// use rs_math3d::vector::Vector4;
-/// 
-/// let v = Vector4::new(1.0, 2.0, 3.0, 1.0);
-/// // w=1 for positions, w=0 for directions
-/// ```
-implVector!(Vector4, x y z w);
+implVector!(
+    /// A 4D vector with x, y, z, and w components.
+    ///
+    /// Often used for homogeneous coordinates in 3D graphics.
+    ///
+    /// # Examples
+    /// ```
+    /// use rs_math3d::vector::Vector4;
+    /// 
+    /// let v = Vector4::new(1.0, 2.0, 3.0, 1.0);
+    /// // w=1 for positions, w=0 for directions
+    /// ```
+    Vector4,
+    x y z w
+);
 
 implFloatVector!(Vector2);
 implFloatVector!(Vector3);
@@ -649,6 +668,14 @@ mod tests {
         let inv_len = 1.0f32 / len_sq.tsqrt();
         let nv_fast = v.normalize_with_inv_len(inv_len);
         assert!((nv_fast.length() - 1.0).abs() < 0.001);
+
+        let nv_fast_try = v
+            .try_normalize_with_inv_len(len_sq, inv_len, EPS_F32)
+            .expect("should normalize");
+        assert!((nv_fast_try.length() - 1.0).abs() < 0.001);
+        assert!(zero
+            .try_normalize_with_inv_len(0.0, 0.0, EPS_F32)
+            .is_none());
     }
 
     #[test]

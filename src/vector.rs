@@ -34,7 +34,7 @@
 //! # Examples
 //!
 //! ```
-//! use rs_math3d::vector::{Vector3, FloatVector};
+//! use rs_math3d::vector::{FloatVector, Vector, Vector3};
 //! 
 //! let v1 = Vector3::new(1.0, 2.0, 3.0);
 //! let v2 = Vector3::new(4.0, 5.0, 6.0);

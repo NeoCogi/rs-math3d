@@ -42,7 +42,7 @@
 //! ## Quick Start
 //!
 //! ```
-//! use rs_math3d::{Vector3, Matrix4, Quat};
+//! use rs_math3d::{Vector, Vector3, Matrix4, Quat};
 //! use rs_math3d::transforms;
 //!
 //! // Create vectors
@@ -200,4 +200,3 @@ pub fn color4b(r: u8, g: u8, b: u8, a: u8) -> Color4b {
         w: a,
     }
 }
-

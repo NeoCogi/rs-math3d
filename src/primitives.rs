@@ -39,14 +39,14 @@
 //! 
 //! // Create a ray from origin pointing along +X axis
 //! let ray = Ray::new(
-//!     Vector3::new(0.0, 0.0, 0.0),
-//!     Vector3::new(1.0, 0.0, 0.0)
+//!     &Vector3::new(0.0, 0.0, 0.0),
+//!     &Vector3::new(1.0, 0.0, 0.0)
 //! );
 //! 
 //! // Create a plane at z=5 facing down
 //! let plane = Plane::new(
-//!     Vector3::new(0.0, 0.0, 1.0),
-//!     -5.0
+//!     &Vector3::new(0.0, 0.0, -1.0),
+//!     &Vector3::new(0.0, 0.0, 5.0)
 //! );
 //! ```
 

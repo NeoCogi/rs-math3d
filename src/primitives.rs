@@ -183,10 +183,10 @@ impl<T: Scalar> Box3<T> {
         if self.min.x > other.max.x {
             return false;
         }
-        if self.min.x > other.max.x {
+        if self.min.y > other.max.y {
             return false;
         }
-        if self.min.x > other.max.x {
+        if self.min.z > other.max.z {
             return false;
         }
         return true;
@@ -716,5 +716,42 @@ mod tests {
         assert!(f32::abs(reconstructed.x - test_point.x) < 0.001);
         assert!(f32::abs(reconstructed.y - test_point.y) < 0.001);
         assert!(f32::abs(reconstructed.z - test_point.z) < 0.001);
+    }
+
+    #[test]
+    pub fn test_box3_overlap() {
+        let a = Box3::new(
+            &Vector3::new(0.0, 0.0, 0.0),
+            &Vector3::new(1.0, 1.0, 1.0),
+        );
+        let b = Box3::new(
+            &Vector3::new(0.5, 0.5, 0.5),
+            &Vector3::new(1.5, 1.5, 1.5),
+        );
+        assert!(a.overlap(&b));
+
+        let c = Box3::new(
+            &Vector3::new(2.0, 0.0, 0.0),
+            &Vector3::new(3.0, 1.0, 1.0),
+        );
+        assert!(!a.overlap(&c));
+
+        let d = Box3::new(
+            &Vector3::new(0.0, 2.0, 0.0),
+            &Vector3::new(1.0, 3.0, 1.0),
+        );
+        assert!(!a.overlap(&d));
+
+        let e = Box3::new(
+            &Vector3::new(0.0, 0.0, 2.0),
+            &Vector3::new(1.0, 1.0, 3.0),
+        );
+        assert!(!a.overlap(&e));
+
+        let f = Box3::new(
+            &Vector3::new(1.0, 0.0, 0.0),
+            &Vector3::new(2.0, 1.0, 1.0),
+        );
+        assert!(a.overlap(&f));
     }
 }

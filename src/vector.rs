@@ -376,95 +376,58 @@ pub trait Swizzle2<T: Scalar> {
     fn zz(&self) -> Vector2<T>;
 }
 
-impl<T: Scalar> Swizzle2<T> for Vector2<T> {
-    fn xx(&self) -> Vector2<T> {
-        Vector2::new(self.x, self.x)
-    }
-    fn xy(&self) -> Vector2<T> {
-        Vector2::new(self.x, self.y)
-    }
-    fn xz(&self) -> Vector2<T> {
-        Vector2::new(self.x, <T as Zero>::zero())
-    }
-    fn yx(&self) -> Vector2<T> {
-        Vector2::new(self.y, self.x)
-    }
-    fn yy(&self) -> Vector2<T> {
-        Vector2::new(self.y, self.y)
-    }
-    fn yz(&self) -> Vector2<T> {
-        Vector2::new(self.y, <T as Zero>::zero())
-    }
-    fn zx(&self) -> Vector2<T> {
-        Vector2::new(<T as Zero>::zero(), self.x)
-    }
-    fn zy(&self) -> Vector2<T> {
-        Vector2::new(<T as Zero>::zero(), self.y)
-    }
-    fn zz(&self) -> Vector2<T> {
-        Vector2::new(<T as Zero>::zero(), <T as Zero>::zero())
-    }
+macro_rules! swizzle_field {
+    ($s:ident, x) => {
+        $s.x
+    };
+    ($s:ident, y) => {
+        $s.y
+    };
+    ($s:ident, z) => {
+        $s.z
+    };
+    ($s:ident, zero) => {
+        <T as Zero>::zero()
+    };
 }
 
-impl<T: Scalar> Swizzle2<T> for Vector3<T> {
-    fn xx(&self) -> Vector2<T> {
-        Vector2::new(self.x, self.x)
-    }
-    fn xy(&self) -> Vector2<T> {
-        Vector2::new(self.x, self.y)
-    }
-    fn xz(&self) -> Vector2<T> {
-        Vector2::new(self.x, self.z)
-    }
-    fn yx(&self) -> Vector2<T> {
-        Vector2::new(self.y, self.x)
-    }
-    fn yy(&self) -> Vector2<T> {
-        Vector2::new(self.y, self.y)
-    }
-    fn yz(&self) -> Vector2<T> {
-        Vector2::new(self.y, self.z)
-    }
-    fn zx(&self) -> Vector2<T> {
-        Vector2::new(self.z, self.x)
-    }
-    fn zy(&self) -> Vector2<T> {
-        Vector2::new(self.z, self.y)
-    }
-    fn zz(&self) -> Vector2<T> {
-        Vector2::new(self.z, self.z)
-    }
+macro_rules! impl_swizzle2 {
+    ($vec:ident, $x:tt, $y:tt, $z:tt) => {
+        impl<T: Scalar> Swizzle2<T> for $vec<T> {
+            fn xx(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $x), swizzle_field!(self, $x))
+            }
+            fn xy(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $x), swizzle_field!(self, $y))
+            }
+            fn xz(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $x), swizzle_field!(self, $z))
+            }
+            fn yx(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $y), swizzle_field!(self, $x))
+            }
+            fn yy(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $y), swizzle_field!(self, $y))
+            }
+            fn yz(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $y), swizzle_field!(self, $z))
+            }
+            fn zx(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $z), swizzle_field!(self, $x))
+            }
+            fn zy(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $z), swizzle_field!(self, $y))
+            }
+            fn zz(&self) -> Vector2<T> {
+                Vector2::new(swizzle_field!(self, $z), swizzle_field!(self, $z))
+            }
+        }
+    };
 }
 
-impl<T: Scalar> Swizzle2<T> for Vector4<T> {
-    fn xx(&self) -> Vector2<T> {
-        Vector2::new(self.x, self.x)
-    }
-    fn xy(&self) -> Vector2<T> {
-        Vector2::new(self.x, self.y)
-    }
-    fn xz(&self) -> Vector2<T> {
-        Vector2::new(self.x, self.z)
-    }
-    fn yx(&self) -> Vector2<T> {
-        Vector2::new(self.y, self.x)
-    }
-    fn yy(&self) -> Vector2<T> {
-        Vector2::new(self.y, self.y)
-    }
-    fn yz(&self) -> Vector2<T> {
-        Vector2::new(self.y, self.z)
-    }
-    fn zx(&self) -> Vector2<T> {
-        Vector2::new(self.z, self.x)
-    }
-    fn zy(&self) -> Vector2<T> {
-        Vector2::new(self.z, self.y)
-    }
-    fn zz(&self) -> Vector2<T> {
-        Vector2::new(self.z, self.z)
-    }
-}
+impl_swizzle2!(Vector2, x, y, zero);
+impl_swizzle2!(Vector3, x, y, z);
+impl_swizzle2!(Vector4, x, y, z);
 
 /// Trait for 3D swizzle operations on vectors.
 ///
@@ -502,177 +465,98 @@ pub trait Swizzle3<T: Scalar> {
     fn zzz(&self) -> Vector3<T>;
 }
 
-impl<T: Scalar> Swizzle3<T> for Vector3<T> {
-    fn xxx(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.x, self.x)
-    }
-    fn xxy(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.x, self.y)
-    }
-    fn xxz(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.x, self.z)
-    }
-    fn xyx(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.y, self.x)
-    }
-    fn xyy(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.y, self.y)
-    }
-    fn xyz(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.y, self.z)
-    }
-    fn xzx(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.z, self.x)
-    }
-    fn xzy(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.z, self.y)
-    }
-    fn xzz(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.z, self.z)
-    }
+macro_rules! impl_swizzle3 {
+    ($vec:ident, $x:tt, $y:tt, $z:tt) => {
+        impl<T: Scalar> Swizzle3<T> for $vec<T> {
+            fn xxx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $x), swizzle_field!(self, $x))
+            }
+            fn xxy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $x), swizzle_field!(self, $y))
+            }
+            fn xxz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $x), swizzle_field!(self, $z))
+            }
+            fn xyx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $y), swizzle_field!(self, $x))
+            }
+            fn xyy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $y), swizzle_field!(self, $y))
+            }
+            fn xyz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $y), swizzle_field!(self, $z))
+            }
+            fn xzx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $z), swizzle_field!(self, $x))
+            }
+            fn xzy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $z), swizzle_field!(self, $y))
+            }
+            fn xzz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $x), swizzle_field!(self, $z), swizzle_field!(self, $z))
+            }
 
-    fn yxx(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.x, self.x)
-    }
-    fn yxy(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.x, self.y)
-    }
-    fn yxz(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.x, self.z)
-    }
-    fn yyx(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.y, self.x)
-    }
-    fn yyy(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.y, self.y)
-    }
-    fn yyz(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.y, self.z)
-    }
-    fn yzx(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.z, self.x)
-    }
-    fn yzy(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.z, self.y)
-    }
-    fn yzz(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.z, self.z)
-    }
+            fn yxx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $x), swizzle_field!(self, $x))
+            }
+            fn yxy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $x), swizzle_field!(self, $y))
+            }
+            fn yxz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $x), swizzle_field!(self, $z))
+            }
+            fn yyx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $y), swizzle_field!(self, $x))
+            }
+            fn yyy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $y), swizzle_field!(self, $y))
+            }
+            fn yyz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $y), swizzle_field!(self, $z))
+            }
+            fn yzx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $z), swizzle_field!(self, $x))
+            }
+            fn yzy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $z), swizzle_field!(self, $y))
+            }
+            fn yzz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $y), swizzle_field!(self, $z), swizzle_field!(self, $z))
+            }
 
-    fn zxx(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.x, self.x)
-    }
-    fn zxy(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.x, self.y)
-    }
-    fn zxz(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.x, self.z)
-    }
-    fn zyx(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.y, self.x)
-    }
-    fn zyy(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.y, self.y)
-    }
-    fn zyz(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.y, self.z)
-    }
-    fn zzx(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.z, self.x)
-    }
-    fn zzy(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.z, self.y)
-    }
-    fn zzz(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.z, self.z)
-    }
+            fn zxx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $x), swizzle_field!(self, $x))
+            }
+            fn zxy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $x), swizzle_field!(self, $y))
+            }
+            fn zxz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $x), swizzle_field!(self, $z))
+            }
+            fn zyx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $y), swizzle_field!(self, $x))
+            }
+            fn zyy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $y), swizzle_field!(self, $y))
+            }
+            fn zyz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $y), swizzle_field!(self, $z))
+            }
+            fn zzx(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $z), swizzle_field!(self, $x))
+            }
+            fn zzy(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $z), swizzle_field!(self, $y))
+            }
+            fn zzz(&self) -> Vector3<T> {
+                Vector3::new(swizzle_field!(self, $z), swizzle_field!(self, $z), swizzle_field!(self, $z))
+            }
+        }
+    };
 }
 
-impl<T: Scalar> Swizzle3<T> for Vector4<T> {
-    fn xxx(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.x, self.x)
-    }
-    fn xxy(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.x, self.y)
-    }
-    fn xxz(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.x, self.z)
-    }
-    fn xyx(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.y, self.x)
-    }
-    fn xyy(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.y, self.y)
-    }
-    fn xyz(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.y, self.z)
-    }
-    fn xzx(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.z, self.x)
-    }
-    fn xzy(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.z, self.y)
-    }
-    fn xzz(&self) -> Vector3<T> {
-        Vector3::new(self.x, self.z, self.z)
-    }
-
-    fn yxx(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.x, self.x)
-    }
-    fn yxy(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.x, self.y)
-    }
-    fn yxz(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.x, self.z)
-    }
-    fn yyx(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.y, self.x)
-    }
-    fn yyy(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.y, self.y)
-    }
-    fn yyz(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.y, self.z)
-    }
-    fn yzx(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.z, self.x)
-    }
-    fn yzy(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.z, self.y)
-    }
-    fn yzz(&self) -> Vector3<T> {
-        Vector3::new(self.y, self.z, self.z)
-    }
-
-    fn zxx(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.x, self.x)
-    }
-    fn zxy(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.x, self.y)
-    }
-    fn zxz(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.x, self.z)
-    }
-    fn zyx(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.y, self.x)
-    }
-    fn zyy(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.y, self.y)
-    }
-    fn zyz(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.y, self.z)
-    }
-    fn zzx(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.z, self.x)
-    }
-    fn zzy(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.z, self.y)
-    }
-    fn zzz(&self) -> Vector3<T> {
-        Vector3::new(self.z, self.z, self.z)
-    }
-}
+impl_swizzle3!(Vector3, x, y, z);
+impl_swizzle3!(Vector4, x, y, z);
 
 #[cfg(test)]
 mod tests {
@@ -882,6 +766,10 @@ mod tests {
         
         assert_eq!(v2.yy().x, 2.0);
         assert_eq!(v2.yy().y, 2.0);
+
+        let v2_xz = v2.xz();
+        assert_eq!(v2_xz.x, 1.0);
+        assert_eq!(v2_xz.y, 0.0);
         
         let v3 = Vector3::<f32>::new(1.0, 2.0, 3.0);
         
@@ -895,6 +783,15 @@ mod tests {
         assert_eq!(v3_swizzle.x, 3.0);
         assert_eq!(v3_swizzle.y, 2.0);
         assert_eq!(v3_swizzle.z, 1.0);
+
+        let v4 = Vector4::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let v4_xz = v4.xz();
+        assert_eq!(v4_xz.x, 1.0);
+        assert_eq!(v4_xz.y, 3.0);
+        let v4_swizzle = v4.zyx();
+        assert_eq!(v4_swizzle.x, 3.0);
+        assert_eq!(v4_swizzle.y, 2.0);
+        assert_eq!(v4_swizzle.z, 1.0);
     }
 
     #[test]

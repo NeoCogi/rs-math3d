@@ -841,6 +841,25 @@ mod tests {
     }
 
     #[test]
+    fn test_line_normalize_zero_direction() {
+        let line = Line {
+            p: Vector3::new(0.0f32, 0.0, 0.0),
+            d: Vector3::new(0.0f32, 0.0, 0.0),
+            t: core::marker::PhantomData,
+        };
+        assert!(line.normalize(EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_line_normalize_valid_direction() {
+        let p = Vector3::new(0.0f32, 0.0, 0.0);
+        let d = Vector3::new(2.0f32, 0.0, 0.0);
+        let line = Line::new(&p, &d, EPS_F32).expect("line should be valid");
+        let norm = line.normalize(EPS_F32).expect("normalize should succeed");
+        assert!((norm.d.length() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
     fn test_segment_distance_zero_length() {
         let p = Vector3::new(0.0f32, 0.0, 0.0);
         let seg = Segment::new(&p, &p);

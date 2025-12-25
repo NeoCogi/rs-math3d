@@ -633,8 +633,8 @@ impl<T: FloatScalar> ParametricPlane<T> {
 
     pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
         let p = *v - self.center;
-        let x_coord = dot(&p, &self.x_axis) / dot(&self.x_axis, &self.x_axis);
-        let y_coord = dot(&p, &self.y_axis) / dot(&self.y_axis, &self.y_axis);
+        let x_coord = Vector3::dot(&p, &self.x_axis) / Vector3::dot(&self.x_axis, &self.x_axis);
+        let y_coord = Vector3::dot(&p, &self.y_axis) / Vector3::dot(&self.y_axis, &self.y_axis);
         Vector2::new(x_coord, y_coord)
     }
 }
@@ -938,5 +938,18 @@ mod tests {
             assert!(sub.min.x >= 0.0 && sub.min.y >= 0.0 && sub.min.z >= 0.0);
             assert!(sub.max.x <= 2.0 && sub.max.y <= 2.0 && sub.max.z <= 2.0);
         }
+    }
+
+    #[test]
+    fn test_parametric_plane_project() {
+        let plane = ParametricPlane::new(
+            &Vector3::new(1.0f32, 2.0, 3.0),
+            &Vector3::new(1.0, 0.0, 0.0),
+            &Vector3::new(0.0, 1.0, 0.0),
+        );
+        let point = Vector3::new(3.0f32, 6.0, 3.0);
+        let uv = plane.project(&point);
+        assert!((uv.x - 2.0).abs() < 0.001);
+        assert!((uv.y - 4.0).abs() < 0.001);
     }
 }

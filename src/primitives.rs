@@ -450,9 +450,15 @@ impl<T: Scalar> Ray<T, Vector3<T>> {
     ///
     /// Returns the intersection point, or `None` if the ray doesn't hit the plane
     /// (parallel or pointing away).
-    pub fn intersect_plane(&self, p: &Plane<T>) -> Option<Vector3<T>> {
+    ///
+    /// Returns `None` if the ray is parallel to the plane within `epsilon`.
+    pub fn intersect_plane(&self, p: &Plane<T>, epsilon: T) -> Option<Vector3<T>> {
         let n = p.normal();
-        let t: T = -(p.d + Vector3::dot(&n, &self.start)) / Vector3::dot(&n, &self.direction);
+        let denom = Vector3::dot(&n, &self.direction);
+        if denom.tabs() <= epsilon {
+            return None;
+        }
+        let t: T = -(p.d + Vector3::dot(&n, &self.start)) / denom;
         if t < <T as Zero>::zero() {
             None
         } else {
@@ -532,8 +538,8 @@ impl<T: Scalar> Plane<T> {
         self.d
     }
 
-    pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>) -> Option<Vector3<T>> {
-        r.intersect_plane(self)
+    pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+        r.intersect_plane(self, epsilon)
     }
 
     /// Computes line-plane intersection.
@@ -610,8 +616,8 @@ impl<T: FloatScalar> ParametricPlane<T> {
         Vector3::cross(&self.x_axis, &self.y_axis).normalize()
     }
 
-    pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>) -> Option<Vector3<T>> {
-        r.intersect_plane(&self.plane())
+    pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+        r.intersect_plane(&self.plane(), epsilon)
     }
 
     pub fn intersect_line(
@@ -855,5 +861,37 @@ mod tests {
         let l0 = Line::new(&p0, &d, EPS_F32).expect("line should be valid");
         let l1 = Line::new(&p1, &d, EPS_F32).expect("line should be valid");
         assert!(shortest_segment3d_between_lines3d(&l0, &l1, EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_ray_intersect_plane_parallel() {
+        let ray = Ray::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 0.0, 0.0),
+            EPS_F32,
+        )
+        .expect("ray should be valid");
+        let plane = Plane::new(
+            &Vector3::new(0.0f32, 1.0, 0.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+        assert!(ray.intersect_plane(&plane, EPS_F32).is_none());
+        assert!(plane.intersect_ray(&ray, EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_ray_intersect_plane_hit() {
+        let ray = Ray::new(
+            &Vector3::new(0.0f32, -1.0, 0.0),
+            &Vector3::new(0.0, 1.0, 0.0),
+            EPS_F32,
+        )
+        .expect("ray should be valid");
+        let plane = Plane::new(
+            &Vector3::new(0.0f32, 1.0, 0.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+        let hit = ray.intersect_plane(&plane, EPS_F32).expect("should hit");
+        assert!(hit.y.abs() < 0.001);
     }
 }

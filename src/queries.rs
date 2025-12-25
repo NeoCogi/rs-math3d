@@ -129,9 +129,9 @@ impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
             dist += T::squared(c.y - self.max.y)
         }
 
-        if c.x < self.min.z {
+        if c.z < self.min.z {
             dist += T::squared(c.z - self.min.z)
-        } else if c.x > self.max.z {
+        } else if c.z > self.max.z {
             dist += T::squared(c.z - self.max.z)
         }
 
@@ -248,4 +248,25 @@ pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
     let v = Vector3::normalize(&v);
     let w = Vector3::normalize(&Vector3::cross(&u, &v));
     [u, w, v]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Intersect;
+    use crate::primitives::{Box3, Sphere3};
+    use crate::vector::Vector3;
+
+    #[test]
+    fn test_box3_sphere_intersect_z_axis() {
+        let b = Box3::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 1.0, 1.0),
+        );
+
+        let outside_z = Sphere3::new(Vector3::new(0.5, 0.5, 2.0), 0.25);
+        assert!(!b.intersect(&outside_z));
+
+        let touching_z = Sphere3::new(Vector3::new(0.5, 0.5, 2.0), 1.1);
+        assert!(b.intersect(&touching_z));
+    }
 }

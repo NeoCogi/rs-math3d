@@ -133,8 +133,17 @@ impl<T: FloatScalar> Quat<T> {
     pub fn fdiv(l: T, r: &Self) -> Self {
         Self::new(l / r.x, l / r.y, l / r.z, l / r.w)
     }
+    /// Returns the multiplicative inverse of the quaternion.
+    ///
+    /// For non-zero quaternions: q⁻¹ = conjugate(q) / |q|².
+    /// Returns the input unchanged if the norm is too small.
     pub fn inverse(q: &Self) -> Self {
-        Self::normalize(&Self::conjugate(q))
+        let denom = Self::dot(q, q);
+        if denom > T::epsilon() {
+            Self::conjugate(q) / denom
+        } else {
+            *q
+        }
     }
 
     /// Converts the quaternion to a 3x3 rotation matrix.
@@ -800,6 +809,18 @@ mod tests {
         assert!((product.x).abs() < 0.001);
         assert!((product.y).abs() < 0.001);
         assert!((product.z).abs() < 0.001);
+        assert!((product.w - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_quaternion_inverse_non_unit() {
+        let q = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
+        let q_inv = Quat::inverse(&q);
+        let product = q * q_inv;
+
+        assert!(product.x.abs() < 0.001);
+        assert!(product.y.abs() < 0.001);
+        assert!(product.z.abs() < 0.001);
         assert!((product.w - 1.0).abs() < 0.001);
     }
 

@@ -206,7 +206,11 @@ pub fn unproject3<T: FloatScalar>(
     pt: &Vector3<T>,
 ) -> Vector3<T> {
     let pw = *persp * *world;
-    let inv = pw.inverse();
+    let inv = if pw.is_affine(T::epsilon()) {
+        pw.inverse_affine()
+    } else {
+        pw.inverse()
+    };
     let in_x = (T::two() * (pt.x - lb.x) / (rt.x - lb.x)) - <T as One>::one();
     let in_y = (T::two() * (pt.y - lb.y) / (rt.y - lb.y)) - <T as One>::one();
     let in_z = (T::two() * pt.z) - <T as One>::one();

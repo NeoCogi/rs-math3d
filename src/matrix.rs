@@ -667,6 +667,14 @@ impl<T: Scalar> Matrix4<T> {
         )
     }
 
+    /// Returns true if the matrix is affine (last row equals [0, 0, 0, 1]).
+    pub fn is_affine(&self, epsilon: T) -> bool {
+        self.col[0].w.tabs() <= epsilon
+            && self.col[1].w.tabs() <= epsilon
+            && self.col[2].w.tabs() <= epsilon
+            && (self.col[3].w - <T as One>::one()).tabs() <= epsilon
+    }
+
     /// Computes the inverse of the matrix.
     ///
     /// Uses the adjugate matrix method:
@@ -819,6 +827,45 @@ impl<T: Scalar> Matrix4<T> {
 
         Self::new(
             r00, r10, r20, r30, r01, r11, r21, r31, r02, r12, r22, r32, r03, r13, r23, r33,
+        )
+    }
+
+    /// Computes the inverse of an affine matrix (rotation/scale + translation).
+    ///
+    /// Assumes the last row is `[0, 0, 0, 1]`.
+    pub fn inverse_affine(&self) -> Self {
+        let rot = Matrix3::new(
+            self.col[0].x,
+            self.col[0].y,
+            self.col[0].z,
+            self.col[1].x,
+            self.col[1].y,
+            self.col[1].z,
+            self.col[2].x,
+            self.col[2].y,
+            self.col[2].z,
+        );
+        let rot_inv = rot.inverse();
+        let trans = Vector3::new(self.col[3].x, self.col[3].y, self.col[3].z);
+        let trans_inv = -(rot_inv * trans);
+
+        Self::new(
+            rot_inv.col[0].x,
+            rot_inv.col[0].y,
+            rot_inv.col[0].z,
+            <T as Zero>::zero(),
+            rot_inv.col[1].x,
+            rot_inv.col[1].y,
+            rot_inv.col[1].z,
+            <T as Zero>::zero(),
+            rot_inv.col[2].x,
+            rot_inv.col[2].y,
+            rot_inv.col[2].z,
+            <T as Zero>::zero(),
+            trans_inv.x,
+            trans_inv.y,
+            trans_inv.z,
+            <T as One>::one(),
         )
     }
 
@@ -1302,5 +1349,36 @@ mod tests {
                     "Matrix inverse failed at [{}, {}]: expected {}, got {}", i, j, expected, val);
             }
         }
+    }
+
+    #[test]
+    fn test_matrix4_inverse_affine() {
+        let m = Matrix4::<f32>::new(
+            0.0, 1.0, 0.0, 0.0,
+            -1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 2.0, 0.0,
+            3.0, 4.0, 5.0, 1.0,
+        );
+        assert!(m.is_affine(EPS_F32));
+
+        let inv_affine = m.inverse_affine();
+        let inv_full = m.inverse();
+
+        for i in 0..4 {
+            let a = inv_affine.col[i];
+            let b = inv_full.col[i];
+            assert!((a.x - b.x).abs() < 0.001);
+            assert!((a.y - b.y).abs() < 0.001);
+            assert!((a.z - b.z).abs() < 0.001);
+            assert!((a.w - b.w).abs() < 0.001);
+        }
+
+        let non_affine = Matrix4::<f32>::new(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, -1.0,
+            0.0, 0.0, 0.0, 0.0,
+        );
+        assert!(!non_affine.is_affine(EPS_F32));
     }
 }

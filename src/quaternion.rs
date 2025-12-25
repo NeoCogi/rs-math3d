@@ -41,6 +41,51 @@ pub struct Quat<T: Scalar> {
 }
 
 impl<T: FloatScalar> Quat<T> {
+    fn from_rotation_matrix(
+        m00: T,
+        m01: T,
+        m02: T,
+        m10: T,
+        m11: T,
+        m12: T,
+        m20: T,
+        m21: T,
+        m22: T,
+    ) -> Self {
+        let t = <T as One>::one() + m00 + m11 + m22;
+
+        if t > <T as Zero>::zero() {
+            let s = T::tsqrt(t) * T::two();
+
+            let x = (m21 - m12) / s;
+            let y = (m02 - m20) / s;
+            let z = (m10 - m01) / s;
+            let w = T::quarter() * s;
+            Self::new(x, y, z, w)
+        } else if m00 > m11 && m00 > m22 {
+            let s = T::tsqrt(<T as One>::one() + m00 - m11 - m22) * T::two();
+            let x = T::quarter() * s;
+            let y = (m10 + m01) / s;
+            let z = (m02 + m20) / s;
+            let w = (m21 - m12) / s;
+            Self::new(x, y, z, w)
+        } else if m11 > m22 {
+            let s = T::tsqrt(<T as One>::one() + m11 - m00 - m22) * T::two();
+            let x = (m10 + m01) / s;
+            let y = T::quarter() * s;
+            let z = (m21 + m12) / s;
+            let w = (m02 - m20) / s;
+            Self::new(x, y, z, w)
+        } else {
+            let s = T::tsqrt(<T as One>::one() + m22 - m00 - m11) * T::two();
+            let x = (m02 + m20) / s;
+            let y = (m21 + m12) / s;
+            let z = T::quarter() * s;
+            let w = (m10 - m01) / s;
+            Self::new(x, y, z, w)
+        }
+    }
+
     pub fn identity() -> Self {
         Self {
             x: <T as Zero>::zero(),
@@ -252,107 +297,31 @@ impl<T: FloatScalar> Quat<T> {
     }
 
     pub fn of_matrix3(m: &Matrix3<T>) -> Self {
-        let mat0 = m.col[0].x;
-        let mat1 = m.col[1].x;
-        let mat2 = m.col[2].x;
-
-        let mat4 = m.col[0].y;
-        let mat5 = m.col[1].y;
-        let mat6 = m.col[2].y;
-
-        let mat8 = m.col[0].z;
-        let mat9 = m.col[1].z;
-        let mat10 = m.col[2].z;
-
-        let t = <T as One>::one() + mat0 + mat5 + mat10;
-
-        if t > <T as Zero>::zero() {
-            let s = T::tsqrt(t) * T::two();
-
-            let x = (mat9 - mat6) / s;
-            let y = (mat2 - mat8) / s;
-            let z = (mat4 - mat1) / s;
-            let w = T::quarter() * s;
-            Self::new(x, y, z, w)
-        } else {
-            if mat0 > mat5 && mat0 > mat10 {
-                // Column 0:
-                let s = T::tsqrt(<T as One>::one() + mat0 - mat5 - mat10) * T::two();
-                let x = T::quarter() * s;
-                let y = (mat4 + mat1) / s;
-                let z = (mat2 + mat8) / s;
-                let w = (mat9 - mat6) / s;
-                Self::new(x, y, z, w)
-            } else if mat5 > mat10 {
-                // Column 1:
-                let s = T::tsqrt(<T as One>::one() + mat5 - mat0 - mat10) * T::two();
-                let x = (mat4 + mat1) / s;
-                let y = T::quarter() * s;
-                let z = (mat9 + mat6) / s;
-                let w = (mat2 - mat8) / s;
-                Self::new(x, y, z, w)
-            } else {
-                // Column 2:
-                let s = T::tsqrt(<T as One>::one() + mat10 - mat0 - mat5) * T::two();
-                let x = (mat2 + mat8) / s;
-                let y = (mat9 + mat6) / s;
-                let z = T::quarter() * s;
-                let w = (mat4 - mat1) / s;
-                Self::new(x, y, z, w)
-            }
-        }
+        Self::from_rotation_matrix(
+            m.col[0].x,
+            m.col[1].x,
+            m.col[2].x,
+            m.col[0].y,
+            m.col[1].y,
+            m.col[2].y,
+            m.col[0].z,
+            m.col[1].z,
+            m.col[2].z,
+        )
     }
 
     pub fn of_matrix4(m: &Matrix4<T>) -> Self {
-        let mat0 = m.col[0].x;
-        let mat1 = m.col[1].x;
-        let mat2 = m.col[2].x;
-
-        let mat4 = m.col[0].y;
-        let mat5 = m.col[1].y;
-        let mat6 = m.col[2].y;
-
-        let mat8 = m.col[0].z;
-        let mat9 = m.col[1].z;
-        let mat10 = m.col[2].z;
-
-        let t = <T as One>::one() + mat0 + mat5 + mat10;
-
-        if t > <T as Zero>::zero() {
-            let s = T::tsqrt(t) * T::two();
-
-            let x = (mat9 - mat6) / s;
-            let y = (mat2 - mat8) / s;
-            let z = (mat4 - mat1) / s;
-            let w = T::quarter() * s;
-            Self::new(x, y, z, w)
-        } else {
-            if mat0 > mat5 && mat0 > mat10 {
-                // Column 0:
-                let s = T::tsqrt(<T as One>::one() + mat0 - mat5 - mat10) * T::two();
-                let x = T::quarter() * s;
-                let y = (mat4 + mat1) / s;
-                let z = (mat2 + mat8) / s;
-                let w = (mat9 - mat6) / s;
-                Self::new(x, y, z, w)
-            } else if mat5 > mat10 {
-                // Column 1:
-                let s = T::tsqrt(<T as One>::one() + mat5 - mat0 - mat10) * T::two();
-                let x = (mat4 + mat1) / s;
-                let y = T::quarter() * s;
-                let z = (mat9 + mat6) / s;
-                let w = (mat2 - mat8) / s;
-                Self::new(x, y, z, w)
-            } else {
-                // Column 2:
-                let s = T::tsqrt(<T as One>::one() + mat10 - mat0 - mat5) * T::two();
-                let x = (mat2 + mat8) / s;
-                let y = (mat9 + mat6) / s;
-                let z = T::quarter() * s;
-                let w = (mat4 - mat1) / s;
-                Self::new(x, y, z, w)
-            }
-        }
+        Self::from_rotation_matrix(
+            m.col[0].x,
+            m.col[1].x,
+            m.col[2].x,
+            m.col[0].y,
+            m.col[1].y,
+            m.col[2].y,
+            m.col[0].z,
+            m.col[1].z,
+            m.col[2].z,
+        )
     }
 
     /// Creates a quaternion from an axis and angle.
@@ -962,6 +931,20 @@ mod tests {
         let q = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 1.234);
         let mat = q.mat3();
         let q2 = Quat::of_matrix3(&mat);
+        let dot = Quat::dot(&q, &q2);
+        let q2 = if dot < 0.0 { Quat::neg(&q2) } else { q2 };
+
+        assert!((q.x - q2.x).abs() < 0.001);
+        assert!((q.y - q2.y).abs() < 0.001);
+        assert!((q.z - q2.z).abs() < 0.001);
+        assert!((q.w - q2.w).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_matrix4_quaternion_roundtrip() {
+        let q = quat_axis_angle_f32(&Vector3::new(0.0, 0.0, 1.0), 0.75);
+        let mat4 = q.mat4();
+        let q2 = Quat::of_matrix4(&mat4);
         let dot = Quat::dot(&q, &q2);
         let q2 = if dot < 0.0 { Quat::neg(&q2) } else { q2 };
 

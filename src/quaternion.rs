@@ -231,22 +231,24 @@ impl<T: FloatScalar> Quat<T> {
     /// For a quaternion q = cos(θ/2) + sin(θ/2)(xi + yj + zk):
     /// - axis = normalize(x, y, z)
     /// - angle = 2 * acos(w)
+    ///
+    /// If the rotation is near-zero, returns a default axis of (1, 0, 0).
     pub fn to_axis_angle(&self) -> (Vector3<T>, T) {
         let nq = Self::normalize(self);
-        let cos_a = nq.w;
-        let sin_a = {
-            let sin_a = T::tsqrt(<T as One>::one() - cos_a * cos_a);
-            // Use epsilon for numerical stability check
-            if T::tabs(sin_a) < T::epsilon() {
-                <T as One>::one()
-            } else {
-                sin_a
-            }
-        };
-
+        let one = <T as One>::one();
+        let mut cos_a = nq.w;
+        cos_a = T::min(one, T::max(-one, cos_a));
         let angle = T::tacos(cos_a) * T::two();
-        let axis = Vector3::new(nq.x, nq.y, nq.z) / sin_a;
-        (axis, angle)
+        let axis_vec = Vector3::new(nq.x, nq.y, nq.z);
+        let axis_len = axis_vec.length();
+        if axis_len <= T::epsilon() {
+            (
+                Vector3::new(one, <T as Zero>::zero(), <T as Zero>::zero()),
+                angle,
+            )
+        } else {
+            (axis_vec / axis_len, angle)
+        }
     }
 
     pub fn of_matrix3(m: &Matrix3<T>) -> Self {
@@ -896,6 +898,16 @@ mod tests {
         let q_identity = Quat::<f32>::identity();
         let (axis, angle) = q_identity.to_axis_angle();
         assert!((angle).abs() < 0.001);
+        assert!((axis.x - 1.0).abs() < 0.001);
+        assert!(axis.y.abs() < 0.001);
+        assert!(axis.z.abs() < 0.001);
+
+        // Test clamped w slightly above 1 does not produce NaN
+        let q_clamped = Quat::<f32>::new(0.0, 0.0, 0.0, 1.00001);
+        let (axis_clamped, angle_clamped) = q_clamped.to_axis_angle();
+        assert!(!angle_clamped.is_nan());
+        assert!((axis_clamped.length() - 1.0).abs() < 0.01);
+        assert!(Vector3::dot(&axis_clamped, &Vector3::new(1.0, 0.0, 0.0)) > 0.99);
         
         // Test 180-degree rotation
         let q_180 = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 3.14159265);
@@ -908,6 +920,8 @@ mod tests {
         let q_small = quat_axis_angle_f32(&Vector3::new(1.0, 0.0, 0.0), small_angle);
         let (axis_small, angle_small) = q_small.to_axis_angle();
         assert!((angle_small - small_angle).abs() < 0.0001);
+        assert!((axis_small.length() - 1.0).abs() < 0.01);
+        assert!(Vector3::dot(&axis_small, &Vector3::new(1.0, 0.0, 0.0)) > 0.99);
     }
 
     #[test]

@@ -31,7 +31,7 @@ use crate::matrix::{Matrix3, Matrix4};
 use crate::scalar::*;
 use crate::vector::{FloatVector, Vector, Vector3};
 use core::ops::*;
-use num_traits::{Zero, One};
+use num_traits::{One, Zero};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
@@ -48,6 +48,7 @@ pub struct Quat<T: Scalar> {
 }
 
 impl<T: FloatScalar> Quat<T> {
+    #[allow(clippy::too_many_arguments)]
     fn from_rotation_matrix(
         m00: T,
         m01: T,
@@ -104,12 +105,7 @@ impl<T: FloatScalar> Quat<T> {
     }
     /// Creates a quaternion from components.
     pub fn new(x: T, y: T, z: T, w: T) -> Self {
-        Self {
-            x: x,
-            y: y,
-            z: z,
-            w: w,
-        }
+        Self { x, y, z, w }
     }
 
     /// Computes the dot product of two quaternions.
@@ -129,7 +125,7 @@ impl<T: FloatScalar> Quat<T> {
     pub fn length(&self) -> T {
         T::tsqrt(Self::dot(self, self))
     }
-    
+
     /// Returns the conjugate of the quaternion.
     ///
     /// The conjugate inverts the rotation:
@@ -139,7 +135,7 @@ impl<T: FloatScalar> Quat<T> {
     pub fn conjugate(q: &Self) -> Self {
         Self::new(-q.x, -q.y, -q.z, q.w)
     }
-    
+
     /// Normalizes the quaternion to unit length.
     ///
     /// Unit quaternions represent valid rotations:
@@ -154,7 +150,7 @@ impl<T: FloatScalar> Quat<T> {
             *q
         }
     }
-    
+
     /// Negates all components of the quaternion.
     ///
     /// Note: -q and q represent the same rotation (double cover property).
@@ -315,30 +311,16 @@ impl<T: FloatScalar> Quat<T> {
     /// Creates a quaternion from a 3x3 rotation matrix.
     pub fn of_matrix3(m: &Matrix3<T>) -> Self {
         Self::from_rotation_matrix(
-            m.col[0].x,
-            m.col[1].x,
-            m.col[2].x,
-            m.col[0].y,
-            m.col[1].y,
-            m.col[2].y,
-            m.col[0].z,
-            m.col[1].z,
-            m.col[2].z,
+            m.col[0].x, m.col[1].x, m.col[2].x, m.col[0].y, m.col[1].y, m.col[2].y, m.col[0].z,
+            m.col[1].z, m.col[2].z,
         )
     }
 
     /// Creates a quaternion from a 4x4 rotation matrix.
     pub fn of_matrix4(m: &Matrix4<T>) -> Self {
         Self::from_rotation_matrix(
-            m.col[0].x,
-            m.col[1].x,
-            m.col[2].x,
-            m.col[0].y,
-            m.col[1].y,
-            m.col[2].y,
-            m.col[0].z,
-            m.col[1].z,
-            m.col[2].z,
+            m.col[0].x, m.col[1].x, m.col[2].x, m.col[0].y, m.col[1].y, m.col[2].y, m.col[0].z,
+            m.col[1].z, m.col[2].z,
         )
     }
 
@@ -429,11 +411,12 @@ impl_scalar!(Mul, mul, fmul, f64);
 
 #[cfg(test)]
 mod tests {
+    use core::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+
     use crate::matrix::*;
     use crate::scalar::*;
     use crate::vector::*;
     use crate::Quat;
-    use crate::*;
 
     fn quat_axis_angle_f32(axis: &Vector3<f32>, angle: f32) -> Quat<f32> {
         Quat::of_axis_angle(axis, angle, EPS_F32).expect("axis length too small")
@@ -447,6 +430,22 @@ mod tests {
         Matrix3::of_axis_angle(axis, angle, EPS_F32).expect("axis length too small")
     }
 
+    fn assert_vec3_close_f32(actual: Vector3<f32>, expected: Vector3<f32>) {
+        assert!((actual - expected).length() < f32::epsilon());
+    }
+
+    fn assert_vec3_close_f64(actual: Vector3<f64>, expected: Vector3<f64>) {
+        assert!((actual - expected).length() < f64::epsilon());
+    }
+
+    fn assert_scalar_close_f32(actual: f32, expected: f32) {
+        assert!((actual - expected).abs() < f32::epsilon());
+    }
+
+    fn assert_scalar_close_f64(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < f64::epsilon());
+    }
+
     #[test]
     fn test_identity() {
         let q = Quat::<f32>::identity();
@@ -456,18 +455,9 @@ mod tests {
         let y_axis = m.col[1];
         let z_axis = m.col[2];
 
-        assert_eq!(
-            (x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (y_axis - Vector3::new(0.0, 1.0, 0.0)).length() < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (z_axis - Vector3::new(0.0, 0.0, 1.0)).length() < f32::epsilon(),
-            true
-        );
+        assert_vec3_close_f32(x_axis, Vector3::new(1.0, 0.0, 0.0));
+        assert_vec3_close_f32(y_axis, Vector3::new(0.0, 1.0, 0.0));
+        assert_vec3_close_f32(z_axis, Vector3::new(0.0, 0.0, 1.0));
     }
 
     #[test]
@@ -479,24 +469,15 @@ mod tests {
         let y_axis = m.col[1];
         let z_axis = m.col[2];
 
-        assert_eq!(
-            (x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (y_axis - Vector3::new(0.0, 1.0, 0.0)).length() < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (z_axis - Vector3::new(0.0, 0.0, 1.0)).length() < f32::epsilon(),
-            true
-        );
+        assert_vec3_close_f32(x_axis, Vector3::new(1.0, 0.0, 0.0));
+        assert_vec3_close_f32(y_axis, Vector3::new(0.0, 1.0, 0.0));
+        assert_vec3_close_f32(z_axis, Vector3::new(0.0, 0.0, 1.0));
     }
 
     #[test]
     fn test_rot_180() {
         let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
-        let a = 3.14159265;
+        let a = PI;
 
         let q = quat_axis_angle_f32(&v, a);
         let m = q.mat3();
@@ -505,18 +486,9 @@ mod tests {
         let y_axis = m.col[1];
         let z_axis = m.col[2];
 
-        assert_eq!(
-            (x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (y_axis - Vector3::new(0.0, -1.0, 0.0)).length() < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (z_axis - Vector3::new(0.0, 0.0, -1.0)).length() < f32::epsilon(),
-            true
-        );
+        assert_vec3_close_f32(x_axis, Vector3::new(1.0, 0.0, 0.0));
+        assert_vec3_close_f32(y_axis, Vector3::new(0.0, -1.0, 0.0));
+        assert_vec3_close_f32(z_axis, Vector3::new(0.0, 0.0, -1.0));
 
         let m2 = mat3_axis_angle_f32(&v, a);
 
@@ -524,15 +496,15 @@ mod tests {
         let y2_axis = m2.col[1];
         let z2_axis = m2.col[2];
 
-        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
-        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
-        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(x_axis, x2_axis);
+        assert_vec3_close_f32(y_axis, y2_axis);
+        assert_vec3_close_f32(z_axis, z2_axis);
     }
 
     #[test]
     fn test_rot_90() {
         let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
-        let a = 3.14159265 / 2.0;
+        let a = FRAC_PI_2;
 
         let q = quat_axis_angle_f32(&v, a);
         let m = q.mat3();
@@ -541,18 +513,9 @@ mod tests {
         let y_axis = m.col[1];
         let z_axis = m.col[2];
 
-        assert_eq!(
-            (x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (y_axis - Vector3::new(0.0, 0.0, 1.0)).length() < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (z_axis - Vector3::new(0.0, -1.0, 0.0)).length() < f32::epsilon(),
-            true
-        );
+        assert_vec3_close_f32(x_axis, Vector3::new(1.0, 0.0, 0.0));
+        assert_vec3_close_f32(y_axis, Vector3::new(0.0, 0.0, 1.0));
+        assert_vec3_close_f32(z_axis, Vector3::new(0.0, -1.0, 0.0));
 
         let m2 = mat3_axis_angle_f32(&v, a);
 
@@ -560,15 +523,15 @@ mod tests {
         let y2_axis = m2.col[1];
         let z2_axis = m2.col[2];
 
-        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
-        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
-        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(x_axis, x2_axis);
+        assert_vec3_close_f32(y_axis, y2_axis);
+        assert_vec3_close_f32(z_axis, z2_axis);
     }
 
     #[test]
     fn test_rot_45() {
         let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
-        let a = 3.14159265 / 4.0;
+        let a = FRAC_PI_4;
 
         let q = quat_axis_angle_f32(&v, a);
         let m = q.mat3();
@@ -577,19 +540,14 @@ mod tests {
         let y_axis = m.col[1];
         let z_axis = m.col[2];
 
-        assert_eq!(
-            (x_axis - Vector3::new(1.0, 0.0, 0.0)).length() < f32::epsilon(),
-            true
+        assert_vec3_close_f32(x_axis, Vector3::new(1.0, 0.0, 0.0));
+        assert_vec3_close_f32(
+            y_axis,
+            Vector3::new(0.0, f32::sqrt(2.0) / 2.0, f32::sqrt(2.0) / 2.0),
         );
-        assert_eq!(
-            (y_axis - Vector3::new(0.0, f32::sqrt(2.0) / 2.0, f32::sqrt(2.0) / 2.0)).length()
-                < f32::epsilon(),
-            true
-        );
-        assert_eq!(
-            (z_axis - Vector3::new(0.0, -f32::sqrt(2.0) / 2.0, f32::sqrt(2.0) / 2.0)).length()
-                < f32::epsilon(),
-            true
+        assert_vec3_close_f32(
+            z_axis,
+            Vector3::new(0.0, -f32::sqrt(2.0) / 2.0, f32::sqrt(2.0) / 2.0),
         );
 
         let m2 = mat3_axis_angle_f32(&v, a);
@@ -598,16 +556,16 @@ mod tests {
         let y2_axis = m2.col[1];
         let z2_axis = m2.col[2];
 
-        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
-        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
-        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(x_axis, x2_axis);
+        assert_vec3_close_f32(y_axis, y2_axis);
+        assert_vec3_close_f32(z_axis, z2_axis);
     }
 
     #[test]
     fn test_rot_composed_45() {
         let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
-        let a_u = 3.14159265 / 4.0;
-        let a_f = 3.14159265;
+        let a_u = FRAC_PI_4;
+        let a_f = PI;
 
         let q_u = quat_axis_angle_f32(&v, a_u);
         let q_f = quat_axis_angle_f32(&v, a_f);
@@ -625,17 +583,17 @@ mod tests {
         let y2_axis = m2.col[1];
         let z2_axis = m2.col[2];
 
-        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
-        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
-        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(x_axis, x2_axis);
+        assert_vec3_close_f32(y_axis, y2_axis);
+        assert_vec3_close_f32(z_axis, z2_axis);
     }
 
     #[test]
     fn test_rot_composed_120() {
         let v = Vector3::<f32>::new(1.0, 0.0, 0.0);
-        let a_u1 = 3.14159265 / 2.0;
-        let a_u2 = 3.14159265 / 6.0;
-        let a_f = 3.14159265 / 2.0 + 3.14159265 / 6.0;
+        let a_u1 = FRAC_PI_2;
+        let a_u2 = PI / 6.0;
+        let a_f = FRAC_PI_2 + PI / 6.0;
 
         let q_u1 = quat_axis_angle_f32(&v, a_u1);
         let q_u2 = quat_axis_angle_f32(&v, a_u2);
@@ -654,9 +612,9 @@ mod tests {
         let y2_axis = m2.col[1];
         let z2_axis = m2.col[2];
 
-        assert_eq!((x_axis - x2_axis).length() < f32::epsilon(), true);
-        assert_eq!((y_axis - y2_axis).length() < f32::epsilon(), true);
-        assert_eq!((z_axis - z2_axis).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(x_axis, x2_axis);
+        assert_vec3_close_f32(y_axis, y2_axis);
+        assert_vec3_close_f32(z_axis, z2_axis);
     }
 
     #[test]
@@ -669,7 +627,7 @@ mod tests {
         let v4y = Vector4::<f32>::new(0.0, 1.0, 0.0, 1.0);
         let v4z = Vector4::<f32>::new(0.0, 0.0, 1.0, 1.0);
 
-        let a = 3.14159265 / 2.0;
+        let a = FRAC_PI_2;
 
         let q_ux = quat_axis_angle_f32(&vx, a);
         let q_uy = quat_axis_angle_f32(&vy, a);
@@ -686,13 +644,13 @@ mod tests {
         let y_axis = mx.col[1];
         let z_axis = mx.col[2];
 
-        assert_eq!((x_axis - vx).length() < f32::epsilon(), true);
-        assert_eq!((y_axis - vz).length() < f32::epsilon(), true);
-        assert_eq!((z_axis - -vy).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(x_axis, vx);
+        assert_vec3_close_f32(y_axis, vz);
+        assert_vec3_close_f32(z_axis, -vy);
 
-        assert_eq!((px - vx).length() < f32::epsilon(), true);
-        assert_eq!((py - vz).length() < f32::epsilon(), true);
-        assert_eq!((pz - -vy).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(px, vx);
+        assert_vec3_close_f32(py, vz);
+        assert_vec3_close_f32(pz, -vy);
 
         // rotate x, then y
         let q_yx = q_uy * q_ux;
@@ -707,13 +665,13 @@ mod tests {
         let y_axis = myx.col[1];
         let z_axis = myx.col[2];
 
-        assert_eq!((x_axis - -vz).length() < f32::epsilon(), true);
-        assert_eq!((y_axis - vx).length() < f32::epsilon(), true);
-        assert_eq!((z_axis - -vy).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(x_axis, -vz);
+        assert_vec3_close_f32(y_axis, vx);
+        assert_vec3_close_f32(z_axis, -vy);
 
-        assert_eq!((px - -vz).length() < f32::epsilon(), true);
-        assert_eq!((py - vx).length() < f32::epsilon(), true);
-        assert_eq!((pz - -vy).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(px, -vz);
+        assert_vec3_close_f32(py, vx);
+        assert_vec3_close_f32(pz, -vy);
 
         // rotate x, then y, then z
         let q_zyx = q_uz * q_uy * q_ux;
@@ -729,13 +687,13 @@ mod tests {
         let y_axis = mzyx.col[1];
         let z_axis = mzyx.col[2];
 
-        assert_eq!((x_axis - -vz).length() < f32::epsilon(), true);
-        assert_eq!((y_axis - vy).length() < f32::epsilon(), true);
-        assert_eq!((z_axis - vx).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(x_axis, -vz);
+        assert_vec3_close_f32(y_axis, vy);
+        assert_vec3_close_f32(z_axis, vx);
 
-        assert_eq!((px - -vz).length() < f32::epsilon(), true);
-        assert_eq!((py - vy).length() < f32::epsilon(), true);
-        assert_eq!((pz - vx).length() < f32::epsilon(), true);
+        assert_vec3_close_f32(px, -vz);
+        assert_vec3_close_f32(py, vy);
+        assert_vec3_close_f32(pz, vx);
     }
 
     #[test]
@@ -743,10 +701,8 @@ mod tests {
         let v = Vector3::normalize(&Vector3::<f32>::new(1.0, 2.0, 3.0));
         let q0 = quat_axis_angle_f32(&v, 3.0);
         let (v2, a) = q0.to_axis_angle();
-        assert_eq!((v.x - v2.x).abs() < f32::epsilon(), true);
-        assert_eq!((v.y - v2.y).abs() < f32::epsilon(), true);
-        assert_eq!((v.z - v2.z).abs() < f32::epsilon(), true);
-        assert_eq!((a - 3.0).abs() < f32::epsilon(), true);
+        assert_vec3_close_f32(v, v2);
+        assert_scalar_close_f32(a, 3.0);
     }
 
     #[test]
@@ -754,10 +710,8 @@ mod tests {
         let v = Vector3::normalize(&Vector3::<f64>::new(1.0, 2.0, 3.0));
         let q0 = quat_axis_angle_f64(&v, 3.0);
         let (v2, a) = q0.to_axis_angle();
-        assert_eq!((v.x - v2.x).abs() < f64::epsilon(), true);
-        assert_eq!((v.y - v2.y).abs() < f64::epsilon(), true);
-        assert_eq!((v.z - v2.z).abs() < f64::epsilon(), true);
-        assert_eq!((a - 3.0).abs() < f64::epsilon(), true);
+        assert_vec3_close_f64(v, v2);
+        assert_scalar_close_f64(a, 3.0);
     }
 
     #[test]
@@ -773,7 +727,7 @@ mod tests {
         let nq = Quat::normalize(&q);
         let len = nq.length();
         assert!((len - 1.0).abs() < f32::epsilon());
-        
+
         // Test normalizing zero quaternion (edge case)
         let q_zero = Quat::<f32>::new(0.0, 0.0, 0.0, 0.0);
         let nq_zero = Quat::normalize(&q_zero);
@@ -781,7 +735,7 @@ mod tests {
         assert_eq!(nq_zero.y, 0.0);
         assert_eq!(nq_zero.z, 0.0);
         assert_eq!(nq_zero.w, 0.0);
-        
+
         // Test already normalized quaternion
         let q_unit = Quat::<f32>::identity();
         let nq_unit = Quat::normalize(&q_unit);
@@ -790,10 +744,10 @@ mod tests {
 
     #[test]
     fn test_quaternion_inverse() {
-        let q = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 1.57079632);
+        let q = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), FRAC_PI_2);
         let q_inv = Quat::inverse(&q);
         let product = q * q_inv;
-        
+
         // Quaternion times its inverse should be identity
         assert!((product.x).abs() < 0.001);
         assert!((product.y).abs() < 0.001);
@@ -819,7 +773,7 @@ mod tests {
         let q1 = quat_axis_angle_f32(&Vector3::new(1.0, 0.0, 0.0), 0.5);
         let q2 = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 0.5);
         let q3 = quat_axis_angle_f32(&Vector3::new(0.0, 0.0, 1.0), 0.5);
-        
+
         // Test associativity: (q1 * q2) * q3 == q1 * (q2 * q3)
         let left = (q1 * q2) * q3;
         let right = q1 * (q2 * q3);
@@ -827,7 +781,7 @@ mod tests {
         assert!((left.y - right.y).abs() < f32::epsilon());
         assert!((left.z - right.z).abs() < f32::epsilon());
         assert!((left.w - right.w).abs() < f32::epsilon());
-        
+
         // Test identity multiplication
         let identity = Quat::<f32>::identity();
         let result = q1 * identity;
@@ -841,13 +795,13 @@ mod tests {
     fn test_quaternion_addition_subtraction() {
         let q1 = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let q2 = Quat::<f32>::new(5.0, 6.0, 7.0, 8.0);
-        
+
         let sum = q1 + q2;
         assert_eq!(sum.x, 6.0);
         assert_eq!(sum.y, 8.0);
         assert_eq!(sum.z, 10.0);
         assert_eq!(sum.w, 12.0);
-        
+
         let diff = q2 - q1;
         assert_eq!(diff.x, 4.0);
         assert_eq!(diff.y, 4.0);
@@ -859,19 +813,19 @@ mod tests {
     fn test_quaternion_scalar_multiplication() {
         let q = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let scalar = 2.0;
-        
+
         let result1 = q * scalar;
         assert_eq!(result1.x, 2.0);
         assert_eq!(result1.y, 4.0);
         assert_eq!(result1.z, 6.0);
         assert_eq!(result1.w, 8.0);
-        
+
         let result2 = scalar * q;
         assert_eq!(result2.x, 2.0);
         assert_eq!(result2.y, 4.0);
         assert_eq!(result2.z, 6.0);
         assert_eq!(result2.w, 8.0);
-        
+
         let result3 = q / scalar;
         assert_eq!(result3.x, 0.5);
         assert_eq!(result3.y, 1.0);
@@ -895,13 +849,13 @@ mod tests {
         assert!(!angle_clamped.is_nan());
         assert!((axis_clamped.length() - 1.0).abs() < 0.01);
         assert!(Vector3::dot(&axis_clamped, &Vector3::new(1.0, 0.0, 0.0)) > 0.99);
-        
+
         // Test 180-degree rotation
-        let q_180 = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), 3.14159265);
+        let q_180 = quat_axis_angle_f32(&Vector3::new(0.0, 1.0, 0.0), PI);
         let (axis_180, angle_180) = q_180.to_axis_angle();
-        assert!((angle_180 - 3.14159265).abs() < 0.001);
+        assert!((angle_180 - PI).abs() < 0.001);
         assert!((axis_180.y - 1.0).abs() < 0.001);
-        
+
         // Test very small rotation
         let small_angle = 0.001;
         let q_small = quat_axis_angle_f32(&Vector3::new(1.0, 0.0, 0.0), small_angle);
@@ -914,20 +868,20 @@ mod tests {
     #[test]
     fn test_matrix_quaternion_conversion() {
         // Test round-trip conversion: quaternion -> matrix -> quaternion
-        let angles = [0.0, 0.5, 1.0, 1.57, 3.14159];
+        let angles = [0.0, 0.5, 1.0, FRAC_PI_2, PI];
         let axes = [
             Vector3::<f32>::new(1.0, 0.0, 0.0),
             Vector3::<f32>::new(0.0, 1.0, 0.0),
             Vector3::<f32>::new(0.0, 0.0, 1.0),
             Vector3::<f32>::normalize(&Vector3::new(1.0, 1.0, 1.0)),
         ];
-        
+
         for angle in &angles {
             for axis in &axes {
                 let q1 = quat_axis_angle_f32(axis, *angle);
                 let mat = q1.mat3();
                 let q2 = Quat::of_matrix3(&mat);
-                
+
                 // Account for quaternion double cover (q and -q represent same rotation)
                 let dot_product = Quat::dot(&q1, &q2);
                 let q2_adjusted = if dot_product < 0.0 {
@@ -935,7 +889,7 @@ mod tests {
                 } else {
                     q2
                 };
-                
+
                 assert!((q1.x - q2_adjusted.x).abs() < 0.001);
                 assert!((q1.y - q2_adjusted.y).abs() < 0.001);
                 assert!((q1.z - q2_adjusted.z).abs() < 0.001);
@@ -976,12 +930,12 @@ mod tests {
     fn test_quaternion_conjugate() {
         let q = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let conj = Quat::conjugate(&q);
-        
+
         assert_eq!(conj.x, -1.0);
         assert_eq!(conj.y, -2.0);
         assert_eq!(conj.z, -3.0);
         assert_eq!(conj.w, 4.0);
-        
+
         // Test that conjugate of conjugate is original
         let conj_conj = Quat::conjugate(&conj);
         assert_eq!(conj_conj.x, q.x);
@@ -994,11 +948,11 @@ mod tests {
     fn test_quaternion_dot_product() {
         let q1 = Quat::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let q2 = Quat::<f32>::new(5.0, 6.0, 7.0, 8.0);
-        
+
         let dot = Quat::dot(&q1, &q2);
-        let expected = 1.0*5.0 + 2.0*6.0 + 3.0*7.0 + 4.0*8.0;
+        let expected = 1.0 * 5.0 + 2.0 * 6.0 + 3.0 * 7.0 + 4.0 * 8.0;
         assert_eq!(dot, expected);
-        
+
         // Test dot product with itself equals length squared
         let self_dot = Quat::dot(&q1, &q1);
         let length_squared = q1.length() * q1.length();

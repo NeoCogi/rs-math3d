@@ -55,7 +55,7 @@
 
 use crate::scalar::*;
 use core::ops::{Add, Div, Mul, Neg, Rem, Sub};
-use num_traits::{One, Zero};
+use num_traits::Zero;
 
 /// Generic vector trait defining common vector operations.
 ///

@@ -36,10 +36,10 @@
 //! ```
 //! use rs_math3d::transforms;
 //! use rs_math3d::vector::Vector3;
-//! 
+//!
 //! // Create a translation matrix
 //! let translation = transforms::translate(Vector3::new(10.0, 5.0, 0.0));
-//! 
+//!
 //! // Create a perspective projection matrix
 //! let projection = transforms::perspective(
 //!     45.0f32.to_radians(),  // Field of view
@@ -53,7 +53,7 @@ use crate::matrix::*;
 use crate::quaternion::*;
 use crate::scalar::*;
 use crate::vector::*;
-use num_traits::{Zero, One};
+use num_traits::{One, Zero};
 
 /// Creates a 4x4 translation matrix.
 ///
@@ -265,14 +265,7 @@ pub fn frustum<T: FloatScalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T>
 /// - `near`, `far`: Z-axis bounds (depth)
 ///
 /// Objects maintain their size regardless of depth in orthographic projection.
-pub fn ortho4<T: FloatScalar>(
-    left: T,
-    right: T,
-    bottom: T,
-    top: T,
-    near: T,
-    far: T,
-) -> Matrix4<T> {
+pub fn ortho4<T: FloatScalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) -> Matrix4<T> {
     let width = right - left;
     let height = top - bottom;
     let depth = far - near;
@@ -443,18 +436,18 @@ mod tests {
         match v {
             None => assert_eq!(1, 2),
             Some((s, r, t)) => {
-                assert_eq!((s.x - 4.0) < f32::epsilon(), true);
-                assert_eq!((s.y - 5.0) < f32::epsilon(), true);
-                assert_eq!((s.z - 6.0) < f32::epsilon(), true);
+                assert!((s.x - 4.0) < f32::epsilon());
+                assert!((s.y - 5.0) < f32::epsilon());
+                assert!((s.z - 6.0) < f32::epsilon());
 
-                assert_eq!((q.x - r.x) < f32::epsilon(), true);
-                assert_eq!((q.y - r.y) < f32::epsilon(), true);
-                assert_eq!((q.z - r.z) < f32::epsilon(), true);
-                assert_eq!((q.w - r.w) < f32::epsilon(), true);
+                assert!((q.x - r.x) < f32::epsilon());
+                assert!((q.y - r.y) < f32::epsilon());
+                assert!((q.z - r.z) < f32::epsilon());
+                assert!((q.w - r.w) < f32::epsilon());
 
-                assert_eq!((t.x - 1.0) < f32::epsilon(), true);
-                assert_eq!((t.y - 2.0) < f32::epsilon(), true);
-                assert_eq!((t.z - 3.0) < f32::epsilon(), true);
+                assert!((t.x - 1.0) < f32::epsilon());
+                assert!((t.y - 2.0) < f32::epsilon());
+                assert!((t.z - 3.0) < f32::epsilon());
             }
         }
     }

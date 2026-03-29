@@ -35,6 +35,10 @@
 //! Metric and analytic primitives such as lines, rays, planes, spheres, and
 //! triangles are intended for floating-point use.
 //!
+//! Constructors that normalize directions or normals provide checked `try_`
+//! variants. The unchecked variants assume non-degenerate input and panic when
+//! that precondition is violated.
+//!
 //! # Examples
 //!
 //! ```
@@ -54,9 +58,15 @@
 //!     &Vector3::new(0.0f32, 0.0, -1.0),
 //!     &Vector3::new(0.0, 0.0, 5.0)
 //! );
+//!
+//! let checked = Plane::try_new(
+//!     &Vector3::new(0.0f32, 0.0, -1.0),
+//!     &Vector3::new(0.0, 0.0, 5.0),
+//!     EPS_F32,
+//! ).expect("plane normal should be valid");
+//! assert_eq!(plane.constant(), checked.constant());
 //! ```
 
-use crate::matrix::*;
 use crate::scalar::*;
 use crate::vector::*;
 use num_traits::{One, Zero};
@@ -195,14 +205,14 @@ impl<T: Scalar> Box3<T> {
         if self.min.z > other.max.z {
             return false;
         }
-        return true;
+        true
     }
 
     /// Expands the box to include a point.
     pub fn add(&self, p: &Vector3<T>) -> Self {
         Self {
-            min: Vector3::min(&p, &self.min),
-            max: Vector3::max(&p, &self.max),
+            min: Vector3::min(p, &self.min),
+            max: Vector3::max(p, &self.max),
         }
     }
 }
@@ -361,8 +371,8 @@ pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
     let n0 = Vector3::normalize(&Vector3::cross(&normal, &d0));
     let n1 = Vector3::normalize(&Vector3::cross(&normal, &d1));
 
-    let plane0 = Plane::new(&n0, &s0);
-    let plane1 = Plane::new(&n1, &s1);
+    let plane0 = Plane::try_new(&n0, &s0, epsilon)?;
+    let plane1 = Plane::try_new(&n1, &s1, epsilon)?;
 
     let p1 = plane0.intersect_line(line1, epsilon);
     let p0 = plane1.intersect_line(line0, epsilon);
@@ -501,10 +511,7 @@ pub struct Sphere3<T: FloatScalar> {
 impl<T: FloatScalar> Sphere3<T> {
     /// Creates a sphere from center and radius.
     pub fn new(center: Vector3<T>, radius: T) -> Self {
-        Self {
-            center: center,
-            radius: radius,
-        }
+        Self { center, radius }
     }
 }
 
@@ -520,7 +527,7 @@ pub struct Tri3<T: FloatScalar> {
 impl<T: FloatScalar> Tri3<T> {
     /// Creates a triangle from three vertices.
     pub fn new(vertices: [Vector3<T>; 3]) -> Self {
-        Self { vertices: vertices }
+        Self { vertices }
     }
     /// Returns the triangle vertices.
     pub fn vertices(&self) -> &[Vector3<T>; 3] {
@@ -574,27 +581,71 @@ impl<T: Scalar> Plane<T> {
 
 impl<T: FloatScalar> Plane<T> {
     /// Creates a plane from a normal and a point on the plane.
+    ///
+    /// # Panics
+    /// Panics if `n` is too small to normalize. Use [`Plane::try_new`] when the
+    /// input may be degenerate.
     pub fn new(n: &Vector3<T>, p: &Vector3<T>) -> Self {
-        let norm = Vector3::normalize(n);
+        Self::try_new(n, p, T::epsilon()).expect("plane normal must be non-zero")
+    }
+
+    /// Creates a plane from a normal and a point on the plane.
+    ///
+    /// Returns `None` if `n` is too small to normalize.
+    pub fn try_new(n: &Vector3<T>, p: &Vector3<T>, epsilon: T) -> Option<Self> {
+        let norm = n.try_normalize(epsilon)?;
         let d = Vector3::dot(&norm, p);
-        Self {
+        Some(Self {
             a: norm.x,
             b: norm.y,
             c: norm.z,
             d: -d,
-        }
+        })
     }
 
     /// Creates a plane from triangle vertices.
+    ///
+    /// # Panics
+    /// Panics if the triangle is degenerate. Use [`Plane::try_from_tri`] when
+    /// the input may be degenerate.
     pub fn from_tri(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Self {
-        let n = tri_normal(v0, v1, v2);
-        Self::new(&n, v0)
+        Self::try_from_tri(v0, v1, v2, T::epsilon()).expect("triangle must define a plane")
+    }
+
+    /// Creates a plane from triangle vertices.
+    ///
+    /// Returns `None` if the triangle is degenerate.
+    pub fn try_from_tri(
+        v0: &Vector3<T>,
+        v1: &Vector3<T>,
+        v2: &Vector3<T>,
+        epsilon: T,
+    ) -> Option<Self> {
+        let n = try_tri_normal(v0, v1, v2, epsilon)?;
+        Self::try_new(&n, v0, epsilon)
     }
     /// Creates a plane from quad vertices.
+    ///
+    /// # Panics
+    /// Panics if the quad diagonals do not define a plane. Use
+    /// [`Plane::try_from_quad`] when the input may be degenerate.
     pub fn from_quad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
-        let n = quad_normal(v0, v1, v2, v3);
+        Self::try_from_quad(v0, v1, v2, v3, T::epsilon()).expect("quad must define a plane")
+    }
+
+    /// Creates a plane from quad vertices.
+    ///
+    /// Returns `None` if the quad diagonals do not define a plane.
+    pub fn try_from_quad(
+        v0: &Vector3<T>,
+        v1: &Vector3<T>,
+        v2: &Vector3<T>,
+        v3: &Vector3<T>,
+        epsilon: T,
+    ) -> Option<Self> {
+        let n = try_quad_normal(v0, v1, v2, v3, epsilon)?;
         let c = (*v0 + *v1 + *v2 + *v3) * T::quarter();
-        Self::new(&n, &c)
+        Self::try_new(&n, &c, epsilon)
     }
 
     /// Intersects the plane with a ray.
@@ -650,17 +701,35 @@ impl<T: FloatScalar> ParametricPlane<T> {
 
     /// Converts the parametric plane to an infinite plane.
     pub fn plane(&self) -> Plane<T> {
-        Plane::new(&self.normal(), &self.center)
+        self.try_plane(T::epsilon())
+            .expect("parametric plane axes must span a plane")
+    }
+
+    /// Converts the parametric plane to an infinite plane.
+    ///
+    /// Returns `None` if the axes are too small or parallel.
+    pub fn try_plane(&self, epsilon: T) -> Option<Plane<T>> {
+        let normal = self.try_normal(epsilon)?;
+        Plane::try_new(&normal, &self.center, epsilon)
     }
 
     /// Computes the normal vector (cross product of axes).
     pub fn normal(&self) -> Vector3<T> {
-        Vector3::cross(&self.x_axis, &self.y_axis).normalize()
+        self.try_normal(T::epsilon())
+            .expect("parametric plane axes must span a plane")
+    }
+
+    /// Computes the normal vector (cross product of axes).
+    ///
+    /// Returns `None` if the axes are too small or parallel.
+    pub fn try_normal(&self, epsilon: T) -> Option<Vector3<T>> {
+        Vector3::cross(&self.x_axis, &self.y_axis).try_normalize(epsilon)
     }
 
     /// Intersects the plane with a ray.
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
-        r.intersect_plane(&self.plane(), epsilon)
+        let plane = self.try_plane(epsilon)?;
+        r.intersect_plane(&plane, epsilon)
     }
 
     /// Intersects the plane with a line.
@@ -669,7 +738,8 @@ impl<T: FloatScalar> ParametricPlane<T> {
         line: &Line<T, Vector3<T>>,
         epsilon: T,
     ) -> Option<(T, Vector3<T>)> {
-        self.plane().intersect_line(line, epsilon)
+        let plane = self.try_plane(epsilon)?;
+        plane.intersect_line(line, epsilon)
     }
 
     /// Projects a 3D point onto the plane's 2D coordinates.
@@ -685,9 +755,21 @@ impl<T: FloatScalar> ParametricPlane<T> {
 /// Computes the normal vector of a triangle.
 ////////////////////////////////////////////////////////////////////////////////
 pub fn tri_normal<T: FloatScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
+    try_tri_normal(v0, v1, v2, T::epsilon()).expect("triangle must be non-degenerate")
+}
+
+/// Computes the normal vector of a triangle.
+///
+/// Returns `None` if the triangle is degenerate.
+pub fn try_tri_normal<T: FloatScalar>(
+    v0: &Vector3<T>,
+    v1: &Vector3<T>,
+    v2: &Vector3<T>,
+    epsilon: T,
+) -> Option<Vector3<T>> {
     let v10 = *v1 - *v0;
     let v20 = *v2 - *v0;
-    Vector3::normalize(&Vector3::cross(&v10, &v20))
+    Vector3::cross(&v10, &v20).try_normalize(epsilon)
 }
 
 /// Computes the normal vector of a quadrilateral.
@@ -699,9 +781,22 @@ pub fn quad_normal<T: FloatScalar>(
     v2: &Vector3<T>,
     v3: &Vector3<T>,
 ) -> Vector3<T> {
+    try_quad_normal(v0, v1, v2, v3, T::epsilon()).expect("quad must be non-degenerate")
+}
+
+/// Computes the normal vector of a quadrilateral.
+///
+/// Returns `None` if the quad diagonals are too small or parallel.
+pub fn try_quad_normal<T: FloatScalar>(
+    v0: &Vector3<T>,
+    v1: &Vector3<T>,
+    v2: &Vector3<T>,
+    v3: &Vector3<T>,
+    epsilon: T,
+) -> Option<Vector3<T>> {
     let v20 = *v2 - *v0;
     let v31 = *v3 - *v1;
-    Vector3::normalize(&Vector3::cross(&v20, &v31))
+    Vector3::cross(&v20, &v31).try_normalize(epsilon)
 }
 
 #[cfg(test)]
@@ -956,6 +1051,16 @@ mod tests {
     }
 
     #[test]
+    fn test_plane_try_new_zero_normal_none() {
+        let plane = Plane::try_new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+            EPS_F32,
+        );
+        assert!(plane.is_none());
+    }
+
+    #[test]
     fn test_box3_center_extent_subdivide() {
         let b = Box3::new(
             &Vector3::new(0.0f32, 0.0, 0.0),
@@ -989,5 +1094,16 @@ mod tests {
         let uv = plane.project(&point);
         assert!((uv.x - 2.0).abs() < 0.001);
         assert!((uv.y - 4.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parametric_plane_try_normal_parallel_axes_none() {
+        let plane = ParametricPlane::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 0.0, 0.0),
+            &Vector3::new(2.0, 0.0, 0.0),
+        );
+        assert!(plane.try_normal(EPS_F32).is_none());
+        assert!(plane.try_plane(EPS_F32).is_none());
     }
 }

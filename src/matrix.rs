@@ -296,6 +296,7 @@ impl<T: Scalar> Matrix2<T> {
  *****************************************************************************/
 impl<T: Scalar> Matrix3<T> {
     /// Creates a new 3x3 matrix from column-major elements.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(m0: T, m1: T, m2: T, m3: T, m4: T, m5: T, m6: T, m7: T, m8: T) -> Self {
         Matrix3 {
             col: [
@@ -596,6 +597,7 @@ impl<T: FloatScalar> Matrix3<T> {
  *****************************************************************************/
 impl<T: Scalar> Matrix4<T> {
     /// Creates a new 4x4 matrix from column-major elements.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         m0: T,
         m1: T,
@@ -1184,7 +1186,6 @@ impl<T: Scalar> Matrix4Extension<T> for Matrix4<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::*;
 
     #[test]
     fn test_matrix2_identity() {

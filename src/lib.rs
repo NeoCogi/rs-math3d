@@ -98,7 +98,6 @@
 //! - [`scalar`]: Traits for generic numeric operations
 
 #![no_std]
-#![allow(unused_imports)]
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 pub mod basis;

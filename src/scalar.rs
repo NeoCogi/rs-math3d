@@ -218,7 +218,7 @@ impl FloatScalar for f32 {
         0.25
     }
     fn infinity() -> Self {
-        core::f32::INFINITY
+        f32::INFINITY
     }
     fn tsqrt(self) -> Self {
         Math::sqrt_f32(self)
@@ -248,7 +248,7 @@ impl FloatScalar for f64 {
         0.25
     }
     fn infinity() -> Self {
-        core::f64::INFINITY
+        f64::INFINITY
     }
     fn tsqrt(self) -> Self {
         Math::sqrt_f64(self)

@@ -36,10 +36,10 @@
 //! ```
 //! use rs_math3d::basis::{Basis, BasisPlane};
 //! use rs_math3d::vector::Vector3;
-//! 
+//!
 //! // Create a basis at origin with default axes
 //! let basis = Basis::<f32>::default();
-//! 
+//!
 //! // Create a basis with custom center
 //! let center = Vector3::new(10.0, 5.0, 0.0);
 //! let basis = Basis::default_with_center(&center);
@@ -48,7 +48,7 @@
 use crate::matrix::*;
 use crate::scalar::*;
 use crate::vector::*;
-use num_traits::{Zero, One};
+use num_traits::{One, Zero};
 
 /// Represents one of the three coordinate planes.
 #[derive(Debug, Clone, Copy)]
@@ -156,16 +156,6 @@ impl<T: Scalar> Basis<T> {
         }
     }
 
-    /// Returns the default right-handed basis at the origin.
-    pub fn default() -> Self {
-        Self {
-            center: Vector3::new(<T as Zero>::zero(), <T as Zero>::zero(), <T as Zero>::zero()),
-            x_axis: Vector3::new(<T as One>::one(), <T as Zero>::zero(), <T as Zero>::zero()),
-            y_axis: Vector3::new(<T as Zero>::zero(), <T as One>::one(), <T as Zero>::zero()),
-            z_axis: Vector3::new(<T as Zero>::zero(), <T as Zero>::zero(), <T as One>::one()),
-        }
-    }
-
     /// Returns the default right-handed basis with a custom center.
     pub fn default_with_center(center: &Vector3<T>) -> Self {
         Self {
@@ -220,6 +210,21 @@ impl<T: Scalar> Basis<T> {
             x_axis: m.col[0],
             y_axis: m.col[1],
             z_axis: m.col[2],
+        }
+    }
+}
+
+impl<T: Scalar> Default for Basis<T> {
+    fn default() -> Self {
+        Self {
+            center: Vector3::new(
+                <T as Zero>::zero(),
+                <T as Zero>::zero(),
+                <T as Zero>::zero(),
+            ),
+            x_axis: Vector3::new(<T as One>::one(), <T as Zero>::zero(), <T as Zero>::zero()),
+            y_axis: Vector3::new(<T as Zero>::zero(), <T as One>::one(), <T as Zero>::zero()),
+            z_axis: Vector3::new(<T as Zero>::zero(), <T as Zero>::zero(), <T as One>::one()),
         }
     }
 }

@@ -26,11 +26,14 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //! Intersection and distance query traits and implementations.
+//!
+//! Boolean intersection tests are boundary-inclusive unless stated otherwise:
+//! touching counts as intersecting.
 
 use crate::primitives::*;
 use crate::scalar::*;
 use crate::vector::*;
-use num_traits::{Zero, One};
+use num_traits::{One, Zero};
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Query Traits
@@ -43,6 +46,9 @@ pub trait Distance<T, Other> {
 /// Trait for boolean intersection tests.
 pub trait Intersect<T> {
     /// Returns `true` when two objects intersect.
+    ///
+    /// Unless an implementation documents otherwise, touching at the boundary
+    /// counts as an intersection.
     fn intersect(&self, other: &T) -> bool;
 }
 
@@ -104,7 +110,7 @@ impl<T: FloatScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
         tmin = T::max(tmin, T::min(t0, t1));
         tmax = T::min(tmax, T::max(t0, t1));
 
-        tmax > T::max(tmin, <T as Zero>::zero())
+        tmax >= T::max(tmin, <T as Zero>::zero())
     }
 }
 
@@ -133,7 +139,7 @@ impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
             dist += T::squared(c.z - self.max.z)
         }
 
-        r * r > dist
+        r * r >= dist
     }
 }
 
@@ -149,14 +155,10 @@ impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
         let v1 = verts[1];
         let v2 = verts[2];
         if is_in_0_to_1_range(uvw.x) && is_in_0_to_1_range(uvw.y) && is_in_0_to_1_range(uvw.z) {
-            let p = Plane::from_tri(&v0, &v1, &v2);
-            if p.distance(&self.center)
-                .map_or(false, |dist| dist <= self.radius)
-            {
-                true
-            } else {
-                false
-            }
+            Plane::try_from_tri(&v0, &v1, &v2, T::epsilon()).is_some_and(|p| {
+                p.distance(&self.center)
+                    .is_some_and(|dist| dist <= self.radius)
+            })
         } else {
             let d0 = Segment::new(&v0, &v1).distance(&self.center, T::epsilon());
             let d1 = Segment::new(&v1, &v2).distance(&self.center, T::epsilon());
@@ -165,11 +167,7 @@ impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
             match (d0, d1, d2) {
                 (Some(d0), Some(d1), Some(d2)) => {
                     let m = T::min(d0, T::min(d1, d2));
-                    if m <= self.radius {
-                        true
-                    } else {
-                        false
-                    }
+                    m <= self.radius
                 }
                 _ => false,
             }
@@ -236,8 +234,11 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
 /// I attempt to fix using the following without proof
 /// TODO: do the proof one day!
 ///
-pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
-    let u = Vector3::normalize(unit);
+pub fn try_basis_from_unit<T: FloatScalar>(
+    unit: &Vector3<T>,
+    epsilon: T,
+) -> Option<[Vector3<T>; 3]> {
+    let u = unit.try_normalize(epsilon)?;
     let x = u.x;
     let y = u.y;
     let z = u.z;
@@ -250,16 +251,26 @@ pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
         // z.abs() < x.abs() && z.abs() <= y.abs()
         Vector3::new(-y, x, <T as Zero>::zero())
     };
-    let v = Vector3::normalize(&v);
-    let w = Vector3::normalize(&Vector3::cross(&u, &v));
-    [u, w, v]
+    let v = v.try_normalize(epsilon)?;
+    let w = Vector3::cross(&u, &v).try_normalize(epsilon)?;
+    Some([u, w, v])
+}
+
+/// Builds an orthonormal basis from a non-zero input direction.
+///
+/// # Panics
+/// Panics if `unit` is too small to normalize. Use
+/// [`try_basis_from_unit`] when the input may be degenerate.
+pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
+    try_basis_from_unit(unit, T::epsilon()).expect("basis direction must be non-zero")
 }
 
 #[cfg(test)]
 mod tests {
     use super::Intersect;
-    use crate::primitives::{Box3, Sphere3};
+    use crate::primitives::{Box3, Ray, Sphere3};
     use crate::vector::Vector3;
+    use crate::EPS_F32;
 
     #[test]
     fn test_box3_sphere_intersect_z_axis() {
@@ -271,7 +282,7 @@ mod tests {
         let outside_z = Sphere3::new(Vector3::new(0.5, 0.5, 2.0), 0.25);
         assert!(!b.intersect(&outside_z));
 
-        let touching_z = Sphere3::new(Vector3::new(0.5, 0.5, 2.0), 1.1);
+        let touching_z = Sphere3::new(Vector3::new(0.5, 0.5, 2.0), 1.0);
         assert!(b.intersect(&touching_z));
     }
 
@@ -283,9 +294,30 @@ mod tests {
         );
 
         let touching = Sphere3::new(Vector3::new(2.0, 0.5, 0.5), 1.0);
-        assert!(!b.intersect(&touching));
+        assert!(b.intersect(&touching));
 
         let just_inside = Sphere3::new(Vector3::new(2.0, 0.5, 0.5), 1.0001);
         assert!(b.intersect(&just_inside));
+    }
+
+    #[test]
+    fn test_box3_ray_intersect_touching_boundary() {
+        let b = Box3::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 1.0, 1.0),
+        );
+        let ray = Ray::new(
+            &Vector3::new(1.0f32, 0.5, 0.5),
+            &Vector3::new(1.0, 0.0, 0.0),
+            EPS_F32,
+        )
+        .expect("ray should be valid");
+        assert!(b.intersect(&ray));
+    }
+
+    #[test]
+    fn test_try_basis_from_unit_zero_none() {
+        let zero = Vector3::new(0.0f32, 0.0, 0.0);
+        assert!(super::try_basis_from_unit(&zero, EPS_F32).is_none());
     }
 }

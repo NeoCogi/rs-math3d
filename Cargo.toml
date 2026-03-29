@@ -14,9 +14,12 @@ readme = "README.md"
 
 [dependencies]
 num-traits = { version = "0.2", default-features = false }
+libm = { version = "0.2", optional = true }
 
 [lib]
 
 [features]
 default = []
 std = ["num-traits/std"]
+libm = ["dep:libm"]
+system-libm = []

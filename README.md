@@ -26,11 +26,18 @@ Add to Cargo.toml:
 rs-math3d = { version = "0.10", default-features = false }
 ```
 
-To enable std-backed math functions:
+Select one math backend:
 
 ```toml
-rs-math3d = { version = "0.10", features = ["std"] }
+rs-math3d = { version = "0.10", default-features = false, features = ["std"] }
+rs-math3d = { version = "0.10", default-features = false, features = ["libm"] }
+rs-math3d = { version = "0.10", default-features = false, features = ["system-libm"] }
 ```
+
+When no math backend feature is selected, normal library builds fall back to `system-libm`.
+Test builds without an explicit backend use `std`.
+If more than one backend feature is enabled, precedence is `std`, then `libm`, then
+`system-libm`.
 
 ## Example
 

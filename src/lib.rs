@@ -33,8 +33,8 @@
 //!
 //! ## Features
 //!
-//! - **No standard library required**: Works without `std`, with float math supplied by either
-//!   the `std` feature or the target's C math library
+//! - **No standard library required**: Works without `std`, with float math supplied by the
+//!   `std`, `libm`, or `system-libm` backend
 //! - **Generic storage types**: Vectors, boxes, rectangles, and basic matrix arithmetic support
 //!   `f32`, `f64`, `i32`, and `i64`
 //! - **Float-only analytic math**: Normalization, inverses, quaternions, transforms, rays,
@@ -73,6 +73,19 @@
 //! let rotation_matrix = q.mat4();
 //! ```
 //!
+//! ## Math Backends
+//!
+//! Floating-point transcendental functions are selected through one backend:
+//!
+//! - `std`: use Rust's standard-library float methods
+//! - `libm`: use the pure-software `libm` crate
+//! - `system-libm`: call the target's C math library
+//!
+//! Library builds without any of these features fall back to `system-libm`.
+//! Test builds without an explicit backend use the `std` backend.
+//! If more than one backend feature is enabled, precedence is `std`, then `libm`,
+//! then `system-libm`.
+//!
 //! ## Modules
 //!
 //! - [`vector`]: 2D, 3D, and 4D vectors with arithmetic operations
@@ -89,6 +102,7 @@
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 pub mod basis;
+mod math;
 pub mod matrix;
 pub mod primitives;
 /// Quaternion operations and conversions.

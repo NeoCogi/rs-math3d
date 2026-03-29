@@ -35,6 +35,7 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+use crate::math::Math;
 use core::cmp::PartialOrd;
 use core::ops::Neg;
 use num_traits::{Num, NumAssignOps};
@@ -87,9 +88,8 @@ pub trait Scalar:
 ///
 /// # Implementation Note
 ///
-/// These functions link to external C math libraries (libm on Unix,
-/// MSVCRT on Windows) since they're not available in no_std Rust.
-/// When the `std` feature or tests are enabled, intrinsic std methods are used.
+/// These functions are routed through the crate's selected math backend:
+/// `std`, `libm`, or `system-libm`.
 pub trait FloatScalar: Scalar {
     /// Returns a reasonable epsilon for comparisons.
     fn epsilon() -> Self;
@@ -207,9 +207,6 @@ impl Scalar for f64 {
     }
 }
 
-// FloatScalar implementation for f32
-// Note: Without std or libm, we need to provide our own implementations
-// or link to external math libraries
 impl FloatScalar for f32 {
     fn epsilon() -> Self {
         EPS_F32
@@ -224,75 +221,22 @@ impl FloatScalar for f32 {
         core::f32::INFINITY
     }
     fn tsqrt(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.sqrt()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn sqrtf(x: f32) -> f32;
-            }
-            unsafe { sqrtf(self) }
-        }
+        Math::sqrt_f32(self)
     }
     fn tsin(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.sin()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn sinf(x: f32) -> f32;
-            }
-            unsafe { sinf(self) }
-        }
+        Math::sin_f32(self)
     }
     fn tcos(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.cos()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn cosf(x: f32) -> f32;
-            }
-            unsafe { cosf(self) }
-        }
+        Math::cos_f32(self)
     }
     fn ttan(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.tan()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn tanf(x: f32) -> f32;
-            }
-            unsafe { tanf(self) }
-        }
+        Math::tan_f32(self)
     }
     fn tacos(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.acos()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn acosf(x: f32) -> f32;
-            }
-            unsafe { acosf(self) }
-        }
+        Math::acos_f32(self)
     }
 }
 
-// FloatScalar implementation for f64
-// Note: Without std or libm, we need to provide our own implementations
-// or link to external math libraries
 impl FloatScalar for f64 {
     fn epsilon() -> Self {
         EPS_F64
@@ -307,69 +251,19 @@ impl FloatScalar for f64 {
         core::f64::INFINITY
     }
     fn tsqrt(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.sqrt()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn sqrt(x: f64) -> f64;
-            }
-            unsafe { sqrt(self) }
-        }
+        Math::sqrt_f64(self)
     }
     fn tsin(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.sin()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn sin(x: f64) -> f64;
-            }
-            unsafe { sin(self) }
-        }
+        Math::sin_f64(self)
     }
     fn tcos(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.cos()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn cos(x: f64) -> f64;
-            }
-            unsafe { cos(self) }
-        }
+        Math::cos_f64(self)
     }
     fn ttan(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.tan()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn tan(x: f64) -> f64;
-            }
-            unsafe { tan(self) }
-        }
+        Math::tan_f64(self)
     }
     fn tacos(self) -> Self {
-        #[cfg(any(test, feature = "std"))]
-        {
-            self.acos()
-        }
-        #[cfg(not(any(test, feature = "std")))]
-        {
-            extern "C" {
-                fn acos(x: f64) -> f64;
-            }
-            unsafe { acos(self) }
-        }
+        Math::acos_f64(self)
     }
 }
 

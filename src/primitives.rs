@@ -31,20 +31,24 @@
 //! This module provides common geometric shapes and primitives used in
 //! 3D graphics, physics simulations, and collision detection systems.
 //!
+//! Discrete storage types such as rectangles and boxes work with integer scalars.
+//! Metric and analytic primitives such as lines, rays, planes, spheres, and
+//! triangles are intended for floating-point use.
+//!
 //! # Examples
 //!
 //! ```
 //! use rs_math3d::primitives::{Ray, Plane, Tri3};
 //! use rs_math3d::vector::Vector3;
 //! use rs_math3d::EPS_F32;
-//! 
+//!
 //! // Create a ray from origin pointing along +X axis
 //! let ray = Ray::new(
 //!     &Vector3::new(0.0f32, 0.0, 0.0),
 //!     &Vector3::new(1.0, 0.0, 0.0),
 //!     EPS_F32,
 //! ).unwrap();
-//! 
+//!
 //! // Create a plane at z=5 facing down
 //! let plane = Plane::new(
 //!     &Vector3::new(0.0f32, 0.0, -1.0),
@@ -55,7 +59,7 @@
 use crate::matrix::*;
 use crate::scalar::*;
 use crate::vector::*;
-use num_traits::{Zero, One};
+use num_traits::{One, Zero};
 
 /// A 2D dimension with width and height.
 #[repr(C)]
@@ -263,7 +267,7 @@ pub struct Line<T: Scalar, V: Vector<T>> {
     t: core::marker::PhantomData<T>,
 }
 
-impl<T: Scalar, V: Vector<T>> Line<T, V> {
+impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
     /// Creates a new line from a point and direction.
     ///
     /// Returns `None` if the direction is too small.
@@ -308,9 +312,7 @@ impl<T: Scalar, V: Vector<T>> Line<T, V> {
 
         Some((t, self.p + self.d * t))
     }
-}
 
-impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
     /// Returns a line with normalized direction vector.
     ///
     /// Returns `None` if the direction is too small.
@@ -391,6 +393,9 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
             t: core::marker::PhantomData,
         }
     }
+}
+
+impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
     /// Finds the closest point on the segment to a given point.
     ///
     /// Returns:
@@ -419,9 +424,6 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
 
         Some((t, self.s + dir * t))
     }
-}
-
-impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
     /// Computes the distance from a point to the segment.
     ///
     /// Returns `None` if the segment is too small.
@@ -462,7 +464,7 @@ impl<T: FloatScalar, V: FloatVector<T>> Ray<T, V> {
     }
 }
 
-impl<T: Scalar> Ray<T, Vector3<T>> {
+impl<T: FloatScalar> Ray<T, Vector3<T>> {
     /// Computes ray-plane intersection.
     ///
     /// Returns the intersection point, or `None` if the ray doesn't hit the plane
@@ -568,32 +570,6 @@ impl<T: Scalar> Plane<T> {
     pub fn constant(&self) -> T {
         self.d
     }
-
-    /// Intersects the plane with a ray.
-    pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
-        r.intersect_plane(self, epsilon)
-    }
-
-    /// Computes line-plane intersection.
-    ///
-    /// Returns the parameter t and intersection point, or `None` if parallel.
-    pub fn intersect_line(
-        &self,
-        line: &Line<T, Vector3<T>>,
-        epsilon: T,
-    ) -> Option<(T, Vector3<T>)> {
-        let s = line.p;
-        let dir = line.d;
-        let n = self.normal();
-
-        let denom = Vector3::dot(&n, &dir);
-        if denom.tabs() < epsilon {
-            None
-        } else {
-            let t = -(self.constant() + Vector3::dot(&n, &s)) / denom;
-            Some((t, dir * t + s))
-        }
-    }
 }
 
 impl<T: FloatScalar> Plane<T> {
@@ -619,6 +595,32 @@ impl<T: FloatScalar> Plane<T> {
         let n = quad_normal(v0, v1, v2, v3);
         let c = (*v0 + *v1 + *v2 + *v3) * T::quarter();
         Self::new(&n, &c)
+    }
+
+    /// Intersects the plane with a ray.
+    pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+        r.intersect_plane(self, epsilon)
+    }
+
+    /// Computes line-plane intersection.
+    ///
+    /// Returns the parameter t and intersection point, or `None` if parallel.
+    pub fn intersect_line(
+        &self,
+        line: &Line<T, Vector3<T>>,
+        epsilon: T,
+    ) -> Option<(T, Vector3<T>)> {
+        let s = line.p;
+        let dir = line.d;
+        let n = self.normal();
+
+        let denom = Vector3::dot(&n, &dir);
+        if denom.tabs() < epsilon {
+            None
+        } else {
+            let t = -(self.constant() + Vector3::dot(&n, &s)) / denom;
+            Some((t, dir * t + s))
+        }
     }
 }
 
@@ -736,7 +738,7 @@ mod tests {
         let v2 = Vector3::new(1.0, 5.0, 3.0);
 
         let tri = Tri3::new([v0, v1, v2]);
-        
+
         // Test vertices
         let pp0 = tri.barycentric_coordinates(&v0);
         assert!(f32::abs(pp0.x - 1.0) < 0.001);
@@ -756,10 +758,10 @@ mod tests {
         // Test center point
         let center = (v0 + v1 + v2) / 3.0;
         let pp_center = tri.barycentric_coordinates(&center);
-        assert!(f32::abs(pp_center.x - 1.0/3.0) < 0.001);
-        assert!(f32::abs(pp_center.y - 1.0/3.0) < 0.001);
-        assert!(f32::abs(pp_center.z - 1.0/3.0) < 0.001);
-        
+        assert!(f32::abs(pp_center.x - 1.0 / 3.0) < 0.001);
+        assert!(f32::abs(pp_center.y - 1.0 / 3.0) < 0.001);
+        assert!(f32::abs(pp_center.z - 1.0 / 3.0) < 0.001);
+
         // Verify barycentric coordinates sum to 1
         assert!(f32::abs((pp_center.x + pp_center.y + pp_center.z) - 1.0) < 0.001);
     }
@@ -771,7 +773,7 @@ mod tests {
         let v2 = Vector3::new(0.0, 2.0, 0.0);
 
         let tri = Tri3::new([v0, v1, v2]);
-        
+
         // Midpoint of edge v0-v1
         let mid01 = (v0 + v1) / 2.0;
         let pp_mid01 = tri.barycentric_coordinates(&mid01);
@@ -816,14 +818,14 @@ mod tests {
         let v2 = Vector3::new(0.0, 0.0, 1.0);
 
         let tri = Tri3::new([v0, v1, v2]);
-        
+
         // Test arbitrary point inside triangle
         let test_point = Vector3::new(0.2, 0.3, 0.5);
         let bary = tri.barycentric_coordinates(&test_point);
-        
+
         // Reconstruct the point using barycentric coordinates
         let reconstructed = v0 * bary.x + v1 * bary.y + v2 * bary.z;
-        
+
         assert!(f32::abs(reconstructed.x - test_point.x) < 0.001);
         assert!(f32::abs(reconstructed.y - test_point.y) < 0.001);
         assert!(f32::abs(reconstructed.z - test_point.z) < 0.001);
@@ -831,38 +833,20 @@ mod tests {
 
     #[test]
     pub fn test_box3_overlap() {
-        let a = Box3::new(
-            &Vector3::new(0.0, 0.0, 0.0),
-            &Vector3::new(1.0, 1.0, 1.0),
-        );
-        let b = Box3::new(
-            &Vector3::new(0.5, 0.5, 0.5),
-            &Vector3::new(1.5, 1.5, 1.5),
-        );
+        let a = Box3::new(&Vector3::new(0.0, 0.0, 0.0), &Vector3::new(1.0, 1.0, 1.0));
+        let b = Box3::new(&Vector3::new(0.5, 0.5, 0.5), &Vector3::new(1.5, 1.5, 1.5));
         assert!(a.overlap(&b));
 
-        let c = Box3::new(
-            &Vector3::new(2.0, 0.0, 0.0),
-            &Vector3::new(3.0, 1.0, 1.0),
-        );
+        let c = Box3::new(&Vector3::new(2.0, 0.0, 0.0), &Vector3::new(3.0, 1.0, 1.0));
         assert!(!a.overlap(&c));
 
-        let d = Box3::new(
-            &Vector3::new(0.0, 2.0, 0.0),
-            &Vector3::new(1.0, 3.0, 1.0),
-        );
+        let d = Box3::new(&Vector3::new(0.0, 2.0, 0.0), &Vector3::new(1.0, 3.0, 1.0));
         assert!(!a.overlap(&d));
 
-        let e = Box3::new(
-            &Vector3::new(0.0, 0.0, 2.0),
-            &Vector3::new(1.0, 1.0, 3.0),
-        );
+        let e = Box3::new(&Vector3::new(0.0, 0.0, 2.0), &Vector3::new(1.0, 1.0, 3.0));
         assert!(!a.overlap(&e));
 
-        let f = Box3::new(
-            &Vector3::new(1.0, 0.0, 0.0),
-            &Vector3::new(2.0, 1.0, 1.0),
-        );
+        let f = Box3::new(&Vector3::new(1.0, 0.0, 0.0), &Vector3::new(2.0, 1.0, 1.0));
         assert!(a.overlap(&f));
     }
 

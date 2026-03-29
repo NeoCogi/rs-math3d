@@ -33,10 +33,15 @@
 //!
 //! ## Features
 //!
-//! - **No standard library required**: Works in embedded and WASM environments
-//! - **Generic types**: All types are generic over scalar types (f32, f64, i32, i64)
+//! - **No standard library required**: Works without `std`, with float math supplied by either
+//!   the `std` feature or the target's C math library
+//! - **Generic storage types**: Vectors, boxes, rectangles, and basic matrix arithmetic support
+//!   `f32`, `f64`, `i32`, and `i64`
+//! - **Float-only analytic math**: Normalization, inverses, quaternions, transforms, rays,
+//!   planes, and geometric queries are restricted to floating-point scalars
 //! - **Column-major matrices**: Compatible with OpenGL and similar APIs
-//! - **Comprehensive operations**: Full suite of vector, matrix, and quaternion operations
+//! - **Comprehensive float math**: Full suite of vector, matrix, and quaternion operations for
+//!   `f32` and `f64`
 //! - **Geometric primitives**: Rays, planes, triangles, spheres, and more
 //!
 //! ## Quick Start
@@ -44,6 +49,7 @@
 //! ```
 //! use rs_math3d::{Vector, Vector3, Matrix4, Quat, EPS_F32};
 //! use rs_math3d::transforms;
+//! use core::f32::consts::{FRAC_PI_2, PI};
 //!
 //! // Create vectors
 //! let v1 = Vector3::new(1.0, 2.0, 3.0);
@@ -54,14 +60,14 @@
 //! let translation = transforms::translate(Vector3::new(10.0, 0.0, 0.0));
 //! let rotation = transforms::rotation_from_axis_angle(
 //!     &Vector3::new(0.0, 1.0, 0.0),
-//!     std::f32::consts::PI / 4.0,
+//!     PI / 4.0,
 //!     EPS_F32,
 //! ).unwrap();
 //!
 //! // Use quaternions for rotations
 //! let q = Quat::of_axis_angle(
 //!     &Vector3::new(0.0, 0.0, 1.0),
-//!     std::f32::consts::PI / 2.0,
+//!     FRAC_PI_2,
 //!     EPS_F32,
 //! ).unwrap();
 //! let rotation_matrix = q.mat4();

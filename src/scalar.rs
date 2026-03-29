@@ -35,12 +35,12 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-use num_traits::{Num, NumAssignOps};
 use core::cmp::PartialOrd;
 use core::ops::Neg;
+use num_traits::{Num, NumAssignOps};
 
 // Re-export for convenience
-pub use num_traits::{Zero, One};
+pub use num_traits::{One, Zero};
 
 /// Default epsilon for f32 comparisons.
 pub const EPS_F32: f32 = 1.0 / (1024.0 * 1024.0);
@@ -49,9 +49,11 @@ pub const EPS_F64: f64 = 1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0);
 
 /// Core scalar trait for numeric types used in the library.
 ///
-/// This trait extends `num-traits` types with additional methods
-/// commonly needed in 3D mathematics. It is implemented for
-/// `i32`, `i64`, `f32`, and `f64`.
+/// This trait is intentionally limited to operations that make sense for both
+/// integer and floating-point types. Analytic and fractional operations live on
+/// [`FloatScalar`].
+///
+/// It is implemented for `i32`, `i64`, `f32`, and `f64`.
 ///
 /// # Required Methods
 ///
@@ -60,25 +62,11 @@ pub const EPS_F64: f64 = 1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0);
 /// - Comparison operations (via `PartialOrd`)
 /// - Additional constants and utility methods
 pub trait Scalar:
-    Num
-    + NumAssignOps
-    + Neg<Output = Self>
-    + PartialOrd
-    + Clone
-    + Copy
-    + Sized
+    Num + NumAssignOps + Neg<Output = Self> + PartialOrd + Clone + Copy + Sized
 {
     // Additional methods not provided by num-traits
     /// Returns the constant 2 for the scalar type.
     fn two() -> Self;
-    /// Returns 1/2 for the scalar type.
-    fn half() -> Self;
-    /// Returns 1/4 for the scalar type.
-    fn quarter() -> Self;
-    /// Returns the constant 8192 for the scalar type.
-    fn l8192() -> Self;
-    /// Returns a reasonable epsilon for comparisons.
-    fn epsilon() -> Self;
     /// Returns the minimum of two values.
     fn min(l: Self, r: Self) -> Self;
     /// Returns the maximum of two values.
@@ -103,6 +91,12 @@ pub trait Scalar:
 /// MSVCRT on Windows) since they're not available in no_std Rust.
 /// When the `std` feature or tests are enabled, intrinsic std methods are used.
 pub trait FloatScalar: Scalar {
+    /// Returns a reasonable epsilon for comparisons.
+    fn epsilon() -> Self;
+    /// Returns 1/2 for the scalar type.
+    fn half() -> Self;
+    /// Returns 1/4 for the scalar type.
+    fn quarter() -> Self;
     /// Returns positive infinity.
     fn infinity() -> Self;
     /// Returns the square root.
@@ -119,16 +113,22 @@ pub trait FloatScalar: Scalar {
 
 // Implementation for i32
 impl Scalar for i32 {
-    fn two() -> Self { 2 }
-    fn half() -> Self { 0 }  // Integer division
-    fn quarter() -> Self { 0 }  // Integer division
-    fn l8192() -> Self { 8192 }
-    fn epsilon() -> Self { 0 }
+    fn two() -> Self {
+        2
+    }
     fn min(l: Self, r: Self) -> Self {
-        if l < r { l } else { r }
+        if l < r {
+            l
+        } else {
+            r
+        }
     }
     fn max(l: Self, r: Self) -> Self {
-        if l > r { l } else { r }
+        if l > r {
+            l
+        } else {
+            r
+        }
     }
     fn tabs(self) -> Self {
         self.abs()
@@ -137,16 +137,22 @@ impl Scalar for i32 {
 
 // Implementation for i64
 impl Scalar for i64 {
-    fn two() -> Self { 2 }
-    fn half() -> Self { 0 }  // Integer division
-    fn quarter() -> Self { 0 }  // Integer division
-    fn l8192() -> Self { 8192 }
-    fn epsilon() -> Self { 0 }
+    fn two() -> Self {
+        2
+    }
     fn min(l: Self, r: Self) -> Self {
-        if l < r { l } else { r }
+        if l < r {
+            l
+        } else {
+            r
+        }
     }
     fn max(l: Self, r: Self) -> Self {
-        if l > r { l } else { r }
+        if l > r {
+            l
+        } else {
+            r
+        }
     }
     fn tabs(self) -> Self {
         self.abs()
@@ -155,16 +161,22 @@ impl Scalar for i64 {
 
 // Implementation for f32
 impl Scalar for f32 {
-    fn two() -> Self { 2.0 }
-    fn half() -> Self { 0.5 }
-    fn quarter() -> Self { 0.25 }
-    fn l8192() -> Self { 8192.0 }
-    fn epsilon() -> Self { EPS_F32 }
+    fn two() -> Self {
+        2.0
+    }
     fn min(l: Self, r: Self) -> Self {
-        if l < r { l } else { r }
+        if l < r {
+            l
+        } else {
+            r
+        }
     }
     fn max(l: Self, r: Self) -> Self {
-        if l > r { l } else { r }
+        if l > r {
+            l
+        } else {
+            r
+        }
     }
     fn tabs(self) -> Self {
         self.abs()
@@ -173,16 +185,22 @@ impl Scalar for f32 {
 
 // Implementation for f64
 impl Scalar for f64 {
-    fn two() -> Self { 2.0 }
-    fn half() -> Self { 0.5 }
-    fn quarter() -> Self { 0.25 }
-    fn l8192() -> Self { 8192.0 }
-    fn epsilon() -> Self { EPS_F64 }
+    fn two() -> Self {
+        2.0
+    }
     fn min(l: Self, r: Self) -> Self {
-        if l < r { l } else { r }
+        if l < r {
+            l
+        } else {
+            r
+        }
     }
     fn max(l: Self, r: Self) -> Self {
-        if l > r { l } else { r }
+        if l > r {
+            l
+        } else {
+            r
+        }
     }
     fn tabs(self) -> Self {
         self.abs()
@@ -193,6 +211,15 @@ impl Scalar for f64 {
 // Note: Without std or libm, we need to provide our own implementations
 // or link to external math libraries
 impl FloatScalar for f32 {
+    fn epsilon() -> Self {
+        EPS_F32
+    }
+    fn half() -> Self {
+        0.5
+    }
+    fn quarter() -> Self {
+        0.25
+    }
     fn infinity() -> Self {
         core::f32::INFINITY
     }
@@ -267,6 +294,15 @@ impl FloatScalar for f32 {
 // Note: Without std or libm, we need to provide our own implementations
 // or link to external math libraries
 impl FloatScalar for f64 {
+    fn epsilon() -> Self {
+        EPS_F64
+    }
+    fn half() -> Self {
+        0.5
+    }
+    fn quarter() -> Self {
+        0.25
+    }
     fn infinity() -> Self {
         core::f64::INFINITY
     }

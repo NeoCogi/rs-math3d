@@ -31,12 +31,16 @@
 //! and linear algebra. Matrices are stored in column-major order for compatibility
 //! with graphics APIs like OpenGL.
 //!
+//! Integer matrices are supported for storage, addition, subtraction, and
+//! multiplication. Operations that require fractional results, such as inversion
+//! and axis-angle construction, are available only for floating-point scalars.
+//!
 //! # Examples
 //!
 //! ```
 //! use rs_math3d::matrix::Matrix4;
 //! use rs_math3d::vector::Vector4;
-//! 
+//!
 //! let m = Matrix4::<f32>::identity();
 //! let v = Vector4::new(1.0, 2.0, 3.0, 1.0);
 //! let result = m * v; // Transform vector
@@ -44,8 +48,8 @@
 
 use crate::scalar::*;
 use crate::vector::*;
-use num_traits::{Zero, One};
 use core::ops::*;
+use num_traits::{One, Zero};
 
 /// A 2x2 matrix stored in column-major order.
 ///
@@ -129,7 +133,26 @@ impl<T: Scalar> Matrix2<T> {
     /// [0 1]
     /// ```
     pub fn identity() -> Self {
-        Self::new(<T as One>::one(), <T as Zero>::zero(), <T as Zero>::zero(), <T as One>::one())
+        Self::new(
+            <T as One>::one(),
+            <T as Zero>::zero(),
+            <T as Zero>::zero(),
+            <T as One>::one(),
+        )
+    }
+
+    /// Attempts to cast each element into another numeric type.
+    pub fn try_cast<U>(&self) -> Option<Matrix2<U>>
+    where
+        T: num_traits::ToPrimitive,
+        U: Scalar + num_traits::NumCast,
+    {
+        Some(Matrix2::new(
+            num_traits::NumCast::from(self.col[0].x)?,
+            num_traits::NumCast::from(self.col[0].y)?,
+            num_traits::NumCast::from(self.col[1].x)?,
+            num_traits::NumCast::from(self.col[1].y)?,
+        ))
     }
 
     /// Computes the determinant of the matrix.
@@ -173,7 +196,10 @@ impl<T: Scalar> Matrix2<T> {
     ///
     /// # Note
     /// Returns NaN or Inf if the matrix is singular (determinant = 0).
-    pub fn inverse(&self) -> Self {
+    pub fn inverse(&self) -> Self
+    where
+        T: FloatScalar,
+    {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
 
@@ -301,6 +327,25 @@ impl<T: Scalar> Matrix3<T> {
         )
     }
 
+    /// Attempts to cast each element into another numeric type.
+    pub fn try_cast<U>(&self) -> Option<Matrix3<U>>
+    where
+        T: num_traits::ToPrimitive,
+        U: Scalar + num_traits::NumCast,
+    {
+        Some(Matrix3::new(
+            num_traits::NumCast::from(self.col[0].x)?,
+            num_traits::NumCast::from(self.col[0].y)?,
+            num_traits::NumCast::from(self.col[0].z)?,
+            num_traits::NumCast::from(self.col[1].x)?,
+            num_traits::NumCast::from(self.col[1].y)?,
+            num_traits::NumCast::from(self.col[1].z)?,
+            num_traits::NumCast::from(self.col[2].x)?,
+            num_traits::NumCast::from(self.col[2].y)?,
+            num_traits::NumCast::from(self.col[2].z)?,
+        ))
+    }
+
     /// Computes the determinant of the matrix.
     pub fn determinant(&self) -> T {
         let m00 = self.col[0].x;
@@ -351,7 +396,10 @@ impl<T: Scalar> Matrix3<T> {
     ///
     /// # Note
     /// Returns NaN or Inf if the matrix is singular (determinant = 0).
-    pub fn inverse(&self) -> Self {
+    pub fn inverse(&self) -> Self
+    where
+        T: FloatScalar,
+    {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
         let m20 = self.col[0].z;
@@ -598,6 +646,32 @@ impl<T: Scalar> Matrix4<T> {
         )
     }
 
+    /// Attempts to cast each element into another numeric type.
+    pub fn try_cast<U>(&self) -> Option<Matrix4<U>>
+    where
+        T: num_traits::ToPrimitive,
+        U: Scalar + num_traits::NumCast,
+    {
+        Some(Matrix4::new(
+            num_traits::NumCast::from(self.col[0].x)?,
+            num_traits::NumCast::from(self.col[0].y)?,
+            num_traits::NumCast::from(self.col[0].z)?,
+            num_traits::NumCast::from(self.col[0].w)?,
+            num_traits::NumCast::from(self.col[1].x)?,
+            num_traits::NumCast::from(self.col[1].y)?,
+            num_traits::NumCast::from(self.col[1].z)?,
+            num_traits::NumCast::from(self.col[1].w)?,
+            num_traits::NumCast::from(self.col[2].x)?,
+            num_traits::NumCast::from(self.col[2].y)?,
+            num_traits::NumCast::from(self.col[2].z)?,
+            num_traits::NumCast::from(self.col[2].w)?,
+            num_traits::NumCast::from(self.col[3].x)?,
+            num_traits::NumCast::from(self.col[3].y)?,
+            num_traits::NumCast::from(self.col[3].z)?,
+            num_traits::NumCast::from(self.col[3].w)?,
+        ))
+    }
+
     /// Computes the determinant of the matrix.
     ///
     /// Uses Laplace expansion along the first column.
@@ -695,7 +769,10 @@ impl<T: Scalar> Matrix4<T> {
     ///
     /// # Note
     /// Returns NaN or Inf if the matrix is singular (determinant = 0).
-    pub fn inverse(&self) -> Self {
+    pub fn inverse(&self) -> Self
+    where
+        T: FloatScalar,
+    {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
         let m20 = self.col[0].z;
@@ -844,7 +921,10 @@ impl<T: Scalar> Matrix4<T> {
     /// Computes the inverse of an affine matrix (rotation/scale + translation).
     ///
     /// Assumes the last row is `[0, 0, 0, 1]`.
-    pub fn inverse_affine(&self) -> Self {
+    pub fn inverse_affine(&self) -> Self
+    where
+        T: FloatScalar,
+    {
         let rot = Matrix3::new(
             self.col[0].x,
             self.col[0].y,
@@ -1063,14 +1143,19 @@ implMatrixOps!(Matrix4, Vector4);
 impl<T: Scalar> Mul<Matrix4<T>> for Vector3<T> {
     type Output = Vector3<T>;
     fn mul(self, rhs: Matrix4<T>) -> Vector3<T> {
-        Matrix4::mul_vector_matrix(&Vector4::new(self.x, self.y, self.z, <T as One>::one()), &rhs).xyz()
+        Matrix4::mul_vector_matrix(
+            &Vector4::new(self.x, self.y, self.z, <T as One>::one()),
+            &rhs,
+        )
+        .xyz()
     }
 }
 
 impl<T: Scalar> Mul<Vector3<T>> for Matrix4<T> {
     type Output = Vector3<T>;
     fn mul(self, rhs: Vector3<T>) -> Vector3<T> {
-        Matrix4::mul_matrix_vector(&self, &Vector4::new(rhs.x, rhs.y, rhs.z, <T as One>::one())).xyz()
+        Matrix4::mul_matrix_vector(&self, &Vector4::new(rhs.x, rhs.y, rhs.z, <T as One>::one()))
+            .xyz()
     }
 }
 
@@ -1115,7 +1200,7 @@ mod tests {
         let m = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let det = m.determinant();
         assert_eq!(det, -2.0); // 1*4 - 3*2 = -2
-        
+
         // Test singular matrix
         let m_singular = Matrix2::<f32>::new(1.0, 2.0, 2.0, 4.0);
         let det_singular = m_singular.determinant();
@@ -1127,7 +1212,7 @@ mod tests {
         let m = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let m_inv = m.inverse();
         let product = Matrix2::mul_matrix_matrix(&m, &m_inv);
-        
+
         // Check if product is identity
         assert!((product.col[0].x - 1.0).abs() < 0.001);
         assert!((product.col[0].y).abs() < 0.001);
@@ -1143,7 +1228,7 @@ mod tests {
         assert_eq!(mt.col[0].y, 3.0);
         assert_eq!(mt.col[1].x, 2.0);
         assert_eq!(mt.col[1].y, 4.0);
-        
+
         // Transpose of transpose should be original
         let mtt = mt.transpose();
         assert_eq!(mtt.col[0].x, m.col[0].x);
@@ -1164,32 +1249,20 @@ mod tests {
 
     #[test]
     fn test_matrix3_determinant() {
-        let m = Matrix3::<f32>::new(
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0
-        );
+        let m = Matrix3::<f32>::new(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
         assert_eq!(m.determinant(), 1.0);
-        
-        let m2 = Matrix3::<f32>::new(
-            2.0, 3.0, 1.0,
-            1.0, 0.0, 2.0,
-            1.0, 2.0, 1.0
-        );
+
+        let m2 = Matrix3::<f32>::new(2.0, 3.0, 1.0, 1.0, 0.0, 2.0, 1.0, 2.0, 1.0);
         let det = m2.determinant();
         assert!((det - -3.0).abs() < 0.001);
     }
 
     #[test]
     fn test_matrix3_inverse() {
-        let m = Matrix3::<f32>::new(
-            2.0, 3.0, 1.0,
-            1.0, 0.0, 2.0,
-            1.0, 2.0, 1.0
-        );
+        let m = Matrix3::<f32>::new(2.0, 3.0, 1.0, 1.0, 0.0, 2.0, 1.0, 2.0, 1.0);
         let m_inv = m.inverse();
         let product = Matrix3::mul_matrix_matrix(&m, &m_inv);
-        
+
         // Check if product is close to identity
         for i in 0..3 {
             for j in 0..3 {
@@ -1267,7 +1340,7 @@ mod tests {
         let result2 = m2 * v2;
         assert_eq!(result2.x, 23.0); // 1*5 + 3*6 = 23
         assert_eq!(result2.y, 34.0); // 2*5 + 4*6 = 34
-        
+
         // Test Matrix3 * Vector3
         let m3 = Matrix3::<f32>::identity();
         let v3 = Vector3::<f32>::new(1.0, 2.0, 3.0);
@@ -1275,7 +1348,7 @@ mod tests {
         assert_eq!(result3.x, 1.0);
         assert_eq!(result3.y, 2.0);
         assert_eq!(result3.z, 3.0);
-        
+
         // Test Matrix4 * Vector4
         let m4 = Matrix4::<f32>::identity();
         let v4 = Vector4::<f32>::new(1.0, 2.0, 3.0, 4.0);
@@ -1292,10 +1365,10 @@ mod tests {
         let a = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let b = Matrix2::<f32>::new(5.0, 6.0, 7.0, 8.0);
         let c = Matrix2::<f32>::new(9.0, 10.0, 11.0, 12.0);
-        
+
         let left = (a * b) * c;
         let right = a * (b * c);
-        
+
         assert!((left.col[0].x - right.col[0].x).abs() < 0.001);
         assert!((left.col[0].y - right.col[0].y).abs() < 0.001);
         assert!((left.col[1].x - right.col[1].x).abs() < 0.001);
@@ -1306,13 +1379,13 @@ mod tests {
     fn test_matrix_addition_subtraction() {
         let m1 = Matrix2::<f32>::new(1.0, 2.0, 3.0, 4.0);
         let m2 = Matrix2::<f32>::new(5.0, 6.0, 7.0, 8.0);
-        
+
         let sum = m1 + m2;
         assert_eq!(sum.col[0].x, 6.0);
         assert_eq!(sum.col[0].y, 8.0);
         assert_eq!(sum.col[1].x, 10.0);
         assert_eq!(sum.col[1].y, 12.0);
-        
+
         let diff = m2 - m1;
         assert_eq!(diff.col[0].x, 4.0);
         assert_eq!(diff.col[0].y, 4.0);
@@ -1324,15 +1397,12 @@ mod tests {
     fn test_matrix4_inverse() {
         // Test with a known invertible matrix
         let m = Matrix4::<f32>::new(
-            2.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 0.5, 0.0,
-            1.0, 2.0, 3.0, 1.0
+            2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 1.0, 2.0, 3.0, 1.0,
         );
-        
+
         let m_inv = m.inverse();
         let product = m * m_inv;
-        
+
         // Check if product is close to identity
         for i in 0..4 {
             for j in 0..4 {
@@ -1368,8 +1438,14 @@ mod tests {
                     },
                     _ => 0.0,
                 };
-                assert!((val - expected).abs() < 0.001, 
-                    "Matrix inverse failed at [{}, {}]: expected {}, got {}", i, j, expected, val);
+                assert!(
+                    (val - expected).abs() < 0.001,
+                    "Matrix inverse failed at [{}, {}]: expected {}, got {}",
+                    i,
+                    j,
+                    expected,
+                    val
+                );
             }
         }
     }
@@ -1377,10 +1453,7 @@ mod tests {
     #[test]
     fn test_matrix4_inverse_affine() {
         let m = Matrix4::<f32>::new(
-            0.0, 1.0, 0.0, 0.0,
-            -1.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 2.0, 0.0,
-            3.0, 4.0, 5.0, 1.0,
+            0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 3.0, 4.0, 5.0, 1.0,
         );
         assert!(m.is_affine(EPS_F32));
 
@@ -1397,11 +1470,20 @@ mod tests {
         }
 
         let non_affine = Matrix4::<f32>::new(
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, -1.0,
-            0.0, 0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0,
         );
         assert!(!non_affine.is_affine(EPS_F32));
+    }
+
+    #[test]
+    fn test_matrix_try_cast() {
+        let mi = Matrix2::<i32>::new(1, 2, 3, 4);
+        let mf = mi
+            .try_cast::<f32>()
+            .expect("integer matrix should cast to f32");
+        assert_eq!(mf.col[0].x, 1.0);
+        assert_eq!(mf.col[0].y, 2.0);
+        assert_eq!(mf.col[1].x, 3.0);
+        assert_eq!(mf.col[1].y, 4.0);
     }
 }

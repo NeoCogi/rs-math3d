@@ -31,27 +31,31 @@
 //! and linear algebra applications. All vectors support standard arithmetic operations,
 //! dot products, and component-wise operations.
 //!
+//! Integer vectors are supported for storage and discrete geometry. Operations that
+//! require fractional results, such as normalization, are available only through
+//! [`FloatVector`].
+//!
 //! # Examples
 //!
 //! ```
 //! use rs_math3d::vector::{FloatVector, Vector, Vector3};
-//! 
+//!
 //! let v1 = Vector3::new(1.0, 2.0, 3.0);
 //! let v2 = Vector3::new(4.0, 5.0, 6.0);
-//! 
+//!
 //! // Vector addition
 //! let sum = v1 + v2;
-//! 
+//!
 //! // Dot product
 //! let dot = Vector3::dot(&v1, &v2);
-//! 
+//!
 //! // Normalization
 //! let normalized = v1.normalize();
 //! ```
 
 use crate::scalar::*;
-use num_traits::{Zero, One};
 use core::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use num_traits::{One, Zero};
 
 /// Generic vector trait defining common vector operations.
 ///
@@ -81,22 +85,22 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
 
     /// Adds two vectors component-wise.
     fn add_vv(l: &Self, r: &Self) -> Self;
-    
+
     /// Subtracts two vectors component-wise.
     fn sub_vv(l: &Self, r: &Self) -> Self;
-    
+
     /// Multiplies two vectors component-wise (Hadamard product).
     fn mul_vv(l: &Self, r: &Self) -> Self;
-    
+
     /// Divides two vectors component-wise.
     fn div_vv(l: &Self, r: &Self) -> Self;
-    
+
     /// Multiplies a vector by a scalar.
     fn mul_vs(l: &Self, r: T) -> Self;
-    
+
     /// Divides a vector by a scalar.
     fn div_vs(l: &Self, r: T) -> Self;
-    
+
     /// Computes the remainder of component-wise division.
     fn rem_vv(l: &Self, r: &Self) -> Self;
 
@@ -110,7 +114,7 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
 
     /// Returns a vector with the minimum components from both vectors.
     fn min(l: &Self, r: &Self) -> Self;
-    
+
     /// Returns a vector with the maximum components from both vectors.
     fn max(l: &Self, r: &Self) -> Self;
 }
@@ -127,7 +131,7 @@ pub trait FloatVector<T: FloatScalar>: Vector<T> {
     /// ||v|| = √(v₁² + v₂² + ... + vₙ²)
     /// ```
     fn length(&self) -> T;
-    
+
     /// Returns a unit vector in the same direction.
     ///
     /// For vector **v**:
@@ -138,7 +142,7 @@ pub trait FloatVector<T: FloatScalar>: Vector<T> {
     /// # Note
     /// Returns NaN or Inf components if the vector has zero length.
     fn normalize(&self) -> Self;
-    
+
     /// Computes the Euclidean distance between two vectors.
     ///
     /// For vectors **v** and **w**:
@@ -199,10 +203,18 @@ macro_rules! implVecScalar {
 }
 
 macro_rules! vector_field_doc {
-    (x) => { "X component." };
-    (y) => { "Y component." };
-    (z) => { "Z component." };
-    (w) => { "W component." };
+    (x) => {
+        "X component."
+    };
+    (y) => {
+        "Y component."
+    };
+    (z) => {
+        "Z component."
+    };
+    (w) => {
+        "W component."
+    };
 }
 
 macro_rules! implVector {
@@ -215,6 +227,21 @@ macro_rules! implVector {
         impl<T: Scalar> $vecName<T> {
             /// Creates a vector from components.
             pub fn new($($field:T),*) -> Self { Self { $($field: $field),* } }
+        }
+
+        impl<T> $vecName<T>
+        where
+            T: Copy + num_traits::ToPrimitive,
+        {
+            /// Attempts to cast each component into another numeric type.
+            pub fn try_cast<U>(&self) -> Option<$vecName<U>>
+            where
+                U: Scalar + num_traits::NumCast,
+            {
+                Some($vecName {
+                    $($field: num_traits::NumCast::from(self.$field)?),*
+                })
+            }
         }
 
         impl<T: Scalar> Vector<T> for $vecName<T> {
@@ -349,7 +376,7 @@ implVector!(
     /// # Examples
     /// ```
     /// use rs_math3d::vector::Vector2;
-    /// 
+    ///
     /// let v = Vector2::new(3.0, 4.0);
     /// assert_eq!(v.x, 3.0);
     /// assert_eq!(v.y, 4.0);
@@ -364,7 +391,7 @@ implVector!(
     /// # Examples
     /// ```
     /// use rs_math3d::vector::{Vector3, CrossProduct};
-    /// 
+    ///
     /// let v1 = Vector3::new(1.0, 0.0, 0.0);
     /// let v2 = Vector3::new(0.0, 1.0, 0.0);
     /// let cross = Vector3::cross(&v1, &v2);
@@ -382,7 +409,7 @@ implVector!(
     /// # Examples
     /// ```
     /// use rs_math3d::vector::Vector4;
-    /// 
+    ///
     /// let v = Vector4::new(1.0, 2.0, 3.0, 1.0);
     /// // w=1 for positions, w=0 for directions
     /// ```
@@ -654,7 +681,7 @@ impl_swizzle3!(Vector4, x, y, z);
 mod tests {
     use super::*;
     use crate::scalar::{FloatScalar, EPS_F32};
-    
+
     #[test]
     pub fn test() {
         let f1 = Vector2 { x: 1.0, y: 2.0 };
@@ -679,14 +706,14 @@ mod tests {
         let nv = v.normalize();
         let len = nv.length();
         assert!((len - 1.0).abs() < f32::epsilon());
-        
+
         // Test zero vector normalization (should handle gracefully)
         let v_zero = Vector3::<f32>::new(0.0, 0.0, 0.0);
         let nv_zero = v_zero.normalize();
         // When normalizing zero vector, we get NaN or Inf components
         // The current implementation divides by zero, resulting in inf/nan
         assert!(nv_zero.x.is_infinite() || nv_zero.x.is_nan());
-        
+
         // Test already normalized vector
         let v_unit = Vector3::<f32>::new(1.0, 0.0, 0.0);
         let nv_unit = v_unit.normalize();
@@ -717,22 +744,20 @@ mod tests {
             .try_normalize_with_inv_len(len_sq, inv_len, EPS_F32)
             .expect("should normalize");
         assert!((nv_fast_try.length() - 1.0).abs() < 0.001);
-        assert!(zero
-            .try_normalize_with_inv_len(0.0, 0.0, EPS_F32)
-            .is_none());
+        assert!(zero.try_normalize_with_inv_len(0.0, 0.0, EPS_F32).is_none());
     }
 
     #[test]
     fn test_vector_length() {
         let v2 = Vector2::<f32>::new(3.0, 4.0);
         assert!((v2.length() - 5.0).abs() < f32::epsilon());
-        
+
         let v3 = Vector3::<f32>::new(2.0, 3.0, 6.0);
         assert!((v3.length() - 7.0).abs() < f32::epsilon());
-        
+
         let v4 = Vector4::<f32>::new(1.0, 2.0, 2.0, 0.0);
         assert!((v4.length() - 3.0).abs() < f32::epsilon());
-        
+
         // Test zero vector
         let v_zero = Vector3::<f32>::zero();
         assert_eq!(v_zero.length(), 0.0);
@@ -744,12 +769,12 @@ mod tests {
         let v2 = Vector3::<f32>::new(4.0, 5.0, 6.0);
         let dot = Vector3::dot(&v1, &v2);
         assert_eq!(dot, 32.0); // 1*4 + 2*5 + 3*6 = 32
-        
+
         // Test orthogonal vectors
         let v_ortho1 = Vector3::<f32>::new(1.0, 0.0, 0.0);
         let v_ortho2 = Vector3::<f32>::new(0.0, 1.0, 0.0);
         assert_eq!(Vector3::dot(&v_ortho1, &v_ortho2), 0.0);
-        
+
         // Test dot product with itself equals length squared
         let self_dot = Vector3::dot(&v1, &v1);
         let len_squared = v1.length() * v1.length();
@@ -762,22 +787,22 @@ mod tests {
         let x = Vector3::<f32>::new(1.0, 0.0, 0.0);
         let y = Vector3::<f32>::new(0.0, 1.0, 0.0);
         let z = Vector3::<f32>::new(0.0, 0.0, 1.0);
-        
+
         let x_cross_y = Vector3::cross(&x, &y);
         assert!((x_cross_y.x - z.x).abs() < f32::epsilon());
         assert!((x_cross_y.y - z.y).abs() < f32::epsilon());
         assert!((x_cross_y.z - z.z).abs() < f32::epsilon());
-        
+
         let y_cross_z = Vector3::cross(&y, &z);
         assert!((y_cross_z.x - x.x).abs() < f32::epsilon());
         assert!((y_cross_z.y - x.y).abs() < f32::epsilon());
         assert!((y_cross_z.z - x.z).abs() < f32::epsilon());
-        
+
         let z_cross_x = Vector3::cross(&z, &x);
         assert!((z_cross_x.x - y.x).abs() < f32::epsilon());
         assert!((z_cross_x.y - y.y).abs() < f32::epsilon());
         assert!((z_cross_x.z - y.z).abs() < f32::epsilon());
-        
+
         // Test anti-commutativity: a × b = -(b × a)
         let a = Vector3::<f32>::new(1.0, 2.0, 3.0);
         let b = Vector3::<f32>::new(4.0, 5.0, 6.0);
@@ -786,7 +811,7 @@ mod tests {
         assert!((a_cross_b.x + b_cross_a.x).abs() < f32::epsilon());
         assert!((a_cross_b.y + b_cross_a.y).abs() < f32::epsilon());
         assert!((a_cross_b.z + b_cross_a.z).abs() < f32::epsilon());
-        
+
         // Test cross product with itself is zero
         let self_cross = Vector3::cross(&a, &a);
         assert!(self_cross.x.abs() < f32::epsilon());
@@ -800,7 +825,7 @@ mod tests {
         let v2 = Vector3::<f32>::new(4.0, 6.0, 3.0);
         let dist = Vector3::distance(&v1, &v2);
         assert!((dist - 5.0).abs() < f32::epsilon()); // sqrt(9 + 16 + 0) = 5
-        
+
         // Distance to itself should be zero
         let self_dist = Vector3::distance(&v1, &v1);
         assert!(self_dist.abs() < f32::epsilon());
@@ -810,12 +835,12 @@ mod tests {
     fn test_vector_min_max() {
         let v1 = Vector3::<f32>::new(1.0, 5.0, 3.0);
         let v2 = Vector3::<f32>::new(4.0, 2.0, 6.0);
-        
+
         let v_min = Vector3::min(&v1, &v2);
         assert_eq!(v_min.x, 1.0);
         assert_eq!(v_min.y, 2.0);
         assert_eq!(v_min.z, 3.0);
-        
+
         let v_max = Vector3::max(&v1, &v2);
         assert_eq!(v_max.x, 4.0);
         assert_eq!(v_max.y, 5.0);
@@ -826,43 +851,43 @@ mod tests {
     fn test_vector_arithmetic() {
         let v1 = Vector3::<f32>::new(1.0, 2.0, 3.0);
         let v2 = Vector3::<f32>::new(4.0, 5.0, 6.0);
-        
+
         // Addition
         let sum = v1 + v2;
         assert_eq!(sum.x, 5.0);
         assert_eq!(sum.y, 7.0);
         assert_eq!(sum.z, 9.0);
-        
+
         // Subtraction
         let diff = v2 - v1;
         assert_eq!(diff.x, 3.0);
         assert_eq!(diff.y, 3.0);
         assert_eq!(diff.z, 3.0);
-        
+
         // Component-wise multiplication
         let prod = v1 * v2;
         assert_eq!(prod.x, 4.0);
         assert_eq!(prod.y, 10.0);
         assert_eq!(prod.z, 18.0);
-        
+
         // Component-wise division
         let div = v2 / v1;
         assert_eq!(div.x, 4.0);
         assert_eq!(div.y, 2.5);
         assert_eq!(div.z, 2.0);
-        
+
         // Scalar multiplication
         let scaled = v1 * 2.0;
         assert_eq!(scaled.x, 2.0);
         assert_eq!(scaled.y, 4.0);
         assert_eq!(scaled.z, 6.0);
-        
+
         // Scalar division
         let divided = v2 / 2.0;
         assert_eq!(divided.x, 2.0);
         assert_eq!(divided.y, 2.5);
         assert_eq!(divided.z, 3.0);
-        
+
         // Negation
         let neg = -v1;
         assert_eq!(neg.x, -1.0);
@@ -873,31 +898,31 @@ mod tests {
     #[test]
     fn test_swizzle_operations() {
         let v2 = Vector2::<f32>::new(1.0, 2.0);
-        
+
         assert_eq!(v2.xx().x, 1.0);
         assert_eq!(v2.xx().y, 1.0);
-        
+
         assert_eq!(v2.xy().x, 1.0);
         assert_eq!(v2.xy().y, 2.0);
-        
+
         assert_eq!(v2.yx().x, 2.0);
         assert_eq!(v2.yx().y, 1.0);
-        
+
         assert_eq!(v2.yy().x, 2.0);
         assert_eq!(v2.yy().y, 2.0);
 
         let v2_xz = v2.xz();
         assert_eq!(v2_xz.x, 1.0);
         assert_eq!(v2_xz.y, 0.0);
-        
+
         let v3 = Vector3::<f32>::new(1.0, 2.0, 3.0);
-        
+
         assert_eq!(v3.xz().x, 1.0);
         assert_eq!(v3.xz().y, 3.0);
-        
+
         assert_eq!(v3.zy().x, 3.0);
         assert_eq!(v3.zy().y, 2.0);
-        
+
         let v3_swizzle = v3.zyx();
         assert_eq!(v3_swizzle.x, 3.0);
         assert_eq!(v3_swizzle.y, 2.0);
@@ -917,16 +942,27 @@ mod tests {
     fn test_vector_rem_operation() {
         let v1 = Vector3::<i32>::new(10, 15, 20);
         let v2 = Vector3::<i32>::new(3, 4, 6);
-        
+
         let rem = v1 % v2;
         assert_eq!(rem.x, 1); // 10 % 3 = 1
         assert_eq!(rem.y, 3); // 15 % 4 = 3
         assert_eq!(rem.z, 2); // 20 % 6 = 2
-        
+
         let v3 = Vector3::<i32>::new(10, 15, 20);
         let rem_scalar = v3 % 7;
         assert_eq!(rem_scalar.x, 3); // 10 % 7 = 3
         assert_eq!(rem_scalar.y, 1); // 15 % 7 = 1
         assert_eq!(rem_scalar.z, 6); // 20 % 7 = 6
+    }
+
+    #[test]
+    fn test_vector_try_cast() {
+        let vi = Vector3::<i32>::new(1, 2, 3);
+        let vf = vi
+            .try_cast::<f32>()
+            .expect("integer vector should cast to f32");
+        assert_eq!(vf.x, 1.0);
+        assert_eq!(vf.y, 2.0);
+        assert_eq!(vf.z, 3.0);
     }
 }

@@ -29,6 +29,10 @@
 //!
 //! Boolean intersection tests are boundary-inclusive unless stated otherwise:
 //! touching counts as intersecting.
+//!
+//! The `Box3`/`Ray` query uses a slab-interval test. For ray directions that are
+//! parallel to a slab plane, the implementation checks whether the ray origin is
+//! already inside that slab instead of relying on IEEE `0/0` behaviour.
 
 use crate::primitives::*;
 use crate::scalar::*;
@@ -82,34 +86,87 @@ impl<T: FloatScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
 ////////////////////////////////////////////////////////////////////////////////
 /// Intersect Queries
 ////////////////////////////////////////////////////////////////////////////////
+// Updates the running `[tmin, tmax]` interval for one axis-aligned slab.
+//
+// For nonzero directions this is the usual slab intersection update:
+// intersect the current interval with the parameter interval where the ray lies
+// between `slab_min` and `slab_max`.
+//
+// For zero directions the ray is parallel to the slab planes. In that case there
+// is no finite entry/exit parameter, so the query reduces to whether the origin
+// already lies inside the slab.
+fn update_slab_interval<T: FloatScalar>(
+    slab_min: T,
+    slab_max: T,
+    ray_start: T,
+    ray_dir: T,
+    tmin: &mut T,
+    tmax: &mut T,
+) -> bool {
+    if ray_dir == <T as Zero>::zero() {
+        return ray_start >= slab_min && ray_start <= slab_max;
+    }
+
+    let inv_dir = <T as One>::one() / ray_dir;
+    let mut t0 = (slab_min - ray_start) * inv_dir;
+    let mut t1 = (slab_max - ray_start) * inv_dir;
+    if t0 > t1 {
+        core::mem::swap(&mut t0, &mut t1);
+    }
+
+    *tmin = T::max(*tmin, t0);
+    *tmax = T::min(*tmax, t1);
+    *tmin <= *tmax
+}
+
 impl<T: FloatScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
     fn intersect(&self, other: &Ray<T, Vector3<T>>) -> bool {
-        // From the paper: An Efficient and Robust Ray–Box Intersection Algorithm by A. Williams et. al.
-        // "... Note also that since IEEE arithmetic guarantees that a positive number divided by zero
-        // is +\infinity and a negative number divided by zero is -\infinity, the code works for vertical
-        // and horizontal line ..."
-
+        // Slab test for an axis-aligned box.
+        //
+        // The running interval `[tmin, tmax]` contains all ray parameters `t`
+        // for which the point `other.start + t * other.direction` is inside the
+        // slabs processed so far.
+        //
+        // This is in the same family as the Williams et al. ray-box test, but we
+        // handle `direction == 0` explicitly instead of depending on direct
+        // division for every axis. That avoids `0/0 -> NaN` when a ray starts on
+        // a slab boundary and is parallel to that axis.
         let mut tmin = -T::infinity();
         let mut tmax = T::infinity();
 
-        let mut t0 = (self.min.x - other.start.x) / other.direction.x;
-        let mut t1 = (self.max.x - other.start.x) / other.direction.x;
+        if !update_slab_interval(
+            self.min.x,
+            self.max.x,
+            other.start.x,
+            other.direction.x,
+            &mut tmin,
+            &mut tmax,
+        ) {
+            return false;
+        }
+        if !update_slab_interval(
+            self.min.y,
+            self.max.y,
+            other.start.y,
+            other.direction.y,
+            &mut tmin,
+            &mut tmax,
+        ) {
+            return false;
+        }
+        if !update_slab_interval(
+            self.min.z,
+            self.max.z,
+            other.start.z,
+            other.direction.z,
+            &mut tmin,
+            &mut tmax,
+        ) {
+            return false;
+        }
 
-        tmin = T::max(tmin, T::min(t0, t1));
-        tmax = T::min(tmax, T::max(t0, t1));
-
-        t0 = (self.min.y - other.start.y) / other.direction.y;
-        t1 = (self.max.y - other.start.y) / other.direction.y;
-
-        tmin = T::max(tmin, T::min(t0, t1));
-        tmax = T::min(tmax, T::max(t0, t1));
-
-        t0 = (self.min.z - other.start.z) / other.direction.z;
-        t1 = (self.max.z - other.start.z) / other.direction.z;
-
-        tmin = T::max(tmin, T::min(t0, t1));
-        tmax = T::min(tmax, T::max(t0, t1));
-
+        // Intersect the final slab interval with the forward-ray constraint
+        // `t >= 0`. Touching the box boundary counts as an intersection.
         tmax >= T::max(tmin, <T as Zero>::zero())
     }
 }
@@ -230,9 +287,34 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
 /// John. F. Hughes & Thomas Moller
 /// Journal of Graphics Tools, 4:4, 33-35 (DOI: 10.1080/10867651.1999.10487513)
 ///
-/// The original implementation has issues around edge cases (any of x,y,z = 0)
-/// I attempt to fix using the following without proof
-/// TODO: do the proof one day!
+/// This implementation uses a symmetric variant of the Hughes-Moller
+/// construction: instead of branching on two specific components, it zeros the
+/// smallest-magnitude component and normalizes the resulting orthogonal helper
+/// vector. The proof sketch below applies to this variant.
+///
+/// Proof sketch for the branch construction:
+///
+/// Let `u = (x, y, z)` be the normalized input, so `||u|| = 1`.
+/// We choose the helper vector by zeroing the smallest-magnitude component:
+///
+/// - if `|x| <= |y|` and `|x| <= |z|`, choose `v0 = (0, -z, y)`
+/// - else if `|y| <= |x|` and `|y| <= |z|`, choose `v0 = (-z, 0, x)`
+/// - else choose `v0 = (-y, x, 0)`
+///
+/// In each branch, `u · v0 = 0`, so `v0` is orthogonal to `u`.
+/// The squared length is also bounded away from zero:
+///
+/// - first branch: `||v0||² = y² + z² = 1 - x²`
+/// - second branch: `||v0||² = x² + z² = 1 - y²`
+/// - third branch: `||v0||² = x² + y² = 1 - z²`
+///
+/// Because the selected component has minimal magnitude, its square is at most
+/// `1/3`. Therefore `||v0||² >= 2/3` in every branch, so `v0` is never zero for
+/// non-zero `u`, and normalizing it is always safe.
+///
+/// Let `v = normalize(v0)`. Then `u` and `v` are orthonormal. Finally,
+/// `w = normalize(u × v)` is orthogonal to both and has unit length, so the
+/// returned triple is orthonormal.
 ///
 pub fn try_basis_from_unit<T: FloatScalar>(
     unit: &Vector3<T>,
@@ -251,8 +333,8 @@ pub fn try_basis_from_unit<T: FloatScalar>(
         // z.abs() < x.abs() && z.abs() <= y.abs()
         Vector3::new(-y, x, <T as Zero>::zero())
     };
-    let v = v.try_normalize(epsilon)?;
-    let w = Vector3::cross(&u, &v).try_normalize(epsilon)?;
+    let v = Vector3::normalize(&v);
+    let w = Vector3::normalize(&Vector3::cross(&u, &v));
     Some([u, w, v])
 }
 
@@ -269,8 +351,18 @@ pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
 mod tests {
     use super::Intersect;
     use crate::primitives::{Box3, Ray, Sphere3};
-    use crate::vector::Vector3;
+    use crate::vector::{FloatVector, Vector, Vector3};
     use crate::EPS_F32;
+
+    fn assert_orthonormal_basis(basis: [Vector3<f32>; 3]) {
+        let [u, w, v] = basis;
+        assert!((u.length() - 1.0).abs() < 0.001);
+        assert!((v.length() - 1.0).abs() < 0.001);
+        assert!((w.length() - 1.0).abs() < 0.001);
+        assert!(Vector3::dot(&u, &v).abs() < 0.001);
+        assert!(Vector3::dot(&u, &w).abs() < 0.001);
+        assert!(Vector3::dot(&v, &w).abs() < 0.001);
+    }
 
     #[test]
     fn test_box3_sphere_intersect_z_axis() {
@@ -316,8 +408,72 @@ mod tests {
     }
 
     #[test]
+    fn test_box3_ray_intersect_parallel_on_face() {
+        let b = Box3::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 1.0, 1.0),
+        );
+        let ray = Ray::new(
+            &Vector3::new(0.0f32, 0.5, 0.5),
+            &Vector3::new(0.0, 1.0, 0.0),
+            EPS_F32,
+        )
+        .expect("ray should be valid");
+        assert!(b.intersect(&ray));
+    }
+
+    #[test]
+    fn test_box3_ray_intersect_parallel_outside_slab() {
+        let b = Box3::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 1.0, 1.0),
+        );
+        let ray = Ray::new(
+            &Vector3::new(2.0f32, 0.5, 0.5),
+            &Vector3::new(0.0, 1.0, 0.0),
+            EPS_F32,
+        )
+        .expect("ray should be valid");
+        assert!(!b.intersect(&ray));
+    }
+
+    #[test]
     fn test_try_basis_from_unit_zero_none() {
         let zero = Vector3::new(0.0f32, 0.0, 0.0);
         assert!(super::try_basis_from_unit(&zero, EPS_F32).is_none());
+    }
+
+    #[test]
+    fn test_try_basis_from_unit_orthonormal() {
+        let basis0 = super::try_basis_from_unit(&Vector3::new(1.0f32, 2.0, 3.0), EPS_F32)
+            .expect("basis should exist");
+        let basis1 = super::try_basis_from_unit(&Vector3::new(0.1f32, 4.0, 5.0), EPS_F32)
+            .expect("basis should exist");
+        let basis2 = super::try_basis_from_unit(&Vector3::new(4.0f32, 0.1, 5.0), EPS_F32)
+            .expect("basis should exist");
+        let basis3 = super::try_basis_from_unit(&Vector3::new(4.0f32, 5.0, 0.1), EPS_F32)
+            .expect("basis should exist");
+
+        assert_orthonormal_basis(basis0);
+        assert_orthonormal_basis(basis1);
+        assert_orthonormal_basis(basis2);
+        assert_orthonormal_basis(basis3);
+    }
+
+    #[test]
+    fn test_try_basis_from_unit_axes_and_ties() {
+        let basis_x =
+            super::try_basis_from_unit(&Vector3::new(1.0f32, 0.0, 0.0), EPS_F32).expect("basis");
+        let basis_y =
+            super::try_basis_from_unit(&Vector3::new(0.0f32, 1.0, 0.0), EPS_F32).expect("basis");
+        let basis_z =
+            super::try_basis_from_unit(&Vector3::new(0.0f32, 0.0, 1.0), EPS_F32).expect("basis");
+        let basis_neg =
+            super::try_basis_from_unit(&Vector3::new(-1.0f32, -1.0, -1.0), EPS_F32).expect("basis");
+
+        assert_orthonormal_basis(basis_x);
+        assert_orthonormal_basis(basis_y);
+        assert_orthonormal_basis(basis_z);
+        assert_orthonormal_basis(basis_neg);
     }
 }

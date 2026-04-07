@@ -62,7 +62,7 @@ impl<T: FloatScalar> Quat<T> {
     ) -> Self {
         let t = <T as One>::one() + m00 + m11 + m22;
 
-        if t > <T as Zero>::zero() {
+        if t > T::epsilon() {
             let s = T::tsqrt(t) * T::two();
 
             let x = (m21 - m12) / s;
@@ -205,21 +205,25 @@ impl<T: FloatScalar> Quat<T> {
 
     /// Converts the quaternion to a 3x3 rotation matrix.
     ///
+    /// The quaternion is normalized before conversion so the output remains a
+    /// pure rotation even when the input is not already unit length.
+    ///
     /// The conversion formula:
     /// ```text
     /// R = I + 2s(q×) + 2(q×)²
     /// ```
     /// where q× is the cross-product matrix of the vector part.
     pub fn mat3(&self) -> Matrix3<T> {
-        let xx = self.x * self.x;
-        let xy = self.x * self.y;
-        let xz = self.x * self.z;
-        let xw = self.x * self.w;
-        let yy = self.y * self.y;
-        let yz = self.y * self.z;
-        let yw = self.y * self.w;
-        let zz = self.z * self.z;
-        let zw = self.z * self.w;
+        let q = Self::normalize(self);
+        let xx = q.x * q.x;
+        let xy = q.x * q.y;
+        let xz = q.x * q.z;
+        let xw = q.x * q.w;
+        let yy = q.y * q.y;
+        let yz = q.y * q.z;
+        let yw = q.y * q.w;
+        let zz = q.z * q.z;
+        let zw = q.z * q.w;
 
         let m00 = <T as One>::one() - T::two() * (yy + zz);
         let m10 = T::two() * (xy + zw);
@@ -238,16 +242,20 @@ impl<T: FloatScalar> Quat<T> {
     ///
     /// The resulting matrix represents a pure rotation with no translation.
     /// The bottom-right element is 1 for homogeneous coordinates.
+    ///
+    /// The quaternion is normalized before conversion so the output remains a
+    /// pure rotation even when the input is not already unit length.
     pub fn mat4(&self) -> Matrix4<T> {
-        let xx = self.x * self.x;
-        let xy = self.x * self.y;
-        let xz = self.x * self.z;
-        let xw = self.x * self.w;
-        let yy = self.y * self.y;
-        let yz = self.y * self.z;
-        let yw = self.y * self.w;
-        let zz = self.z * self.z;
-        let zw = self.z * self.w;
+        let q = Self::normalize(self);
+        let xx = q.x * q.x;
+        let xy = q.x * q.y;
+        let xz = q.x * q.z;
+        let xw = q.x * q.w;
+        let yy = q.y * q.y;
+        let yz = q.y * q.z;
+        let yw = q.y * q.w;
+        let zz = q.z * q.z;
+        let zw = q.z * q.w;
 
         let m00 = <T as One>::one() - T::two() * (yy + zz);
         let m10 = T::two() * (xy + zw);
@@ -957,5 +965,29 @@ mod tests {
         let self_dot = Quat::dot(&q1, &q1);
         let length_squared = q1.length() * q1.length();
         assert!((self_dot - length_squared).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_quaternion_matrix_conversion_normalizes_input() {
+        let q_unit = quat_axis_angle_f32(&Vector3::new(1.0, 0.0, 0.0), FRAC_PI_2);
+        let q_scaled = q_unit * 5.0;
+
+        let mat3_unit = q_unit.mat3();
+        let mat3_scaled = q_scaled.mat3();
+        let mat4_unit = q_unit.mat4();
+        let mat4_scaled = q_scaled.mat4();
+
+        for i in 0..3 {
+            assert!((mat3_unit.col[i].x - mat3_scaled.col[i].x).abs() < 0.001);
+            assert!((mat3_unit.col[i].y - mat3_scaled.col[i].y).abs() < 0.001);
+            assert!((mat3_unit.col[i].z - mat3_scaled.col[i].z).abs() < 0.001);
+        }
+
+        for i in 0..4 {
+            assert!((mat4_unit.col[i].x - mat4_scaled.col[i].x).abs() < 0.001);
+            assert!((mat4_unit.col[i].y - mat4_scaled.col[i].y).abs() < 0.001);
+            assert!((mat4_unit.col[i].z - mat4_scaled.col[i].z).abs() < 0.001);
+            assert!((mat4_unit.col[i].w - mat4_scaled.col[i].w).abs() < 0.001);
+        }
     }
 }

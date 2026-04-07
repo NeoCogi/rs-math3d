@@ -123,7 +123,10 @@ pub fn scale<T: Scalar>(scale: Vector3<T>) -> Matrix4<T> {
 
 /// Creates a 4x4 rotation matrix from a quaternion.
 ///
-/// Converts a unit quaternion to its equivalent rotation matrix.
+/// Converts a quaternion to its equivalent rotation matrix.
+///
+/// The quaternion is normalized before conversion so the result is always a
+/// pure rotation matrix.
 pub fn rotation_from_quat<T: FloatScalar>(q: &Quat<T>) -> Matrix4<T> {
     Quat::mat4(q)
 }
@@ -338,6 +341,13 @@ pub fn perspective<T: FloatScalar>(fovy: T, aspect: T, near: T, far: T) -> Matri
 /// - `up`: Up vector (typically (0, 1, 0))
 ///
 /// The resulting matrix transforms from world space to view space.
+///
+/// # Preconditions
+/// - `eye` and `dest` must not be the same point
+/// - `up` must not be parallel, or nearly parallel, to the viewing direction
+///
+/// This routine performs unchecked normalization. Violating the preconditions
+/// yields non-finite matrix components.
 pub fn lookat<T: FloatScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
     let f = Vector3::normalize(&(*dest - *eye));
     let s = Vector3::normalize(&Vector3::cross(&f, up));

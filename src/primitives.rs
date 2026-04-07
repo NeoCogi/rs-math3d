@@ -510,8 +510,14 @@ pub struct Sphere3<T: FloatScalar> {
 
 impl<T: FloatScalar> Sphere3<T> {
     /// Creates a sphere from center and radius.
+    ///
+    /// The radius is canonicalized with `abs(radius)`, so negative inputs are
+    /// treated the same as their positive magnitude.
     pub fn new(center: Vector3<T>, radius: T) -> Self {
-        Self { center, radius }
+        Self {
+            center,
+            radius: radius.tabs(),
+        }
     }
 }
 
@@ -535,6 +541,10 @@ impl<T: FloatScalar> Tri3<T> {
     }
 
     /// Computes barycentric coordinates of a point in the triangle plane.
+    ///
+    /// This method assumes the triangle is non-degenerate. When the triangle
+    /// area is zero, the denominator vanishes and the returned coordinates are
+    /// non-finite.
     pub fn barycentric_coordinates(&self, pt: &Vector3<T>) -> Vector3<T> {
         let v0 = self.vertices[0];
         let v1 = self.vertices[1];
@@ -629,6 +639,10 @@ impl<T: FloatScalar> Plane<T> {
     /// # Panics
     /// Panics if the quad diagonals do not define a plane. Use
     /// [`Plane::try_from_quad`] when the input may be degenerate.
+    ///
+    /// This routine does not validate that the four vertices are coplanar.
+    /// For non-coplanar quads it returns the diagonal-derived representative
+    /// plane described by [`Plane::try_from_quad`].
     pub fn from_quad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
         Self::try_from_quad(v0, v1, v2, v3, T::epsilon()).expect("quad must define a plane")
     }
@@ -636,6 +650,11 @@ impl<T: FloatScalar> Plane<T> {
     /// Creates a plane from quad vertices.
     ///
     /// Returns `None` if the quad diagonals do not define a plane.
+    ///
+    /// The plane normal is computed from the quad diagonals and anchored at the
+    /// vertex centroid. This is a representative plane for the quad and does
+    /// not validate coplanarity. For non-coplanar input, the returned plane is
+    /// not guaranteed to pass through any of the vertices.
     pub fn try_from_quad(
         v0: &Vector3<T>,
         v1: &Vector3<T>,
@@ -743,10 +762,22 @@ impl<T: FloatScalar> ParametricPlane<T> {
     }
 
     /// Projects a 3D point onto the plane's 2D coordinates.
+    ///
+    /// The coordinates are solved against the 2x2 Gram matrix of the plane
+    /// axes, so non-orthogonal axes are handled correctly. The axes must still
+    /// be linearly independent; otherwise the returned coordinates are
+    /// non-finite.
     pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
         let p = *v - self.center;
-        let x_coord = Vector3::dot(&p, &self.x_axis) / Vector3::dot(&self.x_axis, &self.x_axis);
-        let y_coord = Vector3::dot(&p, &self.y_axis) / Vector3::dot(&self.y_axis, &self.y_axis);
+        let g00 = Vector3::dot(&self.x_axis, &self.x_axis);
+        let g01 = Vector3::dot(&self.x_axis, &self.y_axis);
+        let g11 = Vector3::dot(&self.y_axis, &self.y_axis);
+        let rhs0 = Vector3::dot(&p, &self.x_axis);
+        let rhs1 = Vector3::dot(&p, &self.y_axis);
+        let det = g00 * g11 - g01 * g01;
+
+        let x_coord = (rhs0 * g11 - rhs1 * g01) / det;
+        let y_coord = (rhs1 * g00 - rhs0 * g01) / det;
         Vector2::new(x_coord, y_coord)
     }
 }
@@ -775,6 +806,9 @@ pub fn try_tri_normal<T: FloatScalar>(
 /// Computes the normal vector of a quadrilateral.
 ///
 /// Uses the cross product of the two diagonals for a more stable result.
+///
+/// For non-coplanar quads this is a representative diagonal-based normal, not a
+/// proof that the four vertices lie on a single plane.
 pub fn quad_normal<T: FloatScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
@@ -1009,6 +1043,12 @@ mod tests {
     }
 
     #[test]
+    fn test_sphere_new_abs_radius() {
+        let sphere = Sphere3::new(Vector3::new(0.0f32, 0.0, 0.0), -2.5);
+        assert!((sphere.radius - 2.5).abs() < 0.001);
+    }
+
+    #[test]
     fn test_shortest_segment_parallel_lines() {
         let p0 = Vector3::new(0.0f32, 0.0, 0.0);
         let p1 = Vector3::new(0.0f32, 1.0, 0.0);
@@ -1094,6 +1134,19 @@ mod tests {
         let uv = plane.project(&point);
         assert!((uv.x - 2.0).abs() < 0.001);
         assert!((uv.y - 4.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parametric_plane_project_non_orthogonal_axes() {
+        let plane = ParametricPlane::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 0.0, 0.0),
+            &Vector3::new(1.0, 1.0, 0.0),
+        );
+        let point = Vector3::new(2.0f32, 1.0, 0.0);
+        let uv = plane.project(&point);
+        assert!((uv.x - 1.0).abs() < 0.001);
+        assert!((uv.y - 1.0).abs() < 0.001);
     }
 
     #[test]

@@ -23,21 +23,36 @@ Add to Cargo.toml:
 
 ```toml
 [dependencies]
-rs-math3d = { version = "0.10", default-features = false }
+rs-math3d = { version = "0.12.0", default-features = false }
 ```
 
 Select one math backend:
 
 ```toml
-rs-math3d = { version = "0.10", default-features = false, features = ["std"] }
-rs-math3d = { version = "0.10", default-features = false, features = ["libm"] }
-rs-math3d = { version = "0.10", default-features = false, features = ["system-libm"] }
+rs-math3d = { version = "0.12.0", default-features = false, features = ["std"] }
+rs-math3d = { version = "0.12.0", default-features = false, features = ["libm"] }
+rs-math3d = { version = "0.12.0", default-features = false, features = ["system-libm"] }
 ```
 
 When no math backend feature is selected, normal library builds fall back to `system-libm`.
 Test builds without an explicit backend use `std`.
 If more than one backend feature is enabled, precedence is `std`, then `libm`, then
 `system-libm`.
+
+## Behavior Notes
+
+- `Ray`/`Tri3` intersection is a true ray query: hits behind the ray origin are rejected.
+  Use the corresponding `Line`/`Tri3` intersection when you want the infinite-line result.
+- `ParametricPlane::project` solves the 2x2 Gram system of the plane axes, so projection
+  works for non-orthogonal axes as well as orthogonal ones.
+- `Sphere3::new` canonicalizes the radius with `abs(radius)`.
+- `Quat::mat3` and `Quat::mat4` normalize the quaternion before converting it to a matrix.
+- `Plane::from_quad` and `Plane::try_from_quad` use a diagonal-derived representative plane.
+  They do not validate that the four vertices are coplanar.
+- `transforms::lookat` assumes `eye != dest` and an `up` vector that is not parallel to the
+  view direction. Violating those preconditions yields non-finite output.
+- `Tri3::barycentric_coordinates` assumes a non-degenerate triangle. Degenerate triangles
+  produce non-finite coordinates.
 
 ## Example
 

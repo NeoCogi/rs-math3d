@@ -233,52 +233,91 @@ impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
 }
 
 ///
-/// Ray-Triangle Intersection Test Routines
+/// Ray/Line-Triangle Intersection Test Routines
 /// Different optimizations of my and Ben Trumbore's
 /// code from journals of graphics tools (JGT)
 /// <http://www.acm.org/jgt/>
 /// by Tomas Moller, May 2000
 ///
+enum TriangleIntersectionKind {
+    Ray,
+    Line,
+}
+
+fn triangle_intersection_from_point_dir<T: FloatScalar>(
+    start: &Vector3<T>,
+    direction: &Vector3<T>,
+    tri: &Tri3<T>,
+    epsilon: T,
+    kind: TriangleIntersectionKind,
+) -> Option<(T, Vector3<T>)> {
+    let verts = tri.vertices();
+    let v0 = verts[0];
+    let v1 = verts[1];
+    let v2 = verts[2];
+    let edge1 = v1 - v0;
+    let edge2 = v2 - v0;
+
+    let pvec = Vector3::cross(direction, &edge2);
+    let det = Vector3::dot(&edge1, &pvec);
+    if det > -epsilon && det < epsilon {
+        return None;
+    }
+
+    let tvec = *start - v0;
+    let qvec = Vector3::cross(&tvec, &edge1);
+
+    let u = Vector3::dot(&tvec, &pvec) / det;
+    if u < -epsilon || u > <T as One>::one() + epsilon {
+        return None;
+    }
+
+    let v = Vector3::dot(direction, &qvec) / det;
+    if v < -epsilon || u + v > <T as One>::one() + T::two() * epsilon {
+        return None;
+    }
+
+    let t = Vector3::dot(&edge2, &qvec) / det;
+    if matches!(kind, TriangleIntersectionKind::Ray) && t < -epsilon {
+        return None;
+    }
+
+    Some((t, *start + (*direction * t)))
+}
+
 impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>> {
     fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
-        let verts = tri.vertices();
-        let v0 = verts[0];
-        let v1 = verts[1];
-        let v2 = verts[2];
-        // find vectors for two edges sharing vert0
-        let edge1 = v1 - v0;
-        let edge2 = v2 - v0;
+        triangle_intersection_from_point_dir(
+            &self.start,
+            &self.direction,
+            tri,
+            T::epsilon(),
+            TriangleIntersectionKind::Ray,
+        )
+    }
+}
 
-        // begin calculating determinant - also used to calculate U parameter
-        let pvec = Vector3::cross(&self.direction, &edge2);
+impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<T>> {
+    fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
+        triangle_intersection_from_point_dir(
+            &self.p,
+            &self.d,
+            tri,
+            T::epsilon(),
+            TriangleIntersectionKind::Line,
+        )
+    }
+}
 
-        // if determinant is near zero, ray lies in plane of triangle
-        let det = Vector3::dot(&edge1, &pvec);
+impl<T: FloatScalar> Intersection<(T, Vector3<T>), Ray<T, Vector3<T>>> for Tri3<T> {
+    fn intersection(&self, ray: &Ray<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
+        ray.intersection(self)
+    }
+}
 
-        if det > -T::epsilon() && det < T::epsilon() {
-            return None; // Parallel
-        }
-
-        // calculate distance from vert0 to ray origin
-        let tvec = self.start - v0;
-
-        let qvec = Vector3::cross(&tvec, &edge1);
-
-        let u = Vector3::dot(&tvec, &pvec) / det;
-
-        if u < -T::epsilon() || u > <T as One>::one() + T::epsilon() {
-            return None; // NoIntersection
-        }
-
-        // calculate V parameter and test bounds
-        let v = Vector3::dot(&self.direction, &qvec) / det;
-        if v < -T::epsilon() || u + v > <T as One>::one() + T::two() * T::epsilon() {
-            return None; // NoIntersection
-        }
-
-        let t = Vector3::dot(&edge2, &qvec) / det;
-        let out = self.start + (self.direction * t);
-        Some((t, out)) //Intersect
+impl<T: FloatScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3<T> {
+    fn intersection(&self, line: &Line<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
+        line.intersection(self)
     }
 }
 
@@ -349,8 +388,8 @@ pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
 
 #[cfg(test)]
 mod tests {
-    use super::Intersect;
-    use crate::primitives::{Box3, Ray, Sphere3};
+    use super::{Intersect, Intersection};
+    use crate::primitives::{Box3, Line, Ray, Sphere3, Tri3};
     use crate::vector::{FloatVector, Vector, Vector3};
     use crate::EPS_F32;
 
@@ -475,5 +514,89 @@ mod tests {
         assert_orthonormal_basis(basis_y);
         assert_orthonormal_basis(basis_z);
         assert_orthonormal_basis(basis_neg);
+    }
+
+    #[test]
+    fn test_ray_triangle_intersection_rejects_hits_behind_ray() {
+        let tri = Tri3::new([
+            Vector3::new(0.0f32, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+        let ray = Ray::new(
+            &Vector3::new(0.25f32, 0.25, 1.0),
+            &Vector3::new(0.0, 0.0, 1.0),
+            EPS_F32,
+        )
+        .expect("ray should be valid");
+
+        assert!(ray.intersection(&tri).is_none());
+        assert!(tri.intersection(&ray).is_none());
+    }
+
+    #[test]
+    fn test_ray_triangle_intersection_forward_hit() {
+        let tri = Tri3::new([
+            Vector3::new(0.0f32, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+        let ray = Ray::new(
+            &Vector3::new(0.25f32, 0.25, 1.0),
+            &Vector3::new(0.0, 0.0, -1.0),
+            EPS_F32,
+        )
+        .expect("ray should be valid");
+
+        let (t0, p0) = ray.intersection(&tri).expect("ray should hit triangle");
+        let (t1, p1) = tri.intersection(&ray).expect("triangle should hit ray");
+
+        assert!((t0 - 1.0).abs() < 0.001);
+        assert!((p0.x - 0.25).abs() < 0.001);
+        assert!((p0.y - 0.25).abs() < 0.001);
+        assert!(p0.z.abs() < 0.001);
+
+        assert!((t1 - t0).abs() < 0.001);
+        assert!((p1.x - p0.x).abs() < 0.001);
+        assert!((p1.y - p0.y).abs() < 0.001);
+        assert!((p1.z - p0.z).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_line_triangle_intersection_accepts_hits_on_both_sides() {
+        let tri = Tri3::new([
+            Vector3::new(0.0f32, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+        let line = Line::new(
+            &Vector3::new(0.25f32, 0.25, 1.0),
+            &Vector3::new(0.0, 0.0, 1.0),
+            EPS_F32,
+        )
+        .expect("line should be valid");
+
+        let (t0, p0) = line.intersection(&tri).expect("line should hit triangle");
+        let (t1, p1) = tri.intersection(&line).expect("triangle should hit line");
+
+        assert!((t0 + 1.0).abs() < 0.001);
+        assert!((p0.x - 0.25).abs() < 0.001);
+        assert!((p0.y - 0.25).abs() < 0.001);
+        assert!(p0.z.abs() < 0.001);
+
+        assert!((t1 - t0).abs() < 0.001);
+        assert!((p1.x - p0.x).abs() < 0.001);
+        assert!((p1.y - p0.y).abs() < 0.001);
+        assert!((p1.z - p0.z).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_box3_sphere_intersect_negative_radius_canonicalized() {
+        let b = Box3::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(1.0, 1.0, 1.0),
+        );
+        let touching = Sphere3::new(Vector3::new(2.0f32, 0.5, 0.5), -1.0);
+        assert!(b.intersect(&touching));
     }
 }

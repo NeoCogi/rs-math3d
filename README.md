@@ -23,15 +23,15 @@ Add to Cargo.toml:
 
 ```toml
 [dependencies]
-rs-math3d = { version = "0.12.0", default-features = false }
+rs-math3d = { version = "0.13.0", default-features = false }
 ```
 
 Select one math backend:
 
 ```toml
-rs-math3d = { version = "0.12.0", default-features = false, features = ["std"] }
-rs-math3d = { version = "0.12.0", default-features = false, features = ["libm"] }
-rs-math3d = { version = "0.12.0", default-features = false, features = ["system-libm"] }
+rs-math3d = { version = "0.13.0", default-features = false, features = ["std"] }
+rs-math3d = { version = "0.13.0", default-features = false, features = ["libm"] }
+rs-math3d = { version = "0.13.0", default-features = false, features = ["system-libm"] }
 ```
 
 When no math backend feature is selected, normal library builds fall back to `system-libm`.

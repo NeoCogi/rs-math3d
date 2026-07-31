@@ -176,50 +176,13 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   A shear is a valid, nonsingular affine transform but cannot be represented by its return tuple.
   The current test can also pass grossly low results because it uses one-sided differences.
 
-  **Decision needed: Yes (resolved by maintainer)**
+  **Decision needed: No (resolved by maintainer)**
 
-  1. **Keep only the existing TRS tuple and reject shear.**
-     - Benefits: smallest API surface.
-     - Consequences: cannot expose a valid decomposition for general nonsingular affine matrices.
-     - Shape:
+  **Decision**
 
-       ```rust
-       if !m.is_affine(T::epsilon()) || !normalized_columns_are_orthogonal {
-           return None;
-       }
-       ```
-
-  2. **Add an affine result containing shear and retain `decompose` as a wrapper (selected).**
-     - Benefits: represents general nonsingular affine linear transforms above the documented pivot
-       tolerance while preserving the existing TRS API for callers that require shear-free results.
-     - Consequences: adds one public result type and one public function; callers must use the
-       documented `T * R * H * S` order to reconstruct.
-     - Shape:
-
-       ```rust
-       #[repr(C)]
-       #[derive(Copy, Clone, Debug)]
-       pub struct AffineParts<T: FloatScalar> {
-           pub translation: Vector3<T>,
-           pub rotation: Quat<T>,
-           pub scale: Vector3<T>,
-           pub shear: Vector3<T>,
-       }
-
-       pub fn decompose_affine<T: FloatScalar>(
-           m: &Matrix4<T>,
-       ) -> Option<AffineParts<T>>;
-       ```
-
-  3. **Reject determinant zero only.**
-     - Benefits: minimal singular-matrix patch.
-     - Consequences: continues silently producing false decompositions for shear.
-     - Shape: `if linear.determinant().tabs() <= T::epsilon() { return None; }`
-
-  **Recommendation and why**
-
-  Implement selected option 2. A general affine decomposition is useful and mathematically
-  representable, while the wrapper keeps the old tuple truthful by rejecting material shear.
+  Add an affine result containing shear and retain `decompose` as a strict TRS wrapper. This
+  represents general nonsingular affine transforms above the documented pivot tolerance while
+  preserving a truthful compatibility API for callers that require shear-free results.
 
   **Target contract or migration**
 
@@ -289,40 +252,13 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   Derived `Default` creates an invalid zero rotation. `normalize` promises a unit quaternion but
   returns zero, after which matrix and axis-angle conversions disagree.
 
-  **Decision needed: Yes (resolved by maintainer)**
+  **Decision needed: No (resolved by maintainer)**
 
-  1. **Default to identity, add checked normalization, and make total normalization fall back to
-     identity (selected).**
-     - Benefits: defaults are valid rotations; conversions agree; callers can detect zero through
-       an additive checked API.
-     - Consequences: intentionally changes `Quat::default()` and `Quat::normalize(&zero)` behavior.
-     - Shape:
+  **Decision**
 
-       ```rust
-       impl<T: Scalar> Default for Quat<T> {
-           fn default() -> Self {
-               Self { x: T::zero(), y: T::zero(), z: T::zero(), w: T::one() }
-           }
-       }
-
-       pub fn try_normalize(q: &Self, epsilon: T) -> Option<Self>;
-       ```
-
-  2. **Keep zero default and declare it invalid.**
-     - Benefits: preserves current `Default` bytes.
-     - Consequences: keeps a public default that violates the rotation-oriented type contract and
-       still requires every conversion to choose a fallback.
-     - Shape: `/// Quat::default() is not a valid rotation.`
-
-  3. **Make normalization and conversions return `Option`.**
-     - Benefits: invalid values cannot be overlooked.
-     - Consequences: breaks established signatures and downstream callers.
-     - Shape: `pub fn mat3(&self) -> Option<Matrix3<T>>`
-
-  **Recommendation and why**
-
-  Implement selected option 1. It matches the rotation-focused API and mirrors
-  `FloatVector::try_normalize` without breaking existing methods.
+  Default to identity, add checked normalization, and make total normalization fall back to
+  identity. This keeps every default rotation valid, makes conversions coherent, and lets callers
+  detect zero or near-zero inputs through the additive `Quat::try_normalize` API.
 
   **Target contract or migration**
 
@@ -350,27 +286,12 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   nondegenerate triangle behind a normalized ray can therefore return `Some` with negative `t`, in
   direct conflict with README and ray/plane behavior.
 
-  **Decision needed: Yes (resolved by maintainer)**
+  **Decision needed: No (resolved by maintainer)**
 
-  1. **Reject every `t < 0` (selected).**
-     - Benefits: implements a mathematical ray and agrees with `Ray::intersect_plane`.
-     - Consequences: removes the old behind-origin tolerance band.
-     - Shape: `if ray && t < T::zero() { return None; }`
+  **Decision**
 
-  2. **Accept the epsilon band but clamp returned `t` to zero.**
-     - Benefits: tolerates numerical drift while hiding negative results.
-     - Consequences: can return the ray origin even when it is not on the triangle.
-     - Shape: `let t = T::max(t, T::zero());`
-
-  3. **Preserve and document `t >= -epsilon`.**
-     - Benefits: no implementation change.
-     - Consequences: contradicts true-ray semantics and the parallel ray/plane API.
-     - Shape: `if t < -epsilon { return None; }`
-
-  **Recommendation and why**
-
-  Implement selected option 1. Boundary tolerance belongs to barycentric inclusion, not to the
-  half-line's domain.
+  Reject every `t < 0`. Boundary tolerance applies to barycentric inclusion, not to the ray
+  half-line's parameter domain.
 
   **Target contract or migration**
 
@@ -394,46 +315,13 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   their variable order mirrors the implementation instead of establishing a contract. The
   unqualified function names also make a caller's intended handedness invisible.
 
-  **Decision needed: Yes (resolved by maintainer)**
+  **Decision needed: No (resolved by maintainer)**
 
-  1. **Keep unqualified names and change their output to right-handed.**
-     - Benefits: no call-site rename.
-     - Consequences: still hides handedness and silently changes positional meaning.
-     - Shape: `try_basis_from_unit(...) -> Some([u, v, w])`
+  **Decision**
 
-  2. **Provide explicit right- and left-handed function families (selected).**
-     - Benefits: makes orientation a call-site choice, supports both conventions, and removes
-       positional ambiguity from the API name.
-     - Consequences: intentionally breaks source compatibility for the two old names.
-     - Shape:
-
-       ```rust
-       pub fn try_basis_from_unit_rh<T: FloatScalar>(
-           unit: &Vector3<T>,
-           epsilon: T,
-       ) -> Option<[Vector3<T>; 3]>;
-       pub fn basis_from_unit_rh<T: FloatScalar>(
-           unit: &Vector3<T>,
-       ) -> [Vector3<T>; 3];
-
-       pub fn try_basis_from_unit_lh<T: FloatScalar>(
-           unit: &Vector3<T>,
-           epsilon: T,
-       ) -> Option<[Vector3<T>; 3]>;
-       pub fn basis_from_unit_lh<T: FloatScalar>(
-           unit: &Vector3<T>,
-       ) -> [Vector3<T>; 3];
-       ```
-
-  3. **Replace the array with a named public frame type.**
-     - Benefits: eliminates positional ambiguity.
-     - Consequences: breaks the public return type and duplicates the existing `Basis` concept.
-     - Shape: `pub struct OrthonormalFrame<T> { u: Vector3<T>, v: Vector3<T>, w: Vector3<T> }`
-
-  **Recommendation and why**
-
-  Implement selected option 2. The `_rh` and `_lh` suffixes make the invariant reviewable at every
-  call site and provide both conventions without adding a new frame representation.
+  Replace the ambiguous functions with explicit right- and left-handed families. The `_rh` and
+  `_lh` suffixes make orientation visible at every call site, support both conventions, and avoid
+  adding another public frame representation.
 
   **Target contract or migration**
 
@@ -479,29 +367,12 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   `abs(n · p + d) / sqrt(n · n)`. Safe constructors normalize `n`, masking the discrepancy, but
   the algorithm and its claimed equation remain wrong and brittle to representation changes or FFI.
 
-  **Decision needed: Yes (resolved by maintainer)**
+  **Decision needed: No (resolved by maintainer)**
 
-  1. **Implement the general equation (selected).**
-     - Benefits: mathematically correct for every nonzero normal and independent of constructor
-       normalization; keeps the public return type.
-     - Consequences: performs one square root per query.
-     - Shape: `Some(nom.tabs() / denom.tsqrt())`
+  **Decision**
 
-  2. **Make unit-normal representation an explicit invariant and divide by one.**
-     - Benefits: avoids a square root for safely constructed planes.
-     - Consequences: couples the trait implementation to private construction and cannot validate
-       the general formula; default/raw/FFI representations remain fragile.
-     - Shape: `Some(nom.tabs())`
-
-  3. **Keep division by squared norm.**
-     - Benefits: no code change.
-     - Consequences: returns a non-distance for unnormalized coefficients.
-     - Shape: `Some(nom.tabs() / denom)`
-
-  **Recommendation and why**
-
-  Implement selected option 1. Correctness takes precedence over an unmeasured square-root
-  optimization, and no benchmark identifies plane distance as a hot path.
+  Implement the general `abs(n · p + d) / |n|` equation. It is correct for every nonzero normal,
+  remains independent of constructor normalization, and preserves the public return type.
 
   **Target contract or migration**
 

@@ -836,6 +836,7 @@ pub fn try_quad_normal<T: FloatScalar>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::queries::Distance;
     #[test]
     pub fn test_barycentric() {
         let v0 = Vector3::new(0.0, 0.0, 0.0);
@@ -1098,6 +1099,43 @@ mod tests {
             EPS_F32,
         );
         assert!(plane.is_none());
+    }
+
+    #[test]
+    fn test_plane_distance_uses_general_equation() {
+        let plane = Plane {
+            a: 0.0f32,
+            b: 2.0,
+            c: 0.0,
+            d: -4.0,
+        };
+        let scaled_plane = Plane {
+            a: 0.0f32,
+            b: -6.0,
+            c: 0.0,
+            d: 12.0,
+        };
+
+        for point in [
+            Vector3::new(1.0f32, 5.0, -2.0),
+            Vector3::new(1.0f32, -1.0, -2.0),
+        ] {
+            let distance = plane.distance(&point).expect("normal is non-zero");
+            let scaled_distance = scaled_plane
+                .distance(&point)
+                .expect("scaled normal is non-zero");
+            assert!((distance - 3.0).abs() < EPS_F32);
+            assert!((scaled_distance - distance).abs() < EPS_F32);
+        }
+
+        let on_plane = Vector3::new(3.0f32, 2.0, 7.0);
+        assert!(plane.distance(&on_plane).expect("normal is non-zero") < EPS_F32);
+    }
+
+    #[test]
+    fn test_plane_distance_rejects_zero_normal() {
+        let zero_plane = Plane::<f32>::default();
+        assert!(zero_plane.distance(&Vector3::new(1.0, 2.0, 3.0)).is_none());
     }
 
     #[test]

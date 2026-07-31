@@ -376,62 +376,173 @@ pub fn lookat<T: FloatScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<
     m * trans
 }
 
-/// Decomposes a transformation matrix into scale, rotation, and translation.
+/// Components of a nonsingular affine transformation.
 ///
-/// # Returns
-/// - `Some((scale, rotation, translation))` if successful
-/// - `None` if the matrix is singular or has zero scale
+/// With column vectors, the represented matrix is reconstructed in the order
+/// `T * R * H * S`, where `shear` stores `(h_xy, h_xz, h_yz)` and:
 ///
-/// # Note
-/// This assumes the matrix represents a valid affine transformation.
-pub fn decompose<T: FloatScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
-    let mut col0 = Vector3::new(m.col[0].x, m.col[0].y, m.col[0].z);
-    let mut col1 = Vector3::new(m.col[1].x, m.col[1].y, m.col[1].z);
-    let mut col2 = Vector3::new(m.col[2].x, m.col[2].y, m.col[2].z);
-    let det = m.determinant();
+/// ```text
+///     [1  h_xy  h_xz  0]
+/// H = [0   1    h_yz  0]
+///     [0   0     1    0]
+///     [0   0     0    1]
+/// ```
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct AffineParts<T: FloatScalar> {
+    /// Translation applied after the linear transform.
+    pub translation: Vector3<T>,
+    /// Proper rotation represented by a unit quaternion.
+    pub rotation: Quat<T>,
+    /// Scale applied before shear and rotation.
+    pub scale: Vector3<T>,
+    /// Upper-triangular shear coefficients `(h_xy, h_xz, h_yz)`.
+    pub shear: Vector3<T>,
+}
 
-    // the scale needs to be tested
-    let mut scale = Vector3::new(
-        Vector3::length(&col0),
-        Vector3::length(&col1),
-        Vector3::length(&col2),
-    );
-    let trans = Vector3::new(m.col[3].x, m.col[3].y, m.col[3].z);
+/// Decomposes a nonsingular affine matrix into translation, rotation, shear,
+/// and scale.
+///
+/// The returned parts reconstruct the input as `T * R * H * S`; see
+/// [`AffineParts`] for the shear convention. A reflected transform is
+/// canonicalized to three negative scale components and a proper rotation.
+///
+/// Returns `None` for projective matrices or when any QR pivot is at or below
+/// [`FloatScalar::epsilon`].
+pub fn decompose_affine<T: FloatScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>> {
+    let epsilon = T::epsilon();
+    if !m.is_affine(epsilon) {
+        return None;
+    }
 
-    if det < <T as Zero>::zero() {
+    let a0 = Vector3::new(m.col[0].x, m.col[0].y, m.col[0].z);
+    let a1 = Vector3::new(m.col[1].x, m.col[1].y, m.col[1].z);
+    let a2 = Vector3::new(m.col[2].x, m.col[2].y, m.col[2].z);
+
+    // Modified Gram-Schmidt gives A = R * U. Dividing the off-diagonal
+    // entries of U by its diagonal separates U into H * S.
+    let scale_x = a0.length();
+    if scale_x.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
+        return None;
+    }
+    let mut r0 = a0 / scale_x;
+
+    let projection_xy = Vector3::dot(&r0, &a1);
+    let a1_orthogonal = a1 - r0 * projection_xy;
+    let scale_y = a1_orthogonal.length();
+    if scale_y.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
+        return None;
+    }
+    let mut r1 = a1_orthogonal / scale_y;
+    let shear_xy = projection_xy / scale_y;
+
+    let projection_xz = Vector3::dot(&r0, &a2);
+    let a2_without_x = a2 - r0 * projection_xz;
+    let projection_yz = Vector3::dot(&r1, &a2_without_x);
+    let a2_orthogonal = a2_without_x - r1 * projection_yz;
+    let scale_z = a2_orthogonal.length();
+    if scale_z.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
+        return None;
+    }
+    let mut r2 = a2_orthogonal / scale_z;
+    let shear_xz = projection_xz / scale_z;
+    let shear_yz = projection_yz / scale_z;
+
+    let mut scale = Vector3::new(scale_x, scale_y, scale_z);
+    let rotation_determinant = Vector3::dot(&r0, &Vector3::cross(&r1, &r2));
+    if rotation_determinant.tabs().partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
+        return None;
+    }
+
+    if rotation_determinant < <T as Zero>::zero() {
+        // Negating both R and S leaves R * H * S unchanged. Flipping all
+        // three axes preserves the crate's established reflection convention
+        // while making R proper for quaternion conversion.
+        r0 = -r0;
+        r1 = -r1;
+        r2 = -r2;
         scale = -scale;
     }
 
-    if scale.x != <T as Zero>::zero() {
-        col0 = col0 / scale.x;
-    } else {
-        return Option::None;
+    let rotation_matrix = Matrix3::new(r0.x, r0.y, r0.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z);
+
+    Some(AffineParts {
+        translation: Vector3::new(m.col[3].x, m.col[3].y, m.col[3].z),
+        rotation: Quat::of_matrix3(&rotation_matrix),
+        scale,
+        shear: Vector3::new(shear_xy, shear_xz, shear_yz),
+    })
+}
+
+/// Decomposes an affine, shear-free transformation into scale, rotation, and
+/// translation.
+///
+/// This compatibility wrapper uses [`decompose_affine`] and returns `None`
+/// when any absolute shear coefficient is greater than
+/// [`FloatScalar::epsilon`]. Coefficients inside that inclusive tolerance band
+/// are treated as numerical zero.
+pub fn decompose<T: FloatScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
+    let parts = decompose_affine(m)?;
+    let epsilon = T::epsilon();
+    if parts.shear.x.tabs() > epsilon
+        || parts.shear.y.tabs() > epsilon
+        || parts.shear.z.tabs() > epsilon
+    {
+        return None;
     }
 
-    if scale.y != <T as Zero>::zero() {
-        col1 = col1 / scale.y;
-    } else {
-        return Option::None;
-    }
-
-    if scale.z != <T as Zero>::zero() {
-        col2 = col2 / scale.z;
-    } else {
-        return Option::None;
-    }
-
-    let rot_matrix = Matrix3::new(
-        col0.x, col0.y, col0.z, col1.x, col1.y, col1.z, col2.x, col2.y, col2.z,
-    );
-
-    let rot = Quat::of_matrix3(&rot_matrix);
-
-    Some((scale, rot, trans))
+    Some((parts.scale, parts.rotation, parts.translation))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_matrix4_close(actual: &Matrix4<f32>, expected: &Matrix4<f32>, tolerance: f32) {
+        for column in 0..4 {
+            assert!(
+                (actual.col[column].x - expected.col[column].x).abs() <= tolerance,
+                "column {} x differs",
+                column
+            );
+            assert!(
+                (actual.col[column].y - expected.col[column].y).abs() <= tolerance,
+                "column {} y differs",
+                column
+            );
+            assert!(
+                (actual.col[column].z - expected.col[column].z).abs() <= tolerance,
+                "column {} z differs",
+                column
+            );
+            assert!(
+                (actual.col[column].w - expected.col[column].w).abs() <= tolerance,
+                "column {} w differs",
+                column
+            );
+        }
+    }
+
+    fn shear_matrix(shear: Vector3<f32>) -> Matrix4<f32> {
+        Matrix4::new(
+            1.0, 0.0, 0.0, 0.0, shear.x, 1.0, 0.0, 0.0, shear.y, shear.z, 1.0, 0.0, 0.0, 0.0, 0.0,
+            1.0,
+        )
+    }
+
+    fn recompose_affine(parts: &AffineParts<f32>) -> Matrix4<f32> {
+        translate(parts.translation)
+            * rotation_from_quat(&parts.rotation)
+            * shear_matrix(parts.shear)
+            * scale(parts.scale)
+    }
+
+    fn assert_affine_roundtrip(matrix: &Matrix4<f32>) -> AffineParts<f32> {
+        let parts = decompose_affine(matrix).expect("matrix should decompose");
+        assert_matrix4_close(&recompose_affine(&parts), matrix, 0.0001);
+        parts
+    }
+
     #[test]
     pub fn test_decompose() {
         let ms = scale(Vector3::<f32>::new(4.0, 5.0, 6.0));
@@ -441,25 +552,104 @@ mod tests {
         let mr = rotation_from_quat(&q);
 
         let m = mt * mr * ms;
+        assert_affine_roundtrip(&m);
 
-        let v = decompose(&m);
-        match v {
-            None => assert_eq!(1, 2),
-            Some((s, r, t)) => {
-                assert!((s.x - 4.0) < f32::epsilon());
-                assert!((s.y - 5.0) < f32::epsilon());
-                assert!((s.z - 6.0) < f32::epsilon());
+        let (s, r, t) = decompose(&m).expect("TRS matrix should decompose");
+        let reconstructed = translate(t) * rotation_from_quat(&r) * scale(s);
+        assert_matrix4_close(&reconstructed, &m, 0.0001);
+    }
 
-                assert!((q.x - r.x) < f32::epsilon());
-                assert!((q.y - r.y) < f32::epsilon());
-                assert!((q.z - r.z) < f32::epsilon());
-                assert!((q.w - r.w) < f32::epsilon());
+    #[test]
+    fn test_decompose_affine_shear_roundtrips() {
+        let pure_shears = [
+            Vector3::new(0.25, 0.0, 0.0),
+            Vector3::new(0.0, -0.5, 0.0),
+            Vector3::new(0.0, 0.0, 0.75),
+            Vector3::new(0.25, -0.5, 0.75),
+        ];
+        for shear in pure_shears {
+            assert_affine_roundtrip(&shear_matrix(shear));
+        }
 
-                assert!((t.x - 1.0) < f32::epsilon());
-                assert!((t.y - 2.0) < f32::epsilon());
-                assert!((t.z - 3.0) < f32::epsilon());
+        let translation = translate(Vector3::new(3.0, -2.0, 5.0));
+        let rotation = rotation_from_axis_angle(&Vector3::new(1.0, 2.0, 3.0), 0.7, EPS_F32)
+            .expect("axis should be valid");
+        let matrix = translation
+            * rotation
+            * shear_matrix(Vector3::new(0.2, -0.3, 0.4))
+            * scale(Vector3::new(2.0, 3.0, 4.0));
+        assert_affine_roundtrip(&matrix);
+        assert!(decompose(&matrix).is_none());
+    }
+
+    #[test]
+    fn test_decompose_affine_reflection_convention() {
+        let rotation = rotation_from_axis_angle(&Vector3::new(1.0, -2.0, 0.5), 1.1, EPS_F32)
+            .expect("axis should be valid");
+        let shear = shear_matrix(Vector3::new(0.2, -0.15, 0.35));
+        let scales = [
+            Vector3::new(-2.0, 3.0, 4.0),
+            Vector3::new(-2.0, -3.0, 4.0),
+            Vector3::new(-2.0, -3.0, -4.0),
+        ];
+
+        for input_scale in scales {
+            let matrix = rotation * shear * scale(input_scale);
+            let parts = assert_affine_roundtrip(&matrix);
+            let determinant = parts.rotation.mat3().determinant();
+            assert!((determinant - 1.0).abs() < 0.0001);
+
+            if input_scale.x * input_scale.y * input_scale.z < 0.0 {
+                assert!(parts.scale.x < 0.0);
+                assert!(parts.scale.y < 0.0);
+                assert!(parts.scale.z < 0.0);
+            } else {
+                assert!(parts.scale.x > 0.0);
+                assert!(parts.scale.y > 0.0);
+                assert!(parts.scale.z > 0.0);
             }
         }
+    }
+
+    #[test]
+    fn test_decompose_wrapper_shear_boundary() {
+        for shear in [
+            Vector3::new(EPS_F32, 0.0, 0.0),
+            Vector3::new(0.0, -EPS_F32, 0.0),
+            Vector3::new(0.0, 0.0, EPS_F32),
+        ] {
+            let matrix = shear_matrix(shear);
+            let (s, r, t) = decompose(&matrix).expect("epsilon-band shear should be accepted");
+            let reconstructed = translate(t) * rotation_from_quat(&r) * scale(s);
+            assert_matrix4_close(&reconstructed, &matrix, EPS_F32);
+        }
+
+        for shear in [
+            Vector3::new(EPS_F32 * 2.0, 0.0, 0.0),
+            Vector3::new(0.0, -EPS_F32 * 2.0, 0.0),
+            Vector3::new(0.0, 0.0, EPS_F32 * 2.0),
+        ] {
+            assert!(decompose(&shear_matrix(shear)).is_none());
+            assert!(decompose_affine(&shear_matrix(shear)).is_some());
+        }
+    }
+
+    #[test]
+    fn test_decompose_rejects_singular_and_projective_matrices() {
+        let dependent_columns = Matrix4::new(
+            1.0f32, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        );
+        assert!(decompose_affine(&dependent_columns).is_none());
+        assert!(decompose(&dependent_columns).is_none());
+
+        let near_zero_scale = scale(Vector3::new(EPS_F32, 1.0, 1.0));
+        assert!(decompose_affine(&near_zero_scale).is_none());
+        assert!(decompose(&near_zero_scale).is_none());
+
+        let mut projective = Matrix4::<f32>::identity();
+        projective.col[0].w = 1.0;
+        assert!(decompose_affine(&projective).is_none());
+        assert!(decompose(&projective).is_none());
     }
 
     #[test]

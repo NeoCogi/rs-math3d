@@ -18,12 +18,13 @@ Scale/tolerance invariance is intentionally deferred to P2 as requested. Audited
 are defects, not compatibility requirements.
 
 This plan is for maintainers implementing and reviewing the fixes. It does not redesign the query
-traits, add arbitrary-precision or robust-predicate dependencies, add general shear decomposition,
-change matrix inverse behavior, or broaden analytic support beyond `f32` and `f64`.
+traits, add arbitrary-precision or robust-predicate dependencies, change matrix inverse behavior,
+or broaden analytic support beyond `f32` and `f64`. P0.1 does add a dependency-free affine
+decomposition result because shear cannot be represented truthfully by the existing TRS tuple.
 
 ## Compatibility boundary
 
-- Keep the signatures of `transforms::decompose`, `Distance::distance`,
+- Keep the signature and tuple ordering of `transforms::decompose`, `Distance::distance`,
   `Plane::intersect_line`, `shortest_segment3d_between_lines3d`, and every existing
   `Intersect`/`Intersection` implementation.
 - Keep `Line::new` and `Line::from_start_end` directions unnormalized. Normalizing storage would
@@ -31,12 +32,18 @@ change matrix inverse behavior, or broaden analytic support beyond `f32` and `f6
   `from_start_end`.
 - Keep boundary-inclusive triangle barycentric, box, and sphere semantics.
 - Keep `decompose`'s current reflection convention: a negative linear determinant produces three
-  negative scale components and a proper rotation quaternion.
+  negative scale components and a proper rotation quaternion. Apply the same canonical sign
+  convention to the new shear-aware affine result.
+- Add `AffineParts<T>` and `decompose_affine(&Matrix4<T>) -> Option<AffineParts<T>>`.
+  `decompose` delegates to it and rejects material shear rather than returning a tuple that cannot
+  reconstruct the input.
 - Intentionally change `Quat::default()` from zero to identity and make total normalization of an
   explicit zero quaternion fall back to identity. Add
   `Quat::try_normalize(&Self, epsilon) -> Option<Self>` for callers that need checked behavior.
-- Intentionally change `try_basis_from_unit`/`basis_from_unit` ordering to a right-handed
-  `[u, v, w]` frame satisfying `u × v = w`; document this behavioral correction.
+- Intentionally replace `try_basis_from_unit`/`basis_from_unit` with explicit
+  `try_basis_from_unit_rh`/`basis_from_unit_rh` names, returning a right-handed `[u, v, w]` frame
+  satisfying `u × v = w`. Add matching `try_basis_from_unit_lh`/`basis_from_unit_lh` functions for
+  a left-handed `[u, v, w]` frame satisfying `u × v = -w`. Do not retain the ambiguous old names.
 - Correct generic plane-distance mathematics to divide by normal length, even though safe plane
   constructors currently normalize the normal and mask the defect.
 - Enforce strict ray half-line semantics: every returned ray intersection has `t >= 0`.
@@ -76,9 +83,9 @@ Core invariants have direct owners and are repaired first:
 
 ```text
 P0 core contracts
-   ├─ transforms.rs  → affine, shear-free TRS decomposition only
+   ├─ transforms.rs  → general affine decomposition plus a strict TRS wrapper
    ├─ quaternion.rs  → identity default and coherent zero fallback
-   ├─ queries.rs     → correct plane distance, right-handed basis, strict ray t
+   ├─ queries.rs     → correct plane distance, explicit RH/LH bases, strict ray t
    └─ module tests   → two-sided/reconstruction-based assertions
 
 P1 degenerate geometry
@@ -92,10 +99,12 @@ P2 scale policy
 
 Authoritative ownership after the work:
 
-- `transforms::decompose` validates that its input is representable as affine TRS.
+- `transforms::decompose_affine` owns nonsingular affine factorization into translation, rotation,
+  upper-triangular shear, and scale; `decompose` owns the shear-free TRS compatibility boundary.
 - `Quat` owns identity/default/normalization semantics.
 - `queries.rs::Distance<_, Plane<_>>` implements the general plane-distance equation.
-- `try_basis_from_unit` owns the ordered right-handed frame invariant.
+- `try_basis_from_unit_rh` and `try_basis_from_unit_lh` own their explicit ordered-frame
+  invariants; the infallible variants only add the established panic-on-degenerate wrapper.
 - Each ray query owns the strict `t >= 0` boundary.
 - `queries.rs` owns total sphere/triangle behavior for face-, segment-, and point-like triangles.
 - `src/vector.rs` owns crate-private dimensionless orientation predicates used by P2 callers.
@@ -159,7 +168,7 @@ triangle routine first; P2 later replaces only its independent raw determinant t
 
 ### P0 — Core logic and algorithm correctness
 
-- [ ] **P0.1 — Make `decompose` reject non-TRS matrices and strengthen its oracle**
+- [x] **P0.1 — Add shear-aware affine decomposition and make `decompose` a strict TRS wrapper**
 
   **Problem**
 
@@ -167,13 +176,11 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   A shear is a valid, nonsingular affine transform but cannot be represented by its return tuple.
   The current test can also pass grossly low results because it uses one-sided differences.
 
-  **Decision needed: Yes (resolved by this plan)**
+  **Decision needed: Yes (resolved by maintainer)**
 
-  1. **Keep `Option` and accept affine TRS without shear (recommended).**
-     - Benefits: honors the existing signature and documented failure path; every `Some` can be
-       required to reconstruct the input.
-     - Consequences: sheared matrices that currently return misleading values begin returning
-       `None`; failure reasons remain undifferentiated.
+  1. **Keep only the existing TRS tuple and reject shear.**
+     - Benefits: smallest API surface.
+     - Consequences: cannot expose a valid decomposition for general nonsingular affine matrices.
      - Shape:
 
        ```rust
@@ -182,18 +189,26 @@ triangle routine first; P2 later replaces only its independent raw determinant t
        }
        ```
 
-  2. **Add a new affine result containing shear and retain `decompose` as a wrapper.**
-     - Benefits: represents general affine matrices.
-     - Consequences: adds a new type, composition contract, and migration beyond this bug-fix scope.
+  2. **Add an affine result containing shear and retain `decompose` as a wrapper (selected).**
+     - Benefits: represents general nonsingular affine linear transforms above the documented pivot
+       tolerance while preserving the existing TRS API for callers that require shear-free results.
+     - Consequences: adds one public result type and one public function; callers must use the
+       documented `T * R * H * S` order to reconstruct.
      - Shape:
 
        ```rust
-       struct AffineParts<T> {
-           scale: Vector3<T>,
-           shear: Vector3<T>,
-           rotation: Quat<T>,
-           translation: Vector3<T>,
+       #[repr(C)]
+       #[derive(Copy, Clone, Debug)]
+       pub struct AffineParts<T: FloatScalar> {
+           pub translation: Vector3<T>,
+           pub rotation: Quat<T>,
+           pub scale: Vector3<T>,
+           pub shear: Vector3<T>,
        }
+
+       pub fn decompose_affine<T: FloatScalar>(
+           m: &Matrix4<T>,
+       ) -> Option<AffineParts<T>>;
        ```
 
   3. **Reject determinant zero only.**
@@ -203,49 +218,81 @@ triangle routine first; P2 later replaces only its independent raw determinant t
 
   **Recommendation and why**
 
-  Use option 1. The existing tuple is explicitly TRS-shaped, and `Option` already provides a
-  compatibility-safe rejection channel.
+  Implement selected option 2. A general affine decomposition is useful and mathematically
+  representable, while the wrapper keeps the old tuple truthful by rejecting material shear.
 
   **Target contract or migration**
 
-  In `src/transforms.rs::decompose`:
+  Add public `AffineParts<T>` in `src/transforms.rs` with fields in the selected order:
+  `translation`, `rotation`, `scale`, and `shear`. Interpret `shear` as
+  `(h_xy, h_xz, h_yz)` and define reconstruction for column-vector transforms as:
 
-  1. Reject a non-affine last row using `m.is_affine(T::epsilon())`.
-  2. Extract translation and the three linear columns.
-  3. Reject any column length at or below `T::epsilon()`.
-  4. Determine reflection from the upper-left `Matrix3` determinant and preserve the current
-     all-negative scale convention for a negative determinant.
-  5. Normalize the columns by the selected signed scales.
-  6. Compare pairwise dot products of those unit columns against the dimensionless epsilon and
-     reject nonorthogonality; also require normalized determinant approximately `+1`.
-  7. Convert only the validated rotation through `Quat::of_matrix3`.
+  ```text
+  M = T * R * H * S
 
-  P0 uses normalized-column dot checks locally and does not depend on the later P2 scale predicates.
-  Keep the public signature and do not add a shear result or error enum.
+      [1  h_xy  h_xz  0]
+  H = [0   1    h_yz  0]
+      [0   0     1    0]
+      [0   0     0    1]
+  ```
+
+  Implement `decompose_affine` as a modified Gram–Schmidt/QR factorization of the three linear
+  columns `a0`, `a1`, and `a2`:
+
+  1. Reject a non-affine last row using `m.is_affine(T::epsilon())`; extract translation unchanged.
+  2. Set `s_x = |a0|` and `r0 = a0 / s_x`; reject `s_x <= T::epsilon()`.
+  3. Set `xy = dot(r0, a1)`, subtract `r0 * xy` from `a1`, then set `s_y` to the residual length
+     and `r1` to its normalized value; reject `s_y <= T::epsilon()` and store
+     `h_xy = xy / s_y`.
+  4. Set `xz = dot(r0, a2)` and subtract `r0 * xz`; set `yz = dot(r1, residual)` and subtract
+     `r1 * yz`; then set `s_z` to the final residual length and `r2` to its normalized value.
+     Reject `s_z <= T::epsilon()` and store `h_xz = xz / s_z` and `h_yz = yz / s_z`.
+  5. Form the orthonormal rotation from columns `[r0, r1, r2]`. If its determinant is negative,
+     negate all three rotation columns and all three scale components. Leave shear unchanged. This
+     preserves the existing all-negative reflection convention and makes the quaternion rotation
+     proper without changing `R * H * S`.
+  6. Convert the proper rotation through `Quat::of_matrix3` and return `AffineParts`.
+
+  Keep `decompose`'s public signature and tuple order. Implement it only as a wrapper around
+  `decompose_affine`: return `None` when any shear component has absolute value greater than
+  `T::epsilon()`; otherwise treat the epsilon-band shear as numerical zero and return
+  `(scale, rotation, translation)`. Document the inclusive `|h| <= epsilon` acceptance boundary so
+  no material shear is silently discarded. Do not maintain a second decomposition algorithm.
 
   **Acceptance tests**
 
   - Replace all one-sided component assertions in `test_decompose` with an absolute
     `assert_matrix4_close` reconstruction helper.
-  - Recompose every successful result as
-    `translate(t) * rotation_from_quat(&q) * scale(s)` and compare the complete matrix, avoiding
-    assumptions about quaternion sign.
+  - Recompose every successful affine result as
+    `translate(t) * rotation_from_quat(&q) * shear_matrix(h) * scale(s)` with a test-local
+    `shear_matrix` helper and compare the complete matrix, avoiding assumptions about quaternion
+    sign.
+  - Cover pure `xy`, `xz`, and `yz` shear; combined shear; and translation/rotation/shear/nonuniform
+    scale together.
   - Cover ordinary TRS, nonuniform scale, translation, rotation, and one/two/three negative scales.
-  - Reject nonsingular shear, dependent nonzero columns, zero/near-zero scale, and non-affine rows.
-  - Update `decompose` rustdoc and README to say "affine TRS without shear."
-  - Remove the unchecked column-to-quaternion path and every one-sided approximate assertion.
+  - Require `decompose` to accept shear components at `±T::epsilon()` and reject any component just
+    beyond that boundary; require all material-shear fixtures to succeed through
+    `decompose_affine`.
+  - Reject dependent nonzero columns, zero/near-zero QR residual scales, and non-affine/projective
+    rows in both APIs.
+  - Verify reflected affine matrices preserve the all-negative scale/proper-rotation convention and
+    reconstruct with shear unchanged.
+  - Update both APIs' rustdoc and README with the field meanings, `T * R * H * S` order, shear
+    matrix, singular failure behavior, and strict-wrapper policy.
+  - Remove the old unchecked column-to-quaternion algorithm and every one-sided approximate
+    assertion.
 
-- [ ] **P0.2 — Establish identity as the quaternion default and zero fallback**
+- [x] **P0.2 — Establish identity as the quaternion default and zero fallback**
 
   **Problem**
 
   Derived `Default` creates an invalid zero rotation. `normalize` promises a unit quaternion but
   returns zero, after which matrix and axis-angle conversions disagree.
 
-  **Decision needed: Yes (resolved by this plan)**
+  **Decision needed: Yes (resolved by maintainer)**
 
   1. **Default to identity, add checked normalization, and make total normalization fall back to
-     identity (recommended).**
+     identity (selected).**
      - Benefits: defaults are valid rotations; conversions agree; callers can detect zero through
        an additive checked API.
      - Consequences: intentionally changes `Quat::default()` and `Quat::normalize(&zero)` behavior.
@@ -274,8 +321,8 @@ triangle routine first; P2 later replaces only its independent raw determinant t
 
   **Recommendation and why**
 
-  Use option 1. It matches the rotation-focused API and mirrors `FloatVector::try_normalize` without
-  breaking existing methods.
+  Implement selected option 1. It matches the rotation-focused API and mirrors
+  `FloatVector::try_normalize` without breaking existing methods.
 
   **Target contract or migration**
 
@@ -295,7 +342,7 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   - Add a README migration note; remove the zero-derived default and zero-preserving normalization
     branch.
 
-- [ ] **P0.3 — Enforce the strict ray half-line in triangle intersection**
+- [x] **P0.3 — Enforce the strict ray half-line in triangle intersection**
 
   **Problem**
 
@@ -303,9 +350,9 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   nondegenerate triangle behind a normalized ray can therefore return `Some` with negative `t`, in
   direct conflict with README and ray/plane behavior.
 
-  **Decision needed: Yes (resolved by this plan)**
+  **Decision needed: Yes (resolved by maintainer)**
 
-  1. **Reject every `t < 0` (recommended).**
+  1. **Reject every `t < 0` (selected).**
      - Benefits: implements a mathematical ray and agrees with `Ray::intersect_plane`.
      - Consequences: removes the old behind-origin tolerance band.
      - Shape: `if ray && t < T::zero() { return None; }`
@@ -322,7 +369,8 @@ triangle routine first; P2 later replaces only its independent raw determinant t
 
   **Recommendation and why**
 
-  Use option 1. Boundary tolerance belongs to barycentric inclusion, not to the half-line's domain.
+  Implement selected option 1. Boundary tolerance belongs to barycentric inclusion, not to the
+  half-line's domain.
 
   **Target contract or migration**
 
@@ -337,27 +385,45 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   - Preserve infinite-line hits on both sides and forward ray hits.
   - Keep the README true-ray statement; remove only the `t < -epsilon` branch in this item.
 
-- [ ] **P0.4 — Return a documented right-handed orthonormal basis**
+- [x] **P0.4 — Replace ambiguous basis builders with explicit RH and LH APIs**
 
   **Problem**
 
   `try_basis_from_unit` computes `w = normalize(u × v)` but returns `[u, w, v]`. The ordered frame
   has determinant `-1`. Existing tests check lengths and orthogonality but never orientation, and
-  their variable order mirrors the implementation instead of establishing a contract.
+  their variable order mirrors the implementation instead of establishing a contract. The
+  unqualified function names also make a caller's intended handedness invisible.
 
-  **Decision needed: Yes (resolved by this plan)**
+  **Decision needed: Yes (resolved by maintainer)**
 
-  1. **Return `[u, v, w]` and require `u × v = w` (recommended).**
-     - Benefits: produces a conventional right-handed frame and aligns with `Basis::default`'s
-       documented handedness.
-     - Consequences: intentionally swaps the last two output elements for downstream callers.
-     - Shape: `Some([u, v, w])`
+  1. **Keep unqualified names and change their output to right-handed.**
+     - Benefits: no call-site rename.
+     - Consequences: still hides handedness and silently changes positional meaning.
+     - Shape: `try_basis_from_unit(...) -> Some([u, v, w])`
 
-  2. **Preserve `[u, w, v]` and document it as left-handed.**
-     - Benefits: no output-order change.
-     - Consequences: preserves surprising orientation and makes the cited `w = u × v` construction
-       awkward for consumers.
-     - Shape: `/// Returns a left-handed [u, w, v] frame.`
+  2. **Provide explicit right- and left-handed function families (selected).**
+     - Benefits: makes orientation a call-site choice, supports both conventions, and removes
+       positional ambiguity from the API name.
+     - Consequences: intentionally breaks source compatibility for the two old names.
+     - Shape:
+
+       ```rust
+       pub fn try_basis_from_unit_rh<T: FloatScalar>(
+           unit: &Vector3<T>,
+           epsilon: T,
+       ) -> Option<[Vector3<T>; 3]>;
+       pub fn basis_from_unit_rh<T: FloatScalar>(
+           unit: &Vector3<T>,
+       ) -> [Vector3<T>; 3];
+
+       pub fn try_basis_from_unit_lh<T: FloatScalar>(
+           unit: &Vector3<T>,
+           epsilon: T,
+       ) -> Option<[Vector3<T>; 3]>;
+       pub fn basis_from_unit_lh<T: FloatScalar>(
+           unit: &Vector3<T>,
+       ) -> [Vector3<T>; 3];
+       ```
 
   3. **Replace the array with a named public frame type.**
      - Benefits: eliminates positional ambiguity.
@@ -366,24 +432,45 @@ triangle routine first; P2 later replaces only its independent raw determinant t
 
   **Recommendation and why**
 
-  Use option 1. Handedness is a core ordered-basis invariant, and the behavioral correction is
-  smaller than introducing another public frame type.
+  Implement selected option 2. The `_rh` and `_lh` suffixes make the invariant reviewable at every
+  call site and provide both conventions without adding a new frame representation.
 
   **Target contract or migration**
 
-  Keep the signatures of `try_basis_from_unit` and `basis_from_unit`; change the result ordering to
-  `[u, v, w]`. State explicitly that element zero is the normalized input, the frame is orthonormal,
-  and `cross(result[0], result[1])` equals `result[2]` within epsilon.
+  Rename `try_basis_from_unit` to `try_basis_from_unit_rh` and `basis_from_unit` to
+  `basis_from_unit_rh`; do not leave deprecated or forwarding functions under the old ambiguous
+  names. Add the `_lh` pair with identical arguments and checked/infallible behavior.
+
+  All four functions return positions `[u, v, w]`, where `u` is the normalized input and all vectors
+  are pairwise orthonormal. Share one crate-private construction helper for `u` and `v`, then derive
+  the last axis according to the public contract:
+
+  - right-handed: `w = normalize(u × v)`, determinant `+1`, and `u × v = w`;
+  - left-handed: `w = -normalize(u × v)`, determinant `-1`, and `u × v = -w`.
+
+  The `try_` variants return `None` when the input cannot be normalized at the supplied epsilon.
+  The infallible variants pass `T::epsilon()` and retain the current panic-on-degenerate behavior.
+  Document the rename as a source-breaking migration:
+  `try_basis_from_unit` → `try_basis_from_unit_rh` and
+  `basis_from_unit` → `basis_from_unit_rh`; callers that actually relied on the old ordered
+  left-handed result must migrate deliberately to the `_lh` family and use `[u, v, w]` positions.
 
   **Acceptance tests**
 
-  - Replace test destructuring `[u, w, v]` with `[u, v, w]`.
-  - Assert unit lengths, pairwise orthogonality, `u × v ≈ w`, and determinant `+1`.
-  - Cover axis-aligned, tied-component, arbitrary, and negative input directions.
-  - Add an explicit README/rustdoc migration note about the last-two-element swap.
-  - Remove tests or comments that encode only the old left-handed ordering.
+  - Test both handedness families with `[u, v, w]` destructuring.
+  - For both, assert unit lengths, pairwise orthogonality, and preservation of normalized input in
+    element zero.
+  - Assert `u × v ≈ w` and determinant `+1` for `_rh`; assert `u × v ≈ -w` and determinant `-1`
+    for `_lh`.
+  - Cover axis-aligned, tied-component, arbitrary, and negative input directions for both families.
+  - Require both `try_` variants to return `None` for zero/too-small input, and both infallible
+    variants to panic under the documented condition.
+  - Add explicit README/rustdoc migration notes for both renames and the new fixed `[u, v, w]`
+    positional contract.
+  - Search source, tests, and documentation to ensure the two old public names and `[u, w, v]`
+    ordering are gone.
 
-- [ ] **P0.5 — Correct the generic point-to-plane distance equation**
+- [x] **P0.5 — Correct the generic point-to-plane distance equation**
 
   **Problem**
 
@@ -392,9 +479,9 @@ triangle routine first; P2 later replaces only its independent raw determinant t
   `abs(n · p + d) / sqrt(n · n)`. Safe constructors normalize `n`, masking the discrepancy, but
   the algorithm and its claimed equation remain wrong and brittle to representation changes or FFI.
 
-  **Decision needed: Yes (resolved by this plan)**
+  **Decision needed: Yes (resolved by maintainer)**
 
-  1. **Implement the general equation (recommended).**
+  1. **Implement the general equation (selected).**
      - Benefits: mathematically correct for every nonzero normal and independent of constructor
        normalization; keeps the public return type.
      - Consequences: performs one square root per query.
@@ -413,8 +500,8 @@ triangle routine first; P2 later replaces only its independent raw determinant t
 
   **Recommendation and why**
 
-  Use option 1. Correctness takes precedence over an unmeasured square-root optimization, and no
-  benchmark identifies plane distance as a hot path.
+  Implement selected option 1. Correctness takes precedence over an unmeasured square-root
+  optimization, and no benchmark identifies plane distance as a hot path.
 
   **Target contract or migration**
 
@@ -630,33 +717,36 @@ triangle routine first; P2 later replaces only its independent raw determinant t
 
   Update:
 
-  - `README.md` behavior notes for TRS-only decomposition, quaternion identity default,
-    right-handed basis ordering, strict ray origin, corrected plane distance, degenerate triangle
-    closure, and dimensionless orientation tolerance;
+  - `README.md` behavior notes for affine `T * R * H * S` decomposition and its strict TRS wrapper,
+    quaternion identity default, explicit RH/LH basis APIs, strict ray origin, corrected plane
+    distance, degenerate triangle closure, and dimensionless orientation tolerance;
   - rustdoc on every affected public function and trait implementation;
   - test helpers so approximate equality is absolute or reconstruction-based.
 
   Do not add a changelog solely for these fixes. Use existing README and crate/module rustdoc for
-  migration-visible changes. Remove stale comments describing old ordering/formulas/tolerances. No
-  deprecated wrapper is needed because no existing signature is replaced.
+  migration-visible changes. Remove stale comments describing old ordering/formulas/tolerances.
+  Document the intentional basis-function renames directly; do not preserve deprecated aliases for
+  the ambiguous names. `decompose` remains as the permanent strict compatibility wrapper for the
+  additive `decompose_affine` API.
 
   **Acceptance tests**
 
   - Search tests for one-sided approximate assertions and correct every unintended ordered check.
   - Run every command in Cross-cutting validation.
   - Confirm `git diff --check` and intended `cargo package --list` contents.
-  - Confirm no dependencies, features, unsafe blocks, or public query signatures were added except
-    additive `Quat::try_normalize`.
+  - Confirm no dependencies, features, or unsafe blocks were added. Confirm public API changes are
+    limited to additive `AffineParts`, `decompose_affine`, `Quat::try_normalize`, the two new `_lh`
+    basis functions, and the two intentional basis-function renames to `_rh`.
 
 ## Known defect matrix and ownership
 
 | Priority | Defect | Current cause | Fix/verification item |
 |---|---|---|---|
-| P0 | Sheared/singular matrices return `Some` from `decompose` | No affine/orthogonality validation | P0.1 |
+| P0 | Sheared/singular matrices return misleading `Some` values from `decompose` | No affine factorization or shear contract | P0.1 |
 | P0 | Decomposition regressions can pass tests | Approximate assertions omit absolute value | P0.1 |
 | P0 | Default/zero quaternion conversions disagree | Zero-derived default and zero-preserving normalization | P0.2 |
 | P0 | Ray/triangle returns negative `t` | Epsilon band applied to ray domain | P0.3 |
-| P0 | Basis builder returns an ordered left-handed frame | Computes `u × v = w` but returns `[u, w, v]` | P0.4 |
+| P0 | Ambiguous basis builder returns an undocumented ordered left-handed frame | Computes `u × v = w` but returns `[u, w, v]` and has no handedness in its name | P0.4 |
 | P0 | Plane distance uses squared normal length | Denominator omits square root | P0.5 |
 | P1 | Degenerate triangle can miss an intersecting sphere | Fallback requires all edge distances to be `Some` | P1.1 |
 | P2 | Equivalent line directions change plane/shortest-line results | Raw dot/cross compared to epsilon | P2.1, P2.2 |
@@ -697,29 +787,36 @@ Regression assertions must be deterministic and mathematical:
 
 ## Suggested implementation sequence
 
-1. Implement P0.1 and replace the weak decomposition oracle in the same change.
-2. Land the independent P0 quaternion, strict-ray, right-handed-basis, and plane-distance fixes with
-   their focused tests; none depends on tolerance refactoring.
+1. Implement P0.1's affine QR factorization, strict TRS wrapper, and reconstruction-based oracle in
+   the same change.
+2. Land the independent P0 quaternion, strict-ray, explicit RH/LH basis, and plane-distance fixes
+   with their focused tests; none depends on tolerance refactoring.
 3. Implement P1's total lower-dimensional sphere/triangle behavior on top of corrected plane
    distance.
 4. Add P2's crate-private orientation predicates, then migrate line/plane and line/ray/triangle
    consumers in separate compile-safe changes.
 5. Complete the P3 documentation sweep and run the full feature/platform validation matrix.
 
-No temporary adapter, feature flag, or dual runtime path is required.
+No temporary adapter, feature flag, or dual runtime path is required. The `decompose` wrapper is a
+permanent compatibility API with a narrower representability contract, not a transitional branch.
 
 ## Completion definition
 
 The work is complete when:
 
-- `decompose` succeeds only for affine, nonsingular, shear-free TRS matrices and every success
-  reconstructs its input within tolerance;
+- `decompose_affine` decomposes every supported nonsingular affine matrix above the documented QR
+  pivot tolerance into `translation`, proper `rotation`, signed `scale`, and `(xy, xz, yz)` shear
+  components whose `T * R * H * S` reconstruction matches the input within tolerance;
+- `decompose` delegates to `decompose_affine`, succeeds only when every shear component is within
+  the documented inclusive epsilon band, and rejects material shear;
 - decomposition tests use two-sided/reconstruction-based assertions;
 - `Quat::default()` is identity, checked zero normalization returns `None`, and total zero
   conversions consistently yield identity;
 - every ray/triangle result has `t >= 0` while infinite lines continue to hit on either side;
-- `basis_from_unit` and `try_basis_from_unit` return orthonormal `[u, v, w]` frames with determinant
-  `+1` and `u × v = w`;
+- `basis_from_unit_rh` and `try_basis_from_unit_rh` return orthonormal `[u, v, w]` frames with
+  determinant `+1` and `u × v = w`;
+- `basis_from_unit_lh` and `try_basis_from_unit_lh` return orthonormal `[u, v, w]` frames with
+  determinant `-1` and `u × v = -w`; the two old ambiguous function names no longer exist;
 - point/plane distance follows `abs(n · p + d) / |n|` and is invariant under nonzero coefficient
   scaling;
 - sphere/triangle queries handle face-, segment-, and point-like triangles with boundary-inclusive
@@ -729,8 +826,10 @@ The work is complete when:
 - valid triangles above the length cutoff are not rejected solely because a raw area determinant is
   below linear epsilon;
 - old raw tolerance branches, the all-edge-`Some` fallback, zero-derived quaternion default,
-  left-handed basis ordering, squared plane-distance denominator, negative-ray epsilon band, and
-  one-sided decomposition assertions are gone;
-- public signatures remain stable except for additive `Quat::try_normalize`;
+  ambiguous basis names and `[u, w, v]` ordering, squared plane-distance denominator, negative-ray
+  epsilon band, and one-sided decomposition assertions are gone;
+- public API changes match the compatibility boundary exactly: additive `AffineParts`,
+  `decompose_affine`, `Quat::try_normalize`, and `_lh` basis functions, plus the two explicit `_rh`
+  renames;
 - README, rustdoc, tests, doctests, Clippy, formatting, backend tests, platform checks,
   documentation, and package contents agree with the final contracts.

@@ -43,6 +43,19 @@ If more than one backend feature is enabled, precedence is `std`, then `libm`, t
 
 - `Ray`/`Tri3` intersection is a true ray query: hits behind the ray origin are rejected.
   Use the corresponding `Line`/`Tri3` intersection when you want the infinite-line result.
+- `transforms::decompose_affine` represents nonsingular affine matrices as translation,
+  proper rotation, `(xy, xz, yz)` upper-triangular shear, and scale in `T * R * H * S`
+  order. The older `transforms::decompose` tuple is a shear-free wrapper and returns `None`
+  when any shear coefficient exceeds the scalar epsilon.
+- `Quat::default()` is the identity rotation. `Quat::normalize` also maps an exact zero
+  quaternion to identity; use `Quat::try_normalize` when invalid or near-zero input must be
+  detected.
+- Orthonormal basis construction makes handedness explicit:
+  `basis_from_unit_rh`/`try_basis_from_unit_rh` return `[u, v, w]` with `u × v = w`, while
+  the `_lh` variants return `[u, v, w]` with `u × v = -w`. These replace the old ambiguous
+  `basis_from_unit` and `try_basis_from_unit` names.
+- Point-to-plane distance uses the general `abs(n · p + d) / |n|` equation and is therefore
+  invariant when all plane coefficients are scaled by the same nonzero value.
 - `ParametricPlane::project` solves the 2x2 Gram system of the plane axes, so projection
   works for non-orthogonal axes as well as orthogonal ones.
 - `Sphere3::new` canonicalizes the radius with `abs(radius)`.

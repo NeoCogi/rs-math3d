@@ -69,11 +69,14 @@ impl<T: FloatScalar> Distance<T, Vector3<T>> for Plane<T> {
     fn distance(&self, other: &Vector3<T>) -> Option<T> {
         let n = self.normal();
         let nom = Vector3::dot(other, &n) + self.constant();
-        let denom = Vector3::dot(&n, &n);
-        if denom <= T::epsilon() {
+        let normal_length_squared = Vector3::dot(&n, &n);
+        if normal_length_squared <= T::epsilon() * T::epsilon() {
             return None;
         }
-        Some(T::tabs(nom) / denom)
+
+        // Plane coefficients need not be normalized at the representation
+        // boundary, so use the general |n·p + d| / |n| equation.
+        Some(T::tabs(nom) / normal_length_squared.tsqrt())
     }
 }
 
@@ -278,7 +281,10 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
     }
 
     let t = Vector3::dot(&edge2, &qvec) / det;
-    if matches!(kind, TriangleIntersectionKind::Ray) && t < -epsilon {
+    // Epsilon belongs to barycentric boundary tests, not to the ray's
+    // mathematical domain. Returning any t < 0 would put the hit behind the
+    // origin and contradict the other ray intersection APIs.
+    if matches!(kind, TriangleIntersectionKind::Ray) && t < <T as Zero>::zero() {
         return None;
     }
 
@@ -351,14 +357,11 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3
 /// `1/3`. Therefore `||v0||² >= 2/3` in every branch, so `v0` is never zero for
 /// non-zero `u`, and normalizing it is always safe.
 ///
-/// Let `v = normalize(v0)`. Then `u` and `v` are orthonormal. Finally,
-/// `w = normalize(u × v)` is orthogonal to both and has unit length, so the
-/// returned triple is orthonormal.
+/// Let `v = normalize(v0)`. Then `u` and `v` are orthonormal. The public
+/// handedness-specific builders derive `w` from `u × v`, with the sign selected
+/// by their documented contract.
 ///
-pub fn try_basis_from_unit<T: FloatScalar>(
-    unit: &Vector3<T>,
-    epsilon: T,
-) -> Option<[Vector3<T>; 3]> {
+fn try_basis_uv<T: FloatScalar>(unit: &Vector3<T>, epsilon: T) -> Option<(Vector3<T>, Vector3<T>)> {
     let u = unit.try_normalize(epsilon)?;
     let x = u.x;
     let y = u.y;
@@ -373,34 +376,80 @@ pub fn try_basis_from_unit<T: FloatScalar>(
         Vector3::new(-y, x, <T as Zero>::zero())
     };
     let v = Vector3::normalize(&v);
-    let w = Vector3::normalize(&Vector3::cross(&u, &v));
-    Some([u, w, v])
+    Some((u, v))
 }
 
-/// Builds an orthonormal basis from a non-zero input direction.
+/// Builds a right-handed orthonormal basis from a non-zero input direction.
+///
+/// Returns `[u, v, w]`, where `u` is the normalized input and
+/// `u × v = w`. Returns `None` when `unit` is too small to normalize at the
+/// supplied epsilon.
+pub fn try_basis_from_unit_rh<T: FloatScalar>(
+    unit: &Vector3<T>,
+    epsilon: T,
+) -> Option<[Vector3<T>; 3]> {
+    let (u, v) = try_basis_uv(unit, epsilon)?;
+    let w = Vector3::normalize(&Vector3::cross(&u, &v));
+    Some([u, v, w])
+}
+
+/// Builds a right-handed orthonormal basis from a non-zero input direction.
 ///
 /// # Panics
 /// Panics if `unit` is too small to normalize. Use
-/// [`try_basis_from_unit`] when the input may be degenerate.
-pub fn basis_from_unit<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
-    try_basis_from_unit(unit, T::epsilon()).expect("basis direction must be non-zero")
+/// [`try_basis_from_unit_rh`] when the input may be degenerate.
+pub fn basis_from_unit_rh<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
+    try_basis_from_unit_rh(unit, T::epsilon()).expect("basis direction must be non-zero")
+}
+
+/// Builds a left-handed orthonormal basis from a non-zero input direction.
+///
+/// Returns `[u, v, w]`, where `u` is the normalized input and
+/// `u × v = -w`. Returns `None` when `unit` is too small to normalize at the
+/// supplied epsilon.
+pub fn try_basis_from_unit_lh<T: FloatScalar>(
+    unit: &Vector3<T>,
+    epsilon: T,
+) -> Option<[Vector3<T>; 3]> {
+    let (u, v) = try_basis_uv(unit, epsilon)?;
+    // Negating only the cross-product axis reverses the ordered frame's
+    // determinant without changing its first two orthonormal axes.
+    let w = -Vector3::normalize(&Vector3::cross(&u, &v));
+    Some([u, v, w])
+}
+
+/// Builds a left-handed orthonormal basis from a non-zero input direction.
+///
+/// # Panics
+/// Panics if `unit` is too small to normalize. Use
+/// [`try_basis_from_unit_lh`] when the input may be degenerate.
+pub fn basis_from_unit_lh<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
+    try_basis_from_unit_lh(unit, T::epsilon()).expect("basis direction must be non-zero")
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Intersect, Intersection};
     use crate::primitives::{Box3, Line, Ray, Sphere3, Tri3};
-    use crate::vector::{FloatVector, Vector, Vector3};
+    use crate::vector::{CrossProduct, FloatVector, Vector, Vector3};
     use crate::EPS_F32;
 
-    fn assert_orthonormal_basis(basis: [Vector3<f32>; 3]) {
-        let [u, w, v] = basis;
+    fn assert_orthonormal_basis(basis: [Vector3<f32>; 3], handedness: f32) {
+        let [u, v, w] = basis;
         assert!((u.length() - 1.0).abs() < 0.001);
         assert!((v.length() - 1.0).abs() < 0.001);
         assert!((w.length() - 1.0).abs() < 0.001);
         assert!(Vector3::dot(&u, &v).abs() < 0.001);
         assert!(Vector3::dot(&u, &w).abs() < 0.001);
         assert!(Vector3::dot(&v, &w).abs() < 0.001);
+
+        let u_cross_v = Vector3::cross(&u, &v);
+        assert!((u_cross_v.x - handedness * w.x).abs() < 0.001);
+        assert!((u_cross_v.y - handedness * w.y).abs() < 0.001);
+        assert!((u_cross_v.z - handedness * w.z).abs() < 0.001);
+
+        let determinant = Vector3::dot(&u, &Vector3::cross(&v, &w));
+        assert!((determinant - handedness).abs() < 0.001);
     }
 
     #[test]
@@ -477,43 +526,68 @@ mod tests {
     }
 
     #[test]
-    fn test_try_basis_from_unit_zero_none() {
+    fn test_try_basis_from_unit_handedness_zero_none() {
         let zero = Vector3::new(0.0f32, 0.0, 0.0);
-        assert!(super::try_basis_from_unit(&zero, EPS_F32).is_none());
+        assert!(super::try_basis_from_unit_rh(&zero, EPS_F32).is_none());
+        assert!(super::try_basis_from_unit_lh(&zero, EPS_F32).is_none());
     }
 
     #[test]
-    fn test_try_basis_from_unit_orthonormal() {
-        let basis0 = super::try_basis_from_unit(&Vector3::new(1.0f32, 2.0, 3.0), EPS_F32)
-            .expect("basis should exist");
-        let basis1 = super::try_basis_from_unit(&Vector3::new(0.1f32, 4.0, 5.0), EPS_F32)
-            .expect("basis should exist");
-        let basis2 = super::try_basis_from_unit(&Vector3::new(4.0f32, 0.1, 5.0), EPS_F32)
-            .expect("basis should exist");
-        let basis3 = super::try_basis_from_unit(&Vector3::new(4.0f32, 5.0, 0.1), EPS_F32)
-            .expect("basis should exist");
+    fn test_try_basis_from_unit_handedness_orthonormal() {
+        let directions = [
+            Vector3::new(1.0f32, 2.0, 3.0),
+            Vector3::new(0.1f32, 4.0, 5.0),
+            Vector3::new(4.0f32, 0.1, 5.0),
+            Vector3::new(4.0f32, 5.0, 0.1),
+        ];
 
-        assert_orthonormal_basis(basis0);
-        assert_orthonormal_basis(basis1);
-        assert_orthonormal_basis(basis2);
-        assert_orthonormal_basis(basis3);
+        for direction in directions {
+            let expected_u = direction
+                .try_normalize(EPS_F32)
+                .expect("direction should normalize");
+            let right = super::try_basis_from_unit_rh(&direction, EPS_F32)
+                .expect("right-handed basis should exist");
+            let left = super::try_basis_from_unit_lh(&direction, EPS_F32)
+                .expect("left-handed basis should exist");
+
+            assert_orthonormal_basis(right, 1.0);
+            assert_orthonormal_basis(left, -1.0);
+            assert!((right[0] - expected_u).length() < 0.001);
+            assert!((left[0] - expected_u).length() < 0.001);
+        }
     }
 
     #[test]
-    fn test_try_basis_from_unit_axes_and_ties() {
-        let basis_x =
-            super::try_basis_from_unit(&Vector3::new(1.0f32, 0.0, 0.0), EPS_F32).expect("basis");
-        let basis_y =
-            super::try_basis_from_unit(&Vector3::new(0.0f32, 1.0, 0.0), EPS_F32).expect("basis");
-        let basis_z =
-            super::try_basis_from_unit(&Vector3::new(0.0f32, 0.0, 1.0), EPS_F32).expect("basis");
-        let basis_neg =
-            super::try_basis_from_unit(&Vector3::new(-1.0f32, -1.0, -1.0), EPS_F32).expect("basis");
+    fn test_try_basis_from_unit_handedness_axes_and_ties() {
+        let directions = [
+            Vector3::new(1.0f32, 0.0, 0.0),
+            Vector3::new(0.0f32, 1.0, 0.0),
+            Vector3::new(0.0f32, 0.0, 1.0),
+            Vector3::new(-1.0f32, -1.0, -1.0),
+        ];
 
-        assert_orthonormal_basis(basis_x);
-        assert_orthonormal_basis(basis_y);
-        assert_orthonormal_basis(basis_z);
-        assert_orthonormal_basis(basis_neg);
+        for direction in directions {
+            assert_orthonormal_basis(
+                super::try_basis_from_unit_rh(&direction, EPS_F32).expect("basis"),
+                1.0,
+            );
+            assert_orthonormal_basis(
+                super::try_basis_from_unit_lh(&direction, EPS_F32).expect("basis"),
+                -1.0,
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "basis direction must be non-zero")]
+    fn test_basis_from_unit_rh_zero_panics() {
+        super::basis_from_unit_rh(&Vector3::new(0.0f32, 0.0, 0.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "basis direction must be non-zero")]
+    fn test_basis_from_unit_lh_zero_panics() {
+        super::basis_from_unit_lh(&Vector3::new(0.0f32, 0.0, 0.0));
     }
 
     #[test]
@@ -532,6 +606,48 @@ mod tests {
 
         assert!(ray.intersection(&tri).is_none());
         assert!(tri.intersection(&ray).is_none());
+    }
+
+    #[test]
+    fn test_ray_triangle_intersection_rejects_negative_epsilon_band() {
+        let tri = Tri3::new([
+            Vector3::new(0.0f32, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+        let start = Vector3::new(0.25f32, 0.25, EPS_F32 * 0.5);
+        let direction = Vector3::new(0.0f32, 0.0, 1.0);
+        let ray = Ray::new(&start, &direction, EPS_F32).expect("ray should be valid");
+        let line = Line::new(&start, &direction, EPS_F32).expect("line should be valid");
+
+        assert!(ray.intersection(&tri).is_none());
+        assert!(tri.intersection(&ray).is_none());
+
+        let (line_t, _) = line
+            .intersection(&tri)
+            .expect("infinite line should retain the negative hit");
+        assert!(line_t < 0.0);
+    }
+
+    #[test]
+    fn test_ray_triangle_intersection_accepts_origin_boundary() {
+        let tri = Tri3::new([
+            Vector3::new(0.0f32, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+        let ray = Ray::new(
+            &Vector3::new(0.25f32, 0.25, 0.0),
+            &Vector3::new(0.0, 0.0, 1.0),
+            EPS_F32,
+        )
+        .expect("ray should be valid");
+
+        let (t, point) = ray
+            .intersection(&tri)
+            .expect("the ray origin lies on the triangle");
+        assert!(t >= 0.0);
+        assert!(point.z.abs() < EPS_F32);
     }
 
     #[test]

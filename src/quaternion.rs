@@ -34,8 +34,10 @@ use core::ops::*;
 use num_traits::{One, Zero};
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)]
 /// A quaternion representing rotation or orientation.
+///
+/// The default value is the identity rotation `(0, 0, 0, 1)`.
 pub struct Quat<T: Scalar> {
     /// X component (imaginary).
     pub x: T,
@@ -45,6 +47,17 @@ pub struct Quat<T: Scalar> {
     pub z: T,
     /// W component (real).
     pub w: T,
+}
+
+impl<T: Scalar> Default for Quat<T> {
+    fn default() -> Self {
+        Self {
+            x: <T as Zero>::zero(),
+            y: <T as Zero>::zero(),
+            z: <T as Zero>::zero(),
+            w: <T as One>::one(),
+        }
+    }
 }
 
 impl<T: FloatScalar> Quat<T> {
@@ -136,19 +149,31 @@ impl<T: FloatScalar> Quat<T> {
         Self::new(-q.x, -q.y, -q.z, q.w)
     }
 
+    /// Attempts to normalize the quaternion to unit length.
+    ///
+    /// Returns `None` when the squared length is at or below
+    /// `epsilon * epsilon`.
+    pub fn try_normalize(q: &Self, epsilon: T) -> Option<Self> {
+        let length_squared = Self::dot(q, q);
+        if length_squared <= epsilon * epsilon {
+            None
+        } else {
+            Some(*q / length_squared.tsqrt())
+        }
+    }
+
     /// Normalizes the quaternion to unit length.
     ///
     /// Unit quaternions represent valid rotations:
     /// ```text
     /// q̂ = q / ||q||
     /// ```
+    ///
+    /// An exact zero quaternion has no direction to preserve, so this total
+    /// operation returns the identity rotation. Use [`Quat::try_normalize`] to
+    /// detect zero or caller-defined near-zero inputs.
     pub fn normalize(q: &Self) -> Self {
-        let ql = q.length();
-        if ql > <T as Zero>::zero() {
-            *q / ql
-        } else {
-            *q
-        }
+        Self::try_normalize(q, <T as Zero>::zero()).unwrap_or_else(Self::identity)
     }
 
     /// Negates all components of the quaternion.
@@ -469,6 +494,21 @@ mod tests {
     }
 
     #[test]
+    fn test_default_is_identity() {
+        let default_f32 = Quat::<f32>::default();
+        assert_eq!(default_f32.x, 0.0);
+        assert_eq!(default_f32.y, 0.0);
+        assert_eq!(default_f32.z, 0.0);
+        assert_eq!(default_f32.w, 1.0);
+
+        let default_f64 = Quat::<f64>::default();
+        assert_eq!(default_f64.x, 0.0);
+        assert_eq!(default_f64.y, 0.0);
+        assert_eq!(default_f64.z, 0.0);
+        assert_eq!(default_f64.w, 1.0);
+    }
+
+    #[test]
     fn test_identity_conjugate() {
         let q = Quat::conjugate(&Quat::<f32>::identity());
         let m = q.mat3();
@@ -735,19 +775,36 @@ mod tests {
         let nq = Quat::normalize(&q);
         let len = nq.length();
         assert!((len - 1.0).abs() < f32::epsilon());
+        let checked = Quat::try_normalize(&q, EPS_F32).expect("quaternion should normalize");
+        assert!((checked.length() - 1.0).abs() < f32::epsilon());
 
-        // Test normalizing zero quaternion (edge case)
+        // Total normalization maps the invalid zero value to a valid rotation;
+        // callers that need to distinguish it use the checked API.
         let q_zero = Quat::<f32>::new(0.0, 0.0, 0.0, 0.0);
         let nq_zero = Quat::normalize(&q_zero);
         assert_eq!(nq_zero.x, 0.0);
         assert_eq!(nq_zero.y, 0.0);
         assert_eq!(nq_zero.z, 0.0);
-        assert_eq!(nq_zero.w, 0.0);
+        assert_eq!(nq_zero.w, 1.0);
+        assert!(Quat::try_normalize(&q_zero, EPS_F32).is_none());
 
         // Test already normalized quaternion
         let q_unit = Quat::<f32>::identity();
         let nq_unit = Quat::normalize(&q_unit);
         assert!((nq_unit.length() - 1.0).abs() < f32::epsilon());
+    }
+
+    #[test]
+    fn test_zero_quaternion_total_conversions_are_identity() {
+        let zero = Quat::<f32>::new(0.0, 0.0, 0.0, 0.0);
+        let matrix = zero.mat3();
+        assert_vec3_close_f32(matrix.col[0], Vector3::new(1.0, 0.0, 0.0));
+        assert_vec3_close_f32(matrix.col[1], Vector3::new(0.0, 1.0, 0.0));
+        assert_vec3_close_f32(matrix.col[2], Vector3::new(0.0, 0.0, 1.0));
+
+        let (axis, angle) = zero.to_axis_angle();
+        assert_vec3_close_f32(axis, Vector3::new(1.0, 0.0, 0.0));
+        assert_scalar_close_f32(angle, 0.0);
     }
 
     #[test]

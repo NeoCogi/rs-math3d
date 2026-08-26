@@ -271,14 +271,25 @@ impl<T: FloatScalar> Box3<T> {
 
 /// An infinite line in 2D or 3D space.
 ///
-/// Defined by a point on the line and a direction vector.
+/// The stored point and direction define the parameterization `p + d * t` for
+/// every scalar `t`. The direction is not required to have unit length.
+/// Multiplying `d` by a nonzero scalar `k` leaves the geometric line unchanged,
+/// but representable parameters reported against the stored direction change
+/// from `t` to `t / k`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Line<T: Scalar, V: Vector<T>> {
-    /// Point on the line.
+    /// Point corresponding to parameter `t = 0`.
     pub p: V,
-    /// Direction of the line.
+    /// Direction in the stored parameterization `p + d * t`.
+    ///
+    /// This vector need not be normalized. Its magnitude and sign determine
+    /// the scale and orientation of parameter values returned by line queries.
     pub d: V,
+    /// Associates the scalar type with the line without adding stored data.
+    ///
+    /// The vector type carries the coordinates, while this marker retains `T`
+    /// as part of the concrete line type and representation.
     t: core::marker::PhantomData<T>,
 }
 
@@ -469,14 +480,24 @@ impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
 
 /// A ray with an origin and direction.
 ///
-/// Commonly used for ray casting and intersection tests.
+/// Points on the ray follow `start + direction * t` for `t >= 0`. Positive
+/// rescaling of `direction` preserves that point set; negative rescaling
+/// reverses the ray and therefore changes its geometry.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Ray<T: Scalar, V: Vector<T>> {
-    /// Ray origin.
+    /// Ray origin, corresponding to parameter `t = 0`.
     pub start: V,
-    /// Ray direction (typically normalized).
+    /// Forward ray direction.
+    ///
+    /// [`Ray::new`] stores a normalized direction, although the public field
+    /// may subsequently be changed. Intersection queries therefore depend on
+    /// its orientation rather than assuming that its magnitude remains one.
     pub direction: V,
+    /// Associates the scalar type with the ray without adding stored data.
+    ///
+    /// The vector type carries the coordinates, while this marker retains `T`
+    /// as part of the concrete ray type and representation.
     t: core::marker::PhantomData<T>,
 }
 
@@ -503,12 +524,15 @@ impl<T: FloatScalar> Ray<T, Vector3<T>> {
     ///
     /// Returns the intersection point, or `None` if the ray does not hit the
     /// plane, either because it is parallel, points away, or contains invalid
-    /// non-finite data.
+    /// non-finite data. A non-finite `epsilon` or one outside `0..=1` is also
+    /// rejected.
     ///
     /// `epsilon` is a dimensionless angular tolerance in the inclusive range
     /// `0..=1`. The ray is treated as parallel when the absolute cosine between
     /// the plane normal and ray direction is at most this value. Positive
     /// rescaling of the stored direction therefore does not change the hit.
+    /// A negative scale reverses the ray and is not an equivalent
+    /// reparameterization.
     pub fn intersect_plane(&self, p: &Plane<T>, epsilon: T) -> Option<Vector3<T>> {
         let normal = p.normal();
 
@@ -541,6 +565,11 @@ impl<T: FloatScalar> Ray<T, Vector3<T>> {
             return None;
         }
 
+        // Reconstruct with the temporary unit direction. Multiplying by the
+        // stored direction would require first converting `distance` into its
+        // possibly extreme parameter scale and would add avoidable rounding or
+        // overflow risk. Positive direction rescaling leaves both operands in
+        // this expression unchanged.
         let point = self.start + unit_direction * distance;
         is_finite_vector3(&point).then_some(point)
     }
@@ -745,11 +774,15 @@ impl<T: FloatScalar> Plane<T> {
     /// Computes the intersection of this plane with an infinite line.
     ///
     /// Returns the line's original parameter `t` and the intersection point, or
-    /// `None` for parallel, zero-direction, or non-finite input.
+    /// `None` for parallel, zero-direction, or non-finite input. The method also
+    /// returns `None` when the geometric hit is finite but its parameter in the
+    /// stored direction's scale would overflow or underflow.
     ///
     /// `epsilon` is a dimensionless angular tolerance in `0..=1`. Parallelism
-    /// is tested from normalized working vectors, so rescaling `line.d` leaves
-    /// the point unchanged and inversely rescales the returned `t`.
+    /// is tested from normalized working vectors, so multiplying `line.d` by a
+    /// finite nonzero `k` leaves the point unchanged and changes a representable
+    /// returned parameter from `t` to `t / k`. Negative `k` values reverse the
+    /// parameter orientation but describe the same infinite line.
     pub fn intersect_line(
         &self,
         line: &Line<T, Vector3<T>>,
@@ -782,10 +815,37 @@ impl<T: FloatScalar> Plane<T> {
         if !is_finite_scalar(distance) {
             return None;
         }
-        let t = direction_metric.divide_by_length(distance)?;
+        // This is `distance / |line.d|`, evaluated from the bounded length
+        // decomposition. It restores the parameter of the caller's exact
+        // equation `line.p + line.d * t`, including the sign change produced
+        // when the stored direction is reversed.
+        let t = direction_metric.divide_by_length_preserving_nonzero(distance)?;
+
+        // Build the geometric result from physical travel rather than from the
+        // potentially extreme reciprocal pair `line.d * t`. Both expressions
+        // represent the same point, but the unit-direction form remains bounded
+        // over a much wider range of stored direction magnitudes.
         let point = line.p + unit_direction * distance;
         if !is_finite_vector3(&point) {
             return None;
+        }
+
+        // Two staged divisions can round a value whose exact quotient lies on
+        // either side of the zero/minimum-subnormal boundary to the same minimum
+        // subnormal `t`. This ambiguity occurs only for that smallest nonzero
+        // magnitude. In that rare case, directly exercise the public line
+        // equation and fail closed unless it reproduces the physical-travel
+        // point component for component. Ordinary parameters avoid this extra
+        // vector multiply and comparison on the interactive-query hot path.
+        let zero = <T as Zero>::zero();
+        if t != zero && t.tabs() * T::half() == zero {
+            let parameterized_point = line.p + line.d * t;
+            if parameterized_point.x != point.x
+                || parameterized_point.y != point.y
+                || parameterized_point.z != point.z
+            {
+                return None;
+            }
         }
 
         Some((t, point))
@@ -1314,6 +1374,14 @@ mod tests {
             assert!((point.x - 1.0).abs() < 1.0e-5);
             assert!(point.y.abs() < 1.0e-5);
             assert!(point.z.abs() < 1.0e-5);
+
+            // The returned parameter belongs to the stored, scaled direction,
+            // not the temporary unit direction used internally. Reconstructing
+            // through the public line equation must recover the same hit.
+            let parameterized_point = line.p + line.d * t;
+            assert!((parameterized_point.x - point.x).abs() < 1.0e-5);
+            assert!((parameterized_point.y - point.y).abs() < 1.0e-5);
+            assert!((parameterized_point.z - point.z).abs() < 1.0e-5);
         }
     }
 
@@ -1343,6 +1411,84 @@ mod tests {
             assert!(point.y.abs() < 1.0e-12);
             assert!(point.z.abs() < 1.0e-12);
         }
+    }
+
+    /// Rejects a line hit whose physical point is representable but whose
+    /// original-direction parameter would round a nonzero value down to zero.
+    #[test]
+    fn test_line_plane_intersection_rejects_parameter_underflow() {
+        let plane = Plane::new(
+            &Vector3::new(0.0f32, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+        let smallest_positive = f32::from_bits(1);
+        let maximum_downward_direction = Vector3::new(0.0f32, 0.0, -f32::MAX);
+
+        // This line starts one minimum subnormal above the plane. Its physical
+        // travel is representable, but dividing that distance by `f32::MAX`
+        // rounds the mathematically positive parameter to zero. Returning that
+        // zero beside the plane hit would violate `point = p + d * t`.
+        let offset_line = Line::new(
+            &Vector3::new(0.0f32, 0.0, smallest_positive),
+            &maximum_downward_direction,
+            EPS_F32,
+        )
+        .expect("the maximum finite direction must define a line");
+        assert!(plane.intersect_line(&offset_line, EPS_F32).is_none());
+
+        // A line that genuinely starts on the plane has physical distance zero,
+        // so its exact stored parameter is also zero and remains a valid hit.
+        // This distinguishes a real origin hit from the underflow rejected above.
+        let on_plane_line = Line::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &maximum_downward_direction,
+            EPS_F32,
+        )
+        .expect("the maximum finite direction must define a line");
+        let (t, point) = plane
+            .intersect_line(&on_plane_line, EPS_F32)
+            .expect("an exactly on-plane line origin must remain a valid hit");
+        assert_eq!(t, 0.0);
+        assert_eq!(point.x, on_plane_line.p.x);
+        assert_eq!(point.y, on_plane_line.p.y);
+        assert_eq!(point.z, on_plane_line.p.z);
+
+        // A minimum-subnormal parameter is not inherently invalid. Here the
+        // stored direction times that parameter exactly reproduces the two-
+        // subnormal physical travel, so the smallest positive `t` must survive.
+        let minimum_parameter_line = Line::new(
+            &Vector3::new(0.0f32, 0.0, smallest_positive * 2.0),
+            &Vector3::new(0.0, 0.0, -2.0),
+            EPS_F32,
+        )
+        .expect("the length-two direction must define a line");
+        let (t, point) = plane
+            .intersect_line(&minimum_parameter_line, EPS_F32)
+            .expect("a reconstructable minimum-subnormal parameter must be retained");
+        assert_eq!(t.to_bits(), smallest_positive.to_bits());
+        assert_eq!(point.z, 0.0);
+    }
+
+    /// Rejects a staged-division result at the minimum-subnormal boundary when
+    /// its nonzero parameter cannot reconstruct the physical intersection point.
+    #[test]
+    fn test_line_plane_intersection_rejects_unreconstructable_minimum_parameter() {
+        let smallest_positive = f32::from_bits(1);
+        let direction = Vector3::new(1.6666666f32, 1.3844372, 0.0);
+        let plane = Plane::new(&direction, &Vector3::new(0.0, 0.0, 0.0));
+        let line = Line::new(
+            &Vector3::new(-smallest_positive, 0.0, 0.0),
+            &direction,
+            EPS_F32,
+        )
+        .expect("the ordinary finite direction must define a line");
+
+        // Both safe division orderings round the original-scale parameter up to
+        // the minimum subnormal even though the physical quotient belongs on
+        // the zero side of that boundary. In floating arithmetic, the unit-
+        // direction point and `line.p + line.d * t` then differ in x, so no
+        // self-consistent `(t, point)` tuple can be returned.
+        assert!(plane.intersect_line(&line, EPS_F32).is_none());
     }
 
     /// Verifies that equivalent non-unit plane equations produce the same line
@@ -1466,6 +1612,30 @@ mod tests {
             assert!(point.y.abs() < 1.0e-5);
             assert!(point.z.abs() < 1.0e-5);
         }
+    }
+
+    /// Confirms that the scale-invariance guarantee for a ray is intentionally
+    /// limited to positive scales because a negative scale reverses its domain.
+    #[test]
+    fn test_ray_plane_negative_direction_scale_reverses_ray() {
+        let plane = Plane::new(
+            &Vector3::new(0.0f32, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+        let mut ray = Ray::new(
+            &Vector3::new(0.0f32, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, -1.0),
+            EPS_F32,
+        )
+        .expect("the downward direction must define a valid ray");
+
+        // The original ray reaches the plane in its forward domain. Negating
+        // the public direction points the ray upward, placing that same plane
+        // behind the origin; this must be rejected rather than treated like an
+        // infinite-line rescaling.
+        assert!(ray.intersect_plane(&plane, EPS_F32).is_some());
+        ray.direction = -ray.direction;
+        assert!(ray.intersect_plane(&plane, EPS_F32).is_none());
     }
 
     /// Verifies that malformed direction data fails closed instead of returning

@@ -396,8 +396,10 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
 
     // Convert unit-distance travel back to the parameter of the original
     // direction. Positive direction rescaling therefore changes `t`
-    // inversely while leaving the represented point unchanged.
-    let t = normalized_direction.divide_by_length(tau)?;
+    // inversely while leaving the represented point unchanged. Unlike internal
+    // barycentric coordinates, this returned parameter must not round a
+    // nonzero travel distance to zero: callers need it to reconstruct the hit.
+    let t = normalized_direction.divide_by_length_preserving_nonzero(tau)?;
 
     // Construct the point from the unit direction and physical distance. This
     // avoids multiplying a huge direction by a tiny parameter (or vice versa),
@@ -405,6 +407,22 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
     let point = *start + direction_unit * tau;
     if !is_finite_scalar(t) || !is_finite_vector3(&point) {
         return None;
+    }
+
+    // Staged division is ambiguous only at the zero/minimum-subnormal boundary:
+    // a mathematical quotient on the zero side can double-round to the smallest
+    // nonzero `t`. Keep the common path to one scalar magnitude check. For that
+    // rare boundary alone, verify the API's parameter equation component by
+    // component and reject a tuple whose `t` cannot reproduce its physical point.
+    let zero = <T as Zero>::zero();
+    if t != zero && t.tabs() * T::half() == zero {
+        let parameterized_point = *start + *direction * t;
+        if parameterized_point.x != point.x
+            || parameterized_point.y != point.y
+            || parameterized_point.z != point.z
+        {
+            return None;
+        }
     }
 
     // All geometric, domain, and floating-point validity checks succeeded.
@@ -416,7 +434,8 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
     ///
     /// The triangle boundary is inclusive within the scalar epsilon. Zero,
     /// non-finite, dimensionlessly degenerate, and near-parallel inputs return
-    /// `None`; every successful result has `t >= 0`.
+    /// `None`; every successful result has `t >= 0`. A hit also returns `None`
+    /// if its parameter in the ray's stored direction scale is not representable.
     fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
         // Select the ray domain while sharing all normalized orientation and
         // barycentric arithmetic with the infinite-line implementation.
@@ -435,7 +454,9 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<
     ///
     /// The triangle boundary is inclusive within the scalar epsilon. Zero,
     /// non-finite, dimensionlessly degenerate, and near-parallel inputs return
-    /// `None`; negative and positive line parameters are both accepted.
+    /// `None`; negative and positive line parameters are both accepted. A hit
+    /// also returns `None` if its parameter in the line's stored direction scale
+    /// is not representable.
     fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
         // Select the unbounded line domain while sharing all normalized
         // orientation and barycentric arithmetic with the ray implementation.
@@ -929,6 +950,49 @@ mod tests {
         assert_triangle_direction_scale_invariance(&[1.0e-200f64, 1.0, 1.0e200], 1.0e-12);
     }
 
+    /// Distinguishes an unrepresentable original-direction parameter from a
+    /// reconstructable minimum-subnormal parameter in the public triangle query.
+    #[test]
+    fn test_ray_triangle_intersection_parameter_underflow_contract() {
+        let triangle = Tri3::new([
+            Vector3::new(-1.0f32, -1.0, 0.0),
+            Vector3::new(1.0, -1.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+        let smallest_positive = f32::from_bits(1);
+
+        // Physical travel of one minimum subnormal divided by the maximum
+        // stored direction magnitude rounds to zero. Returning `t = 0` would
+        // place the parameterized ray at its elevated origin instead of the
+        // triangle, so the query must fail rather than return an inconsistent tuple.
+        let mut underflowing_ray = Ray::new(
+            &Vector3::new(0.0f32, 0.0, smallest_positive),
+            &Vector3::new(0.0, 0.0, -1.0),
+            EPS_F32,
+        )
+        .expect("the unit direction must define a ray");
+        underflowing_ray.direction = underflowing_ray.direction * f32::MAX;
+        assert!(underflowing_ray.intersection(&triangle).is_none());
+
+        // A length-two stored direction and two-subnormal physical travel yield
+        // the minimum positive `t` exactly. Its public ray equation reconstructs
+        // the triangle hit, so the exponent-boundary validation must retain it.
+        let mut minimum_parameter_ray = Ray::new(
+            &Vector3::new(0.0f32, 0.0, smallest_positive * 2.0),
+            &Vector3::new(0.0, 0.0, -1.0),
+            EPS_F32,
+        )
+        .expect("the unit direction must define a ray");
+        minimum_parameter_ray.direction = minimum_parameter_ray.direction * 2.0;
+        let (t, point) = minimum_parameter_ray
+            .intersection(&triangle)
+            .expect("a reconstructable minimum-subnormal parameter must be retained");
+        assert_eq!(t.to_bits(), smallest_positive.to_bits());
+        assert_eq!(point.x, 0.0);
+        assert_eq!(point.y, 0.0);
+        assert_eq!(point.z, 0.0);
+    }
+
     /// Regresses the audited small-triangle miss caused by comparing its raw
     /// determinant, `0.0008²`, with a linear f32 epsilon.
     #[test]
@@ -957,6 +1021,39 @@ mod tests {
         assert!((point.x / edge_length - 0.25).abs() <= 2.0e-5);
         assert!((point.y / edge_length - 0.25).abs() <= 2.0e-5);
         assert!((point.z / edge_length).abs() <= 2.0e-5);
+    }
+
+    /// Keeps a valid triangle hit when an internal positive barycentric
+    /// coordinate is too small to remain nonzero in the scalar representation.
+    #[test]
+    fn test_ray_triangle_intersection_accepts_barycentric_underflow_to_boundary() {
+        let smallest_positive = f32::from_bits(1);
+        let a = Vector3::new(0.0f32, 0.0, 0.0);
+        let b = Vector3::new(2.0, 0.0, 0.0);
+        let c = Vector3::new(0.0, 1.0, 0.0);
+        let ray = Ray::new(
+            &Vector3::new(smallest_positive, 0.25, 1.0),
+            &Vector3::new(0.0, 0.0, -1.0),
+            EPS_F32,
+        )
+        .expect("the unit direction must define a ray");
+
+        // The exact x-axis barycentric contribution is positive, but dividing
+        // the minimum subnormal x offset by the length-two edge rounds it to
+        // zero. Zero is an inclusive boundary used only for containment, so it
+        // must not trigger the stricter policy reserved for returned `t`.
+        // Cycling the vertices moves that tiny contribution between `u`, `v`,
+        // and the implicit third coordinate; ordering cannot change the hit.
+        for vertices in [[a, b, c], [b, c, a], [c, a, b]] {
+            let tri = Tri3::new(vertices);
+            let (t, point) = ray
+                .intersection(&tri)
+                .expect("barycentric underflow to an inclusive edge must remain a hit");
+            assert_eq!(t, 1.0);
+            assert_eq!(point.x, smallest_positive);
+            assert_eq!(point.y, 0.25);
+            assert_eq!(point.z, 0.0);
+        }
     }
 
     /// Confirms that translating the complete query does not disturb the

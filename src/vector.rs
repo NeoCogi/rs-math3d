@@ -494,7 +494,10 @@ impl<T: FloatScalar> Normalized3<T> {
     /// divides by `scale` to preserve ratios between similarly tiny values. If
     /// that intermediate overflows, it retries by dividing by the bounded
     /// `scaled_length` first. `None` is returned when `value` is non-finite or
-    /// neither ordering produces a finite quotient.
+    /// neither ordering produces a finite quotient. As with ordinary floating-
+    /// point division, a nonzero quotient below the scalar's representable
+    /// range may round to zero; callers whose result must distinguish that case
+    /// use [`Normalized3::divide_by_length_preserving_nonzero`] instead.
     pub(crate) fn divide_by_length(&self, value: T) -> Option<T> {
         // Reject NaN and infinity before arithmetic so they cannot silently
         // contaminate an otherwise valid geometric query.
@@ -533,6 +536,30 @@ impl<T: FloatScalar> Normalized3<T> {
         }
         let quotient = length_adjusted / self.scale;
         is_finite_scalar(quotient).then_some(quotient)
+    }
+
+    /// Divides by the original vector length without collapsing nonzero to zero.
+    ///
+    /// This stricter form has the same overflow-resistant arithmetic as
+    /// [`Normalized3::divide_by_length`], but returns `None` when a nonzero
+    /// numerator produces zero through underflow. Returned geometric parameters
+    /// use this distinction because `t = 0` means the query started exactly at
+    /// its reported point. An exactly zero numerator remains valid, and division
+    /// by the decomposition's positive length preserves its signed zero.
+    pub(crate) fn divide_by_length_preserving_nonzero(&self, value: T) -> Option<T> {
+        // Perform the shared two-ordering division first so finite overflow
+        // recovery and backend behavior remain identical between both APIs.
+        let quotient = self.divide_by_length(value)?;
+        let zero = <T as Zero>::zero();
+
+        // Distinguish a genuine zero numerator from a nonzero value whose
+        // quotient rounded to either positive or negative zero. The latter is
+        // not a usable original-scale parameter.
+        if value != zero && quotient == zero {
+            return None;
+        }
+
+        Some(quotient)
     }
 }
 
@@ -1143,6 +1170,17 @@ mod tests {
         let smallest = try_normalized3(&Vector3::new(smallest_positive, zero, zero))
             .expect("the smallest positive axis vector must normalize");
         assert!(smallest.divide_by_length(one).is_none());
+
+        // The opposite exponent pairing has a mathematical nonzero quotient
+        // below the scalar's representable range. Returning zero would make a
+        // geometric parameter inconsistent with its separately computed point,
+        // so the helper must report that loss of information as failure.
+        let largest = try_normalized3(&Vector3::new(largest_finite, zero, zero))
+            .expect("the largest finite axis vector must normalize");
+        assert_eq!(largest.divide_by_length(smallest_positive), Some(zero));
+        assert!(largest
+            .divide_by_length_preserving_nonzero(smallest_positive)
+            .is_none());
     }
 
     /// Exercises dimensionless parallel/perpendicular classification for one scalar type.
@@ -1366,6 +1404,39 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
         );
+    }
+
+    /// Verifies that both length-division policies retain the sign of an exact
+    /// zero numerator for each supported floating-point scalar type.
+    #[test]
+    fn test_stable_length_division_preserves_signed_zero() {
+        // Use a non-axis-aligned vector so preservation is checked across both
+        // divisions in the ordinary path, not only its scaled-length-one shortcut.
+        let normalized_f32 = try_normalized3(&Vector3::new(3.0f32, 4.0, 0.0))
+            .expect("the finite nonzero f32 vector must normalize");
+        let negative_zero_f32 = -0.0f32;
+        let divided_f32 = normalized_f32
+            .divide_by_length(negative_zero_f32)
+            .expect("signed zero divided by a positive length must remain finite");
+        let strict_f32 = normalized_f32
+            .divide_by_length_preserving_nonzero(negative_zero_f32)
+            .expect("exact signed zero is valid under the strict policy");
+        assert_eq!(divided_f32.to_bits(), negative_zero_f32.to_bits());
+        assert_eq!(strict_f32.to_bits(), negative_zero_f32.to_bits());
+
+        // Repeat at f64 so backend-independent generic code cannot accidentally
+        // preserve the sign for only one concrete scalar implementation.
+        let normalized_f64 = try_normalized3(&Vector3::new(3.0f64, 4.0, 0.0))
+            .expect("the finite nonzero f64 vector must normalize");
+        let negative_zero_f64 = -0.0f64;
+        let divided_f64 = normalized_f64
+            .divide_by_length(negative_zero_f64)
+            .expect("signed zero divided by a positive length must remain finite");
+        let strict_f64 = normalized_f64
+            .divide_by_length_preserving_nonzero(negative_zero_f64)
+            .expect("exact signed zero is valid under the strict policy");
+        assert_eq!(divided_f64.to_bits(), negative_zero_f64.to_bits());
+        assert_eq!(strict_f64.to_bits(), negative_zero_f64.to_bits());
     }
 
     /// Verifies scale-invariant angular classification for `f32` vectors.

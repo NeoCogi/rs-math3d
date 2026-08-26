@@ -123,7 +123,10 @@
 //!
 //! Intersection points retain their geometric meaning under direction
 //! rescaling. Returned line parameters retain the original equation
-//! `point + direction * t`, so scaling `direction` scales `t` inversely.
+//! `point + direction * t`, so scaling `direction` scales `t` inversely. A
+//! query returns `None` if that original-direction parameter would overflow or
+//! if exponent-boundary rounding cannot produce a parameter consistent with
+//! the separately calculated intersection point.
 //!
 //! ## Modules
 //!

@@ -85,8 +85,15 @@ backend is active.
   root; an uncommon scaled fallback preserves the same behavior when those squares underflow.
 - Rescaling an already represented `Line`'s stored direction does not change its line/plane or
   line/triangle intersection point, but the returned `t` remains tied to the parameterization
-  `p + d * t`; multiplying `d` by a nonzero scale therefore divides `t` by the same scale. `Ray`
-  intersection points likewise do not depend on a positive rescaling of the stored direction.
+  `p + d * t`; multiplying `d` by a nonzero scale therefore divides every representable `t` by
+  the same scale. `Ray` intersection points likewise do not depend on a positive rescaling of the
+  stored direction.
+  Plane intersections solve physical travel with a temporary unit direction, reconstruct the
+  point from that bounded representation, and convert travel back to the stored line's `t` only
+  when the API returns a line parameter. A negative direction scale reverses a ray rather than
+  merely reparameterizing it. If a line's original-direction parameter would overflow, or if a
+  mathematically nonzero parameter would underflow to zero, the query returns `None` instead of
+  returning a parameter that cannot reconstruct the reported point.
 - `Ray`/`Tri3` intersection is a true ray query: hits behind the ray origin are rejected.
   Use the corresponding `Line`/`Tri3` intersection when you want the infinite-line result.
 - `transforms::decompose_affine` represents nonsingular affine matrices as translation,

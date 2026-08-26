@@ -74,6 +74,16 @@ backend is active.
 
 ## Behavior Notes
 
+- Orientation tolerances in 3D intersection and plane-normal routines are dimensionless and must be
+  finite values in `0..=1`. Parallel tests compare `epsilon` with `|sin(theta)|`, while
+  line/ray-to-plane tests compare it with `|cos(theta)|`. Temporary max-component normalization
+  keeps these decisions stable when valid directions, triangle offsets, or plane-spanning vectors
+  are rescaled, including magnitudes whose raw squared lengths would overflow or underflow. Zero,
+  non-finite operands, and invalid tolerances are rejected.
+- Rescaling an already represented `Line`'s stored direction does not change its line/plane or
+  line/triangle intersection point, but the returned `t` remains tied to the parameterization
+  `p + d * t`; multiplying `d` by a nonzero scale therefore divides `t` by the same scale. `Ray`
+  intersection points likewise do not depend on a positive rescaling of the stored direction.
 - `Ray`/`Tri3` intersection is a true ray query: hits behind the ray origin are rejected.
   Use the corresponding `Line`/`Tri3` intersection when you want the infinite-line result.
 - `transforms::decompose_affine` represents nonsingular affine matrices as translation,

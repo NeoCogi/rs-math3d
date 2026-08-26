@@ -39,6 +39,11 @@
 //! variants. The unchecked variants assume non-degenerate input and panic when
 //! that precondition is violated.
 //!
+//! Intersection routines interpret their epsilon as a dimensionless angular
+//! tolerance when deciding whether directions are parallel or perpendicular.
+//! They normalize temporary working vectors with component scaling, so changing
+//! a valid line's direction magnitude does not change its geometric result.
+//!
 //! # Examples
 //!
 //! ```
@@ -340,47 +345,65 @@ impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
     }
 }
 
-/// Finds the shortest segment connecting two 3D lines.
+/// Finds the shortest segment connecting two infinite 3D lines.
 ///
-/// Returns `None` if the lines are parallel (within epsilon tolerance).
+/// `epsilon` is a finite, dimensionless angular tolerance in `0..=1`. The
+/// function returns `None` when the tolerance is invalid, either direction is
+/// zero or non-finite, or the sine of the angle between the directions is at
+/// most `epsilon`.
+///
+/// Direction vectors are normalized only in temporary calculations. Their
+/// stored magnitudes and parameterizations are not changed, and independently
+/// rescaling either direction does not change the returned segment.
 pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
     line0: &Line<T, Vector3<T>>,
     line1: &Line<T, Vector3<T>>,
     epsilon: T,
 ) -> Option<Segment<T, Vector3<T>>> {
-    let s0 = line0.p;
-    let s1 = line1.p;
+    // Normalize through max-component scaling so valid very small or very
+    // large directions do not underflow or overflow during classification.
+    let direction0 = try_normalized3(&line0.d)?;
+    let direction1 = try_normalized3(&line1.d)?;
 
-    let d1 = line1.d;
-    let d0 = line0.d;
-
-    let eps_sq = epsilon * epsilon;
-    let d0_len_sq = Vector3::dot(&d0, &d0);
-    let d1_len_sq = Vector3::dot(&d1, &d1);
-    if d0_len_sq <= eps_sq || d1_len_sq <= eps_sq {
+    // Parallelism is an angular property. Comparing the raw cross-product
+    // magnitude to epsilon would attach arbitrary units to this decision.
+    if try_nearly_parallel3(&line0.d, &line1.d, epsilon)? {
         return None;
     }
 
-    let cross = Vector3::cross(&d1, &d0);
-    let cross_len_sq = Vector3::dot(&cross, &cross);
-    if cross_len_sq <= eps_sq {
+    let unit0 = direction0.unit();
+    let unit1 = direction1.unit();
+    let separation = line0.p - line1.p;
+
+    // For unit directions, the Gram determinant is |u0 x u1|^2. Computing it
+    // from the cross product avoids the cancellation in 1 - dot(u0, u1)^2 for
+    // nearly parallel lines.
+    let cross = Vector3::cross(&unit0, &unit1);
+    let denominator = Vector3::dot(&cross, &cross);
+    if !is_finite_scalar(denominator) || denominator <= <T as Zero>::zero() {
         return None;
     }
 
-    let normal = Vector3::normalize(&cross);
-    let n0 = Vector3::normalize(&Vector3::cross(&normal, &d0));
-    let n1 = Vector3::normalize(&Vector3::cross(&normal, &d1));
-
-    let plane0 = Plane::try_new(&n0, &s0, epsilon)?;
-    let plane1 = Plane::try_new(&n1, &s1, epsilon)?;
-
-    let p1 = plane0.intersect_line(line1, epsilon);
-    let p0 = plane1.intersect_line(line0, epsilon);
-
-    match (p0, p1) {
-        (Some((_, s)), Some((_, e))) => Some(Segment::new(&s, &e)),
-        _ => None,
+    // Solve the two normal equations in distance-along-unit-direction space.
+    // These parameters are independent of the magnitudes stored in line.d.
+    let direction_dot = Vector3::dot(&unit0, &unit1);
+    let projection0 = Vector3::dot(&unit0, &separation);
+    let projection1 = Vector3::dot(&unit1, &separation);
+    let distance0 = (direction_dot * projection1 - projection0) / denominator;
+    let distance1 = (projection1 - direction_dot * projection0) / denominator;
+    if !is_finite_scalar(distance0) || !is_finite_scalar(distance1) {
+        return None;
     }
+
+    // Reconstruct the closest point on each line from unit directions. This
+    // avoids multiplying an extreme stored direction by an inverse-scale t.
+    let start = line0.p + unit0 * distance0;
+    let end = line1.p + unit1 * distance1;
+    if !is_finite_vector3(&start) || !is_finite_vector3(&end) {
+        return None;
+    }
+
+    Some(Segment::new(&start, &end))
 }
 
 /// A line segment with defined start and end points.
@@ -477,22 +500,47 @@ impl<T: FloatScalar, V: FloatVector<T>> Ray<T, V> {
 impl<T: FloatScalar> Ray<T, Vector3<T>> {
     /// Computes ray-plane intersection.
     ///
-    /// Returns the intersection point, or `None` if the ray doesn't hit the plane
-    /// (parallel or pointing away).
+    /// Returns the intersection point, or `None` if the ray does not hit the
+    /// plane, either because it is parallel, points away, or contains invalid
+    /// non-finite data.
     ///
-    /// Returns `None` if the ray is parallel to the plane within `epsilon`.
+    /// `epsilon` is a dimensionless angular tolerance in the inclusive range
+    /// `0..=1`. The ray is treated as parallel when the absolute cosine between
+    /// the plane normal and ray direction is at most this value. Positive
+    /// rescaling of the stored direction therefore does not change the hit.
     pub fn intersect_plane(&self, p: &Plane<T>, epsilon: T) -> Option<Vector3<T>> {
-        let n = p.normal();
-        let denom = Vector3::dot(&n, &self.direction);
-        if denom.tabs() <= epsilon {
+        let normal = p.normal();
+
+        // Robust temporary normalization keeps the angular decision and later
+        // arithmetic independent of either vector's stored magnitude.
+        let normal_metric = try_normalized3(&normal)?;
+        let direction_metric = try_normalized3(&self.direction)?;
+        if try_nearly_perpendicular3(&normal, &self.direction, epsilon)? {
             return None;
         }
-        let t: T = -(p.d + Vector3::dot(&n, &self.start)) / denom;
-        if t < <T as Zero>::zero() {
-            None
-        } else {
-            Some(self.direction * t + self.start)
+
+        let unit_normal = normal_metric.unit();
+        let unit_direction = direction_metric.unit();
+
+        // Divide the complete plane equation by |normal|. Plane constructors
+        // currently store a unit normal, but keeping this general also handles
+        // internally constructed coefficient-scaled planes consistently.
+        let unit_constant = normal_metric.divide_by_length(p.constant())?;
+        let numerator = unit_constant + Vector3::dot(&unit_normal, &self.start);
+        let denominator = Vector3::dot(&unit_normal, &unit_direction);
+        if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
+            return None;
         }
+
+        // `distance` is physical travel along the unit ray direction, so its
+        // sign is unaffected by positive rescaling of the stored direction.
+        let distance = -numerator / denominator;
+        if !is_finite_scalar(distance) || distance < <T as Zero>::zero() {
+            return None;
+        }
+
+        let point = self.start + unit_direction * distance;
+        is_finite_vector3(&point).then_some(point)
     }
 }
 
@@ -624,13 +672,19 @@ impl<T: FloatScalar> Plane<T> {
 
     /// Creates a plane from triangle vertices.
     ///
-    /// Returns `None` if the triangle is degenerate.
+    /// Returns `None` if either edge is zero or non-finite, or if the sine of
+    /// the angle between the edges is at most the dimensionless `epsilon`
+    /// tolerance, which must be finite and in `0..=1`. Uniformly scaling
+    /// representable triangle offsets does not affect this degeneracy decision
+    /// or the resulting unit normal. Invalid tolerances also return `None`.
     pub fn try_from_tri(
         v0: &Vector3<T>,
         v1: &Vector3<T>,
         v2: &Vector3<T>,
         epsilon: T,
     ) -> Option<Self> {
+        // Build the normal through the shared scale-stable edge-orientation
+        // path, then anchor the normalized plane equation at the first vertex.
         let n = try_tri_normal(v0, v1, v2, epsilon)?;
         Self::try_new(&n, v0, epsilon)
     }
@@ -649,7 +703,10 @@ impl<T: FloatScalar> Plane<T> {
 
     /// Creates a plane from quad vertices.
     ///
-    /// Returns `None` if the quad diagonals do not define a plane.
+    /// Returns `None` if either diagonal is zero or non-finite, or if their
+    /// sine-angle magnitude is at most the dimensionless `epsilon` tolerance.
+    /// The tolerance must be finite and in `0..=1`; invalid values return
+    /// `None`. Diagonal magnitudes do not affect this decision.
     ///
     /// The plane normal is computed from the quad diagonals and anchored at the
     /// vertex centroid. This is a representative plane for the quad and does
@@ -662,35 +719,73 @@ impl<T: FloatScalar> Plane<T> {
         v3: &Vector3<T>,
         epsilon: T,
     ) -> Option<Self> {
+        // Derive a scale-stable unit normal from the diagonals before choosing
+        // the centroid used to anchor the representative plane equation.
         let n = try_quad_normal(v0, v1, v2, v3, epsilon)?;
         let c = (*v0 + *v1 + *v2 + *v3) * T::quarter();
         Self::try_new(&n, &c, epsilon)
     }
 
-    /// Intersects the plane with a ray.
+    /// Computes the intersection of this plane with a ray.
+    ///
+    /// Returns the forward intersection point, including the ray origin, or
+    /// `None` for a parallel ray, a hit behind the origin, a zero direction, or
+    /// non-finite data. `epsilon` is the inclusive, dimensionless upper bound
+    /// on the absolute cosine between the plane normal and ray direction and
+    /// must be finite and in `0..=1`. Positive direction rescaling does not
+    /// change the returned point.
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+        // Keep one implementation of ray-domain and angular-tolerance policy;
+        // the ray owns the actual normalized intersection calculation.
         r.intersect_plane(self, epsilon)
     }
 
-    /// Computes line-plane intersection.
+    /// Computes the intersection of this plane with an infinite line.
     ///
-    /// Returns the parameter t and intersection point, or `None` if parallel.
+    /// Returns the line's original parameter `t` and the intersection point, or
+    /// `None` for parallel, zero-direction, or non-finite input.
+    ///
+    /// `epsilon` is a dimensionless angular tolerance in `0..=1`. Parallelism
+    /// is tested from normalized working vectors, so rescaling `line.d` leaves
+    /// the point unchanged and inversely rescales the returned `t`.
     pub fn intersect_line(
         &self,
         line: &Line<T, Vector3<T>>,
         epsilon: T,
     ) -> Option<(T, Vector3<T>)> {
-        let s = line.p;
-        let dir = line.d;
-        let n = self.normal();
+        let normal = self.normal();
 
-        let denom = Vector3::dot(&n, &dir);
-        if denom.tabs() < epsilon {
-            None
-        } else {
-            let t = -(self.constant() + Vector3::dot(&n, &s)) / denom;
-            Some((t, dir * t + s))
+        // Normalize without forming raw squared lengths, which may overflow or
+        // underflow even when both geometric directions are valid.
+        let normal_metric = try_normalized3(&normal)?;
+        let direction_metric = try_normalized3(&line.d)?;
+        if try_nearly_perpendicular3(&normal, &line.d, epsilon)? {
+            return None;
         }
+
+        let unit_normal = normal_metric.unit();
+        let unit_direction = direction_metric.unit();
+        let unit_constant = normal_metric.divide_by_length(self.constant())?;
+        let numerator = unit_constant + Vector3::dot(&unit_normal, &line.p);
+        let denominator = Vector3::dot(&unit_normal, &unit_direction);
+        if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
+            return None;
+        }
+
+        // Solve first in physical distance along a unit direction. Dividing by
+        // the stored direction length then restores the caller's original line
+        // parameterization without using an overflow-prone raw length.
+        let distance = -numerator / denominator;
+        if !is_finite_scalar(distance) {
+            return None;
+        }
+        let t = direction_metric.divide_by_length(distance)?;
+        let point = line.p + unit_direction * distance;
+        if !is_finite_vector3(&point) {
+            return None;
+        }
+
+        Some((t, point))
     }
 }
 
@@ -726,37 +821,70 @@ impl<T: FloatScalar> ParametricPlane<T> {
 
     /// Converts the parametric plane to an infinite plane.
     ///
-    /// Returns `None` if the axes are too small or parallel.
+    /// Returns `None` if either axis is zero or non-finite, or if the axes are
+    /// parallel within the dimensionless angular `epsilon` tolerance. The
+    /// tolerance must be finite and in `0..=1`; invalid values return `None`.
     pub fn try_plane(&self, epsilon: T) -> Option<Plane<T>> {
+        // Build the normal with the same scale-invariant classification used by
+        // intersection routines, then anchor the resulting plane at the center.
         let normal = self.try_normal(epsilon)?;
         Plane::try_new(&normal, &self.center, epsilon)
     }
 
-    /// Computes the normal vector (cross product of axes).
+    /// Computes the unit normal defined by the two plane axes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either axis is zero or non-finite, or if their sine-angle
+    /// magnitude is at most [`FloatScalar::epsilon`]. Use
+    /// [`ParametricPlane::try_normal`] for checked input.
     pub fn normal(&self) -> Vector3<T> {
+        // The infallible convenience API applies the scalar's default angular
+        // tolerance and makes its invalid-axis precondition explicit by panic.
         self.try_normal(T::epsilon())
             .expect("parametric plane axes must span a plane")
     }
 
-    /// Computes the normal vector (cross product of axes).
+    /// Computes the unit normal defined by the two plane axes.
     ///
-    /// Returns `None` if the axes are too small or parallel.
+    /// Returns `None` if either axis is zero or non-finite, or if the sine of
+    /// their angle is at most the dimensionless `epsilon` tolerance. The
+    /// tolerance must be finite and in `0..=1`; invalid values return `None`.
+    /// Axis magnitudes do not affect the returned decision or unit normal.
     pub fn try_normal(&self, epsilon: T) -> Option<Vector3<T>> {
-        Vector3::cross(&self.x_axis, &self.y_axis).try_normalize(epsilon)
+        // Delegate to the shared spanning-vector path so tiny and huge but
+        // well-conditioned axes receive identical treatment.
+        try_normal_from_spanning_vectors(&self.x_axis, &self.y_axis, epsilon)
     }
 
-    /// Intersects the plane with a ray.
+    /// Computes the intersection of this parametric plane with a ray.
+    ///
+    /// Returns the forward intersection point or `None` when the axes do not
+    /// define a plane, the ray is parallel or points away, or any relevant data
+    /// is non-finite. `epsilon` must be finite and in `0..=1` and is the
+    /// dimensionless angular tolerance for both the axis and ray/normal
+    /// orientation tests.
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
+        // Validate and canonicalize the spanning axes once, then reuse the
+        // ordinary plane/ray query and its forward-ray semantics.
         let plane = self.try_plane(epsilon)?;
         r.intersect_plane(&plane, epsilon)
     }
 
-    /// Intersects the plane with a line.
+    /// Computes the intersection of this parametric plane with an infinite line.
+    ///
+    /// Returns the line's original parameter `t` and intersection point, or
+    /// `None` when the axes do not define a plane, the line is parallel, or any
+    /// relevant data is non-finite. `epsilon` is a finite, dimensionless angular
+    /// tolerance in `0..=1`. Rescaling the line direction leaves the point
+    /// fixed and rescales `t` inversely.
     pub fn intersect_line(
         &self,
         line: &Line<T, Vector3<T>>,
         epsilon: T,
     ) -> Option<(T, Vector3<T>)> {
+        // Convert through the checked unit-normal representation before
+        // delegating to the single line/plane intersection implementation.
         let plane = self.try_plane(epsilon)?;
         plane.intersect_line(line, epsilon)
     }
@@ -783,44 +911,68 @@ impl<T: FloatScalar> ParametricPlane<T> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Computes the normal vector of a triangle.
+/// Computes the unit normal of a triangle.
+///
+/// The result depends on edge orientation, not triangle size.
+///
+/// # Panics
+///
+/// Panics if either edge is zero or non-finite, or if the edges are parallel
+/// within [`FloatScalar::epsilon`]. Use [`try_tri_normal`] for checked input.
 ////////////////////////////////////////////////////////////////////////////////
 pub fn tri_normal<T: FloatScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
+    // Apply the scalar's default dimensionless tolerance while keeping the
+    // checked implementation authoritative for orientation and normalization.
     try_tri_normal(v0, v1, v2, T::epsilon()).expect("triangle must be non-degenerate")
 }
 
-/// Computes the normal vector of a triangle.
+/// Computes the unit normal of a triangle.
 ///
-/// Returns `None` if the triangle is degenerate.
+/// Returns `None` if either edge is zero or non-finite, or if the sine of the
+/// angle between the edges is at most the dimensionless `epsilon` tolerance.
+/// The tolerance must be finite and in `0..=1`; invalid values return `None`.
+/// Edge magnitudes do not affect the decision or returned unit normal.
 pub fn try_tri_normal<T: FloatScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
     epsilon: T,
 ) -> Option<Vector3<T>> {
+    // Translate vertices into edge directions before applying a dimensionless
+    // shape test; the absolute triangle area is not a degeneracy criterion.
     let v10 = *v1 - *v0;
     let v20 = *v2 - *v0;
-    Vector3::cross(&v10, &v20).try_normalize(epsilon)
+    try_normal_from_spanning_vectors(&v10, &v20, epsilon)
 }
 
-/// Computes the normal vector of a quadrilateral.
+/// Computes the diagonal-derived unit normal of a quadrilateral.
 ///
 /// Uses the cross product of the two diagonals for a more stable result.
 ///
 /// For non-coplanar quads this is a representative diagonal-based normal, not a
 /// proof that the four vertices lie on a single plane.
+///
+/// # Panics
+///
+/// Panics if either diagonal is zero or non-finite, or if the diagonals are
+/// parallel within [`FloatScalar::epsilon`]. Use [`try_quad_normal`] for
+/// checked input.
 pub fn quad_normal<T: FloatScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
     v3: &Vector3<T>,
 ) -> Vector3<T> {
+    // Apply the scalar's default dimensionless tolerance while keeping the
+    // checked diagonal-orientation implementation authoritative.
     try_quad_normal(v0, v1, v2, v3, T::epsilon()).expect("quad must be non-degenerate")
 }
 
-/// Computes the normal vector of a quadrilateral.
+/// Computes the diagonal-derived unit normal of a quadrilateral.
 ///
-/// Returns `None` if the quad diagonals are too small or parallel.
+/// Returns `None` if either diagonal is zero or non-finite, or if the diagonals
+/// are parallel within the dimensionless angular `epsilon` tolerance. The
+/// tolerance must be finite and in `0..=1`; invalid values return `None`.
 pub fn try_quad_normal<T: FloatScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
@@ -828,9 +980,37 @@ pub fn try_quad_normal<T: FloatScalar>(
     v3: &Vector3<T>,
     epsilon: T,
 ) -> Option<Vector3<T>> {
+    // Diagonal magnitudes depend on the caller's coordinate scale, so only
+    // their validity and relative orientation participate in this decision.
     let v20 = *v2 - *v0;
     let v31 = *v3 - *v1;
-    Vector3::cross(&v20, &v31).try_normalize(epsilon)
+    try_normal_from_spanning_vectors(&v20, &v31, epsilon)
+}
+
+/// Produces a unit normal from two vectors that should span a plane.
+///
+/// `epsilon` is a dimensionless angular tolerance. The helper rejects zero or
+/// non-finite vectors and treats vectors whose sine-angle magnitude is at most
+/// `epsilon` as parallel. It uses only normalized temporary values, preventing
+/// the raw cross product from overflowing or underflowing with input scale.
+fn try_normal_from_spanning_vectors<T: FloatScalar>(
+    left: &Vector3<T>,
+    right: &Vector3<T>,
+    epsilon: T,
+) -> Option<Vector3<T>> {
+    // Classify the source vectors before dividing by their cross product. The
+    // Option result also rejects invalid vectors and invalid epsilon values.
+    if try_nearly_parallel3(left, right, epsilon)? {
+        return None;
+    }
+
+    // Cross unit vectors so every intermediate stays bounded. A second robust
+    // normalization removes the sine-angle magnitude and returns only the
+    // orientation required by plane constructors.
+    let left_unit = try_normalized3(left)?.unit();
+    let right_unit = try_normalized3(right)?.unit();
+    let cross = Vector3::cross(&left_unit, &right_unit);
+    Some(try_normalized3(&cross)?.unit())
 }
 
 #[cfg(test)]
@@ -1059,6 +1239,165 @@ mod tests {
         assert!(shortest_segment3d_between_lines3d(&l0, &l1, EPS_F32).is_none());
     }
 
+    /// Verifies that closest-line classification depends on direction angle,
+    /// not on either line's arbitrary parameter scale.
+    #[test]
+    fn test_shortest_segment_is_invariant_to_direction_scale() {
+        // These skew perpendicular lines have nonzero closest-point parameters
+        // and endpoints separated by one unit along Z. The first scale pair
+        // reproduces the former 2*epsilon regression; the others exercise
+        // extreme and negative line parameterizations.
+        for (scale0, scale1) in [
+            (EPS_F32 * 2.0, EPS_F32 * 2.0),
+            (1.0e-18, 1.0e18),
+            (-1.0e18, 1.0e-18),
+        ] {
+            let mut line0 = Line::new(
+                &Vector3::new(0.0f32, 0.0, 0.0),
+                &Vector3::new(1.0, 0.0, 0.0),
+                EPS_F32,
+            )
+            .expect("base line should be valid");
+            let mut line1 = Line::new(
+                &Vector3::new(1.0f32, 1.0, 1.0),
+                &Vector3::new(0.0, 1.0, 0.0),
+                EPS_F32,
+            )
+            .expect("base line should be valid");
+            line0.d = line0.d * scale0;
+            line1.d = line1.d * scale1;
+
+            let segment = shortest_segment3d_between_lines3d(&line0, &line1, EPS_F32)
+                .expect("perpendicular lines must have a unique closest segment");
+            assert!((segment.s.x - 1.0).abs() < 1.0e-5);
+            assert!(segment.s.y.abs() < 1.0e-5);
+            assert!(segment.s.z.abs() < 1.0e-5);
+            assert!((segment.e.x - 1.0).abs() < 1.0e-5);
+            assert!(segment.e.y.abs() < 1.0e-5);
+            assert!((segment.e.z - 1.0).abs() < 1.0e-5);
+        }
+    }
+
+    /// Checks that line-plane points remain fixed while the line parameter
+    /// changes inversely with direction magnitude.
+    #[test]
+    fn test_line_plane_intersection_is_scale_invariant() {
+        let plane = Plane::new(
+            &Vector3::new(0.0f32, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+
+        // Every direction describes the same infinite line. The geometric hit
+        // is (1, 0, 0), while t*scale remains the base parameter 1.
+        for scale in [1.0e-18f32, 1.0, 1.0e18, -1.0e18] {
+            let mut line = Line::new(
+                &Vector3::new(0.0f32, 0.0, 1.0),
+                &Vector3::new(1.0, 0.0, -1.0),
+                EPS_F32,
+            )
+            .expect("base line should be valid");
+            line.d = line.d * scale;
+
+            let (t, point) = plane
+                .intersect_line(&line, EPS_F32)
+                .expect("non-parallel line should intersect the plane");
+            assert!((t * scale - 1.0).abs() < 1.0e-5);
+            assert!((point.x - 1.0).abs() < 1.0e-5);
+            assert!(point.y.abs() < 1.0e-5);
+            assert!(point.z.abs() < 1.0e-5);
+        }
+    }
+
+    /// Exercises the same line-parameter rescaling contract at f64 exponent
+    /// ranges that would overflow a raw squared-length calculation.
+    #[test]
+    fn test_line_plane_intersection_extreme_f64_scales() {
+        let plane = Plane::new(
+            &Vector3::new(0.0f64, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+
+        for scale in [1.0e-150f64, 1.0e150] {
+            let mut line = Line::new(
+                &Vector3::new(0.0f64, 0.0, 1.0),
+                &Vector3::new(1.0, 0.0, -1.0),
+                EPS_F64,
+            )
+            .expect("base line should be valid");
+            line.d = line.d * scale;
+
+            let (t, point) = plane
+                .intersect_line(&line, EPS_F64)
+                .expect("non-parallel line should intersect the plane");
+            assert!((t * scale - 1.0).abs() < 1.0e-12);
+            assert!((point.x - 1.0).abs() < 1.0e-12);
+            assert!(point.y.abs() < 1.0e-12);
+            assert!(point.z.abs() < 1.0e-12);
+        }
+    }
+
+    /// Verifies that equivalent non-unit plane equations produce the same line
+    /// intersection, including when every coefficient changes sign.
+    #[test]
+    fn test_line_plane_intersection_is_invariant_to_coefficient_scale() {
+        // Both equations describe z = 2. Constructing them directly is possible
+        // inside this module and exercises the general coefficient path that the
+        // public normalized constructors normally make invisible.
+        let plane = Plane {
+            a: 0.0f32,
+            b: 0.0,
+            c: 2.0,
+            d: -4.0,
+        };
+        let negative_scaled_plane = Plane {
+            a: 0.0f32,
+            b: 0.0,
+            c: -6.0,
+            d: 12.0,
+        };
+        let line = Line::new(
+            &Vector3::new(1.0f32, 2.0, 5.0),
+            &Vector3::new(2.0, 0.0, -3.0),
+            EPS_F32,
+        )
+        .expect("the nonzero direction must define a line");
+
+        // The original line equation reaches (3, 2, 2) at t = 1. Scaling all
+        // plane coefficients cannot change either the parameter or the point.
+        for candidate in [plane, negative_scaled_plane] {
+            let (t, point) = candidate
+                .intersect_line(&line, EPS_F32)
+                .expect("the line must intersect either plane representation");
+            assert!((t - 1.0).abs() < 1.0e-5);
+            assert!((point.x - 3.0).abs() < 1.0e-5);
+            assert!((point.y - 2.0).abs() < 1.0e-5);
+            assert!((point.z - 2.0).abs() < 1.0e-5);
+        }
+    }
+
+    /// Ensures angular parallelism has one answer for every positive scaling of
+    /// an otherwise identical line direction.
+    #[test]
+    fn test_line_plane_near_parallel_decision_is_scale_invariant() {
+        let plane = Plane::new(
+            &Vector3::new(0.0f32, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+        let base_direction = Vector3::new(1.0f32, 0.0, -EPS_F32 * 0.5);
+
+        // The angle is inside the tolerance band. Multiplying the full
+        // direction changes no geometry and must not turn the miss into a hit.
+        for scale in [1.0f32, 4.0, 1.0e12] {
+            let line = Line::new(
+                &Vector3::new(0.0f32, 0.0, 1.0),
+                &(base_direction * scale),
+                EPS_F32,
+            )
+            .expect("direction length should pass constructor validation");
+            assert!(plane.intersect_line(&line, EPS_F32).is_none());
+        }
+    }
+
     #[test]
     fn test_ray_intersect_plane_parallel() {
         let ray = Ray::new(
@@ -1089,6 +1428,59 @@ mod tests {
         );
         let hit = ray.intersect_plane(&plane, EPS_F32).expect("should hit");
         assert!(hit.y.abs() < 0.001);
+    }
+
+    /// Confirms that ray-plane intersection uses direction rather than stored
+    /// direction magnitude after construction.
+    #[test]
+    fn test_ray_plane_intersection_is_scale_invariant() {
+        let plane = Plane::new(
+            &Vector3::new(0.0f32, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+
+        // Mutating the public direction field models callers that retain the
+        // same ray geometry but choose a different positive parameter scale.
+        for scale in [1.0e-18f32, 1.0, 1.0e18] {
+            let mut ray = Ray::new(
+                &Vector3::new(0.0f32, 0.0, 1.0),
+                &Vector3::new(1.0, 0.0, -1.0),
+                EPS_F32,
+            )
+            .expect("base ray should be valid");
+            ray.direction = ray.direction * scale;
+
+            let point = ray
+                .intersect_plane(&plane, EPS_F32)
+                .expect("forward ray should intersect the plane");
+            assert!((point.x - 1.0).abs() < 1.0e-5);
+            assert!(point.y.abs() < 1.0e-5);
+            assert!(point.z.abs() < 1.0e-5);
+        }
+    }
+
+    /// Verifies that malformed direction data fails closed instead of returning
+    /// an intersection containing NaN or infinity.
+    #[test]
+    fn test_plane_intersections_reject_non_finite_directions() {
+        let plane = Plane::new(
+            &Vector3::new(0.0f32, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, 0.0),
+        );
+        let mut line = Line::new(
+            &Vector3::new(0.0f32, 0.0, 1.0),
+            &Vector3::new(0.0, 0.0, -1.0),
+            EPS_F32,
+        )
+        .expect("base line should be valid");
+        let mut ray = Ray::new(&line.p, &line.d, EPS_F32).expect("base ray should be valid");
+
+        // Each invalid component must be detected before orientation or division
+        // can turn it into an apparently successful result.
+        line.d.x = f32::NAN;
+        ray.direction.z = f32::INFINITY;
+        assert!(plane.intersect_line(&line, EPS_F32).is_none());
+        assert!(ray.intersect_plane(&plane, EPS_F32).is_none());
     }
 
     #[test]
@@ -1196,5 +1588,35 @@ mod tests {
         );
         assert!(plane.try_normal(EPS_F32).is_none());
         assert!(plane.try_plane(EPS_F32).is_none());
+    }
+
+    /// Checks that plane-producing cross products use axis orientation rather
+    /// than raw area-like magnitudes.
+    #[test]
+    fn test_cross_derived_normals_are_scale_invariant() {
+        let tiny = 1.0e-18f32;
+
+        // The old cross-then-length-squared path underflowed for these vectors,
+        // although they form a perfectly conditioned right angle.
+        let triangle_normal = try_tri_normal(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(tiny, 0.0, 0.0),
+            &Vector3::new(0.0, tiny, 0.0),
+            EPS_F32,
+        )
+        .expect("tiny right triangle should have a valid normal");
+        assert!(triangle_normal.x.abs() < 1.0e-5);
+        assert!(triangle_normal.y.abs() < 1.0e-5);
+        assert!((triangle_normal.z - 1.0).abs() < 1.0e-5);
+
+        let parametric = ParametricPlane::new(
+            &Vector3::new(0.0f32, 0.0, 0.0),
+            &Vector3::new(tiny, 0.0, 0.0),
+            &Vector3::new(0.0, tiny, 0.0),
+        );
+        let normal = parametric
+            .try_normal(EPS_F32)
+            .expect("tiny perpendicular axes should span a plane");
+        assert!((normal.z - 1.0).abs() < 1.0e-5);
     }
 }

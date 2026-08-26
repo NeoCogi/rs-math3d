@@ -30,6 +30,14 @@
 //! Boolean intersection tests are boundary-inclusive unless stated otherwise:
 //! touching counts as intersecting.
 //!
+//! Line/ray-to-triangle orientation checks use a dimensionless angular
+//! tolerance. Triangle edges and query directions are normalized temporarily
+//! with max-component scaling, so the parallelism decision is not coupled to
+//! triangle area or direction magnitude. Positive rescaling of a finite,
+//! nonzero stored direction preserves a ray's hit, while nonzero rescaling of a
+//! line direction preserves its hit. Returned `t` values continue to
+//! parameterize the original stored direction.
+//!
 //! The `Box3`/`Ray` query uses a slab-interval test. For ray directions that are
 //! parallel to a slab plane, the implementation checks whether the ray origin is
 //! already inside that slab instead of relying on IEEE `0/0` behaviour.
@@ -235,18 +243,37 @@ impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
     }
 }
 
+/// Selects the parameter-domain rule applied by the shared triangle query.
 ///
-/// Ray/Line-Triangle Intersection Test Routines
-/// Different optimizations of my and Ben Trumbore's
-/// code from journals of graphics tools (JGT)
-/// <http://www.acm.org/jgt/>
-/// by Tomas Moller, May 2000
-///
+/// Lines extend through their origin in both directions, whereas rays include
+/// only points at non-negative parameters. Keeping this distinction explicit
+/// lets the arithmetic and barycentric rules remain identical for both public
+/// [`Intersection`] implementations.
 enum TriangleIntersectionKind {
+    /// Restrict the result to the forward half-line, including its origin.
     Ray,
+    /// Accept intersections on either side of the infinite line's origin.
     Line,
 }
 
+/// Intersects a parameterized line or ray with a triangle.
+///
+/// This is a normalized form of Tomas Möller and Ben Trumbore's
+/// Möller–Trumbore algorithm. The direction and both triangle edges are
+/// normalized with overflow-safe component scaling before orientation decisions
+/// are made. Consequently, multiplying a valid direction or all triangle
+/// offsets by a finite, positive scale does not turn the raw determinant into
+/// an absolute length threshold.
+///
+/// `epsilon` is dimensionless here: it is both the angular tolerance used to
+/// reject parallel/degenerate orientations and the tolerance around the
+/// triangle's barycentric boundary. The returned `t` still parameterizes the
+/// original, unnormalized `direction`, preserving [`Line`] semantics.
+///
+/// `None` is returned for a miss, a degenerate or parallel configuration, or
+/// any non-finite input, intermediate value, or result. Treating invalid
+/// floating-point data as a miss prevents a `Some((NaN, ...))` result from
+/// escaping through IEEE comparisons, which are false for NaN.
 fn triangle_intersection_from_point_dir<T: FloatScalar>(
     start: &Vector3<T>,
     direction: &Vector3<T>,
@@ -254,45 +281,131 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
     epsilon: T,
     kind: TriangleIntersectionKind,
 ) -> Option<(T, Vector3<T>)> {
+    // Fetch and name each vertex once so all following vectors share `v0` as
+    // their origin, matching the usual Möller–Trumbore derivation.
     let verts = tri.vertices();
     let v0 = verts[0];
     let v1 = verts[1];
     let v2 = verts[2];
+
+    // Subtracting finite but extremely separated coordinates can itself
+    // overflow. The normalization helpers below reject such a result instead
+    // of allowing an infinite edge to contaminate the intersection tuple.
     let edge1 = v1 - v0;
     let edge2 = v2 - v0;
 
-    let pvec = Vector3::cross(direction, &edge2);
-    let det = Vector3::dot(&edge1, &pvec);
-    if det > -epsilon && det < epsilon {
+    // Triangle degeneracy is an angular property: two non-zero edges are
+    // degenerate when their normalized cross magnitude is within `epsilon`.
+    // The helper also rejects zero and non-finite edges through its `Option`.
+    if try_nearly_parallel3(&edge1, &edge2, epsilon)? {
         return None;
     }
 
-    let tvec = *start - v0;
-    let qvec = Vector3::cross(&tvec, &edge1);
+    // Retain each normalization's scale metadata. Besides supplying stable
+    // unit vectors, it later converts physical distances back into the
+    // barycentric coordinates and original line parameter without forming a
+    // potentially overflowing Euclidean length.
+    let normalized_edge1 = try_normalized3(&edge1)?;
+    let normalized_edge2 = try_normalized3(&edge2)?;
+    let normalized_direction = try_normalized3(direction)?;
+    let edge1_unit = normalized_edge1.unit();
+    let edge2_unit = normalized_edge2.unit();
+    let direction_unit = normalized_direction.unit();
 
-    let u = Vector3::dot(&tvec, &pvec) / det;
+    // The cross of the unit edges has the triangle's normal direction and a
+    // magnitude equal to the sine of their angle. Because degeneracy was
+    // rejected above, it is a valid operand for the perpendicularity test.
+    let triangle_normal = Vector3::cross(&edge1_unit, &edge2_unit);
+    if try_nearly_perpendicular3(direction, &triangle_normal, epsilon)? {
+        return None;
+    }
+
+    // Use only unit vectors in the determinant. Its magnitude now depends on
+    // angles, not on direction length or triangle area, and remains bounded
+    // for every finite input accepted by the normalization helpers.
+    let pvec = Vector3::cross(&direction_unit, &edge2_unit);
+    let det = Vector3::dot(&edge1_unit, &pvec);
+    if !is_finite_scalar(det) || det == <T as Zero>::zero() {
+        // The angular checks mathematically imply a non-zero determinant. This
+        // exact guard handles the residual possibility of floating-point
+        // rounding collapsing it to zero without reintroducing a raw epsilon.
+        return None;
+    }
+
+    // Express the line origin relative to the triangle origin. Explicitly
+    // reject overflow and invalid coordinates before using them in cross/dot
+    // products, since NaN would otherwise bypass every ordered comparison.
+    let tvec = *start - v0;
+    if !is_finite_vector3(&tvec) {
+        return None;
+    }
+
+    // Solving against unit edge 1 first yields a physical distance along that
+    // edge. Divide by the original edge length to recover dimensionless `u`.
+    let edge1_distance = Vector3::dot(&tvec, &pvec) / det;
+    if !is_finite_scalar(edge1_distance) {
+        return None;
+    }
+    let u = normalized_edge1.divide_by_length(edge1_distance)?;
     if u < -epsilon || u > <T as One>::one() + epsilon {
         return None;
     }
 
-    let v = Vector3::dot(direction, &qvec) / det;
+    // The second Cramer numerator is shared by the second barycentric
+    // coordinate and the signed travel distance along the unit direction.
+    let qvec = Vector3::cross(&tvec, &edge1_unit);
+    if !is_finite_vector3(&qvec) {
+        return None;
+    }
+
+    // As for `u`, the normalized solve first produces a physical distance;
+    // divide by edge 2's original length to obtain dimensionless `v`.
+    let edge2_distance = Vector3::dot(&direction_unit, &qvec) / det;
+    if !is_finite_scalar(edge2_distance) {
+        return None;
+    }
+    let v = normalized_edge2.divide_by_length(edge2_distance)?;
     if v < -epsilon || u + v > <T as One>::one() + T::two() * epsilon {
         return None;
     }
 
-    let t = Vector3::dot(&edge2, &qvec) / det;
-    // Epsilon belongs to barycentric boundary tests, not to the ray's
-    // mathematical domain. Returning any t < 0 would put the hit behind the
-    // origin and contradict the other ray intersection APIs.
-    if matches!(kind, TriangleIntersectionKind::Ray) && t < <T as Zero>::zero() {
+    // With a unit direction this numerator produces signed physical travel
+    // distance `tau`. Its sign is therefore the correct ray-domain decision,
+    // independent of the magnitude of the caller's stored direction.
+    let tau = Vector3::dot(&edge2_unit, &qvec) / det;
+    if !is_finite_scalar(tau) {
+        return None;
+    }
+    if matches!(kind, TriangleIntersectionKind::Ray) && tau < <T as Zero>::zero() {
         return None;
     }
 
-    Some((t, *start + (*direction * t)))
+    // Convert unit-distance travel back to the parameter of the original
+    // direction. Positive direction rescaling therefore changes `t`
+    // inversely while leaving the represented point unchanged.
+    let t = normalized_direction.divide_by_length(tau)?;
+
+    // Construct the point from the unit direction and physical distance. This
+    // avoids multiplying a huge direction by a tiny parameter (or vice versa),
+    // either of which can overflow or underflow before their scales cancel.
+    let point = *start + direction_unit * tau;
+    if !is_finite_scalar(t) || !is_finite_vector3(&point) {
+        return None;
+    }
+
+    // All geometric, domain, and floating-point validity checks succeeded.
+    Some((t, point))
 }
 
 impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>> {
+    /// Returns the forward ray/triangle hit in the ray's stored parameterization.
+    ///
+    /// The triangle boundary is inclusive within the scalar epsilon. Zero,
+    /// non-finite, dimensionlessly degenerate, and near-parallel inputs return
+    /// `None`; every successful result has `t >= 0`.
     fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
+        // Select the ray domain while sharing all normalized orientation and
+        // barycentric arithmetic with the infinite-line implementation.
         triangle_intersection_from_point_dir(
             &self.start,
             &self.direction,
@@ -304,7 +417,14 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
 }
 
 impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<T>> {
+    /// Returns the infinite-line/triangle hit in the line's stored parameterization.
+    ///
+    /// The triangle boundary is inclusive within the scalar epsilon. Zero,
+    /// non-finite, dimensionlessly degenerate, and near-parallel inputs return
+    /// `None`; negative and positive line parameters are both accepted.
     fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
+        // Select the unbounded line domain while sharing all normalized
+        // orientation and barycentric arithmetic with the ray implementation.
         triangle_intersection_from_point_dir(
             &self.p,
             &self.d,
@@ -316,13 +436,19 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<
 }
 
 impl<T: FloatScalar> Intersection<(T, Vector3<T>), Ray<T, Vector3<T>>> for Tri3<T> {
+    /// Returns the same forward hit with the [`Intersection`] operands reversed.
     fn intersection(&self, ray: &Ray<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
+        // Keep the symmetric trait surface a pure delegate so parameter,
+        // boundary, and invalid-input semantics cannot diverge.
         ray.intersection(self)
     }
 }
 
 impl<T: FloatScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3<T> {
+    /// Returns the same infinite-line hit with the [`Intersection`] operands reversed.
     fn intersection(&self, line: &Line<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
+        // Keep the symmetric trait surface a pure delegate so parameter,
+        // boundary, and invalid-input semantics cannot diverge.
         line.intersection(self)
     }
 }
@@ -431,8 +557,176 @@ pub fn basis_from_unit_lh<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] 
 mod tests {
     use super::{Intersect, Intersection};
     use crate::primitives::{Box3, Line, Ray, Sphere3, Tri3};
+    use crate::scalar::{FloatScalar, One, Zero};
     use crate::vector::{CrossProduct, FloatVector, Vector, Vector3};
     use crate::EPS_F32;
+
+    /// Verifies that uniformly scaling a well-shaped triangle and its ray
+    /// origin does not change the query's dimensionless result.
+    ///
+    /// The supplied scales deliberately include values whose squared area
+    /// would underflow or overflow in the old raw-determinant implementation.
+    fn assert_triangle_world_scale_invariance<T>(scales: &[T], tolerance: T)
+    where
+        T: FloatScalar + core::fmt::Debug,
+    {
+        // Use the default scalar tolerance so this helper exercises the same
+        // path as the public `Intersection` implementations.
+        let epsilon = T::epsilon();
+        let zero = <T as Zero>::zero();
+        let one = <T as One>::one();
+        let quarter = T::quarter();
+
+        for &scale in scales {
+            // Scale every geometric displacement by the same positive factor;
+            // the triangle retains its shape and the ray retains its incidence.
+            let tri = Tri3::new([
+                Vector3::new(zero, zero, zero),
+                Vector3::new(scale, zero, zero),
+                Vector3::new(zero, scale, zero),
+            ]);
+            let start = Vector3::new(scale * quarter, scale * quarter, scale);
+            let direction = Vector3::new(zero, zero, -one);
+            let ray = Ray::new(&start, &direction, epsilon)
+                .expect("the unit test direction must define a ray");
+
+            // A valid hit must survive at every representable world scale.
+            let (t, point) = ray
+                .intersection(&tri)
+                .expect("world scaling must not change a ray/triangle hit");
+
+            // Divide by the fixture scale before comparing so the assertion is
+            // meaningful for both extremely small and extremely large cases.
+            assert!((t / scale - one).tabs() <= tolerance);
+            assert!((point.x / scale - quarter).tabs() <= tolerance);
+            assert!((point.y / scale - quarter).tabs() <= tolerance);
+            assert!((point.z / scale).tabs() <= tolerance);
+
+            // The symmetric trait implementation must remain a pure delegate
+            // and therefore report the same parameter and point.
+            let (symmetric_t, symmetric_point) = tri
+                .intersection(&ray)
+                .expect("symmetric triangle/ray query must also hit");
+            assert!((symmetric_t / scale - one).tabs() <= tolerance);
+            assert!(((symmetric_point.x - point.x) / scale).tabs() <= tolerance);
+            assert!(((symmetric_point.y - point.y) / scale).tabs() <= tolerance);
+            assert!(((symmetric_point.z - point.z) / scale).tabs() <= tolerance);
+        }
+    }
+
+    /// Verifies that rescaling a stored line or ray direction preserves the
+    /// hit point while inversely rescaling its returned parameter.
+    fn assert_triangle_direction_scale_invariance<T>(scales: &[T], tolerance: T)
+    where
+        T: FloatScalar + core::fmt::Debug,
+    {
+        // Keep the triangle and origin fixed so only direction magnitude varies.
+        let epsilon = T::epsilon();
+        let zero = <T as Zero>::zero();
+        let one = <T as One>::one();
+        let quarter = T::quarter();
+        let tri = Tri3::new([
+            Vector3::new(zero, zero, zero),
+            Vector3::new(one, zero, zero),
+            Vector3::new(zero, one, zero),
+        ]);
+        let start = Vector3::new(quarter, quarter, one);
+        let unit_direction = Vector3::new(zero, zero, -one);
+
+        for &scale in scales {
+            // Construct valid public values first, then exercise their public
+            // direction fields with magnitudes that constructor squaring could
+            // not safely classify at the extremes.
+            let mut line = Line::new(&start, &unit_direction, epsilon)
+                .expect("the unit test direction must define a line");
+            line.d = unit_direction * scale;
+            let mut ray = Ray::new(&start, &unit_direction, epsilon)
+                .expect("the unit test direction must define a ray");
+            ray.direction = unit_direction * scale;
+
+            // Both parameterized primitives represent the same forward hit;
+            // multiplying the result by the direction scale recovers t = 1.
+            let (line_t, line_point) = line
+                .intersection(&tri)
+                .expect("line hit must survive direction rescaling");
+            let (ray_t, ray_point) = ray
+                .intersection(&tri)
+                .expect("ray hit must survive direction rescaling");
+            assert!((line_t * scale - one).tabs() <= tolerance);
+            assert!((ray_t * scale - one).tabs() <= tolerance);
+
+            // The physical intersection is independent of parameterization.
+            for point in [line_point, ray_point] {
+                assert!((point.x - quarter).tabs() <= tolerance);
+                assert!((point.y - quarter).tabs() <= tolerance);
+                assert!(point.z.tabs() <= tolerance);
+            }
+        }
+    }
+
+    /// Verifies that degenerate and non-finite inputs fail closed instead of
+    /// producing a tuple containing NaN or infinity.
+    fn assert_triangle_invalid_inputs_return_none<T>(nan: T, infinity: T)
+    where
+        T: FloatScalar + core::fmt::Debug,
+    {
+        // Build one ordinary triangle and line as the baseline for mutations.
+        let epsilon = T::epsilon();
+        let zero = <T as Zero>::zero();
+        let one = <T as One>::one();
+        let quarter = T::quarter();
+        let tri = Tri3::new([
+            Vector3::new(zero, zero, zero),
+            Vector3::new(one, zero, zero),
+            Vector3::new(zero, one, zero),
+        ]);
+        let start = Vector3::new(quarter, quarter, one);
+        let direction = Vector3::new(zero, zero, -one);
+        let valid_line = Line::new(&start, &direction, epsilon)
+            .expect("the unit test direction must define a line");
+
+        // Duplicate and collinear vertices have no two-dimensional interior.
+        let duplicate = Tri3::new([
+            Vector3::new(zero, zero, zero),
+            Vector3::new(zero, zero, zero),
+            Vector3::new(zero, one, zero),
+        ]);
+        let collinear = Tri3::new([
+            Vector3::new(zero, zero, zero),
+            Vector3::new(one, zero, zero),
+            Vector3::new(T::two(), zero, zero),
+        ]);
+        assert!(valid_line.intersection(&duplicate).is_none());
+        assert!(valid_line.intersection(&collinear).is_none());
+
+        // A publicly mutable direction can violate constructor invariants; the
+        // query must still reject exact zero and non-finite directions safely.
+        let mut invalid_line = valid_line;
+        invalid_line.d = Vector3::new(zero, zero, zero);
+        assert!(invalid_line.intersection(&tri).is_none());
+        invalid_line.d = Vector3::new(zero, zero, nan);
+        assert!(invalid_line.intersection(&tri).is_none());
+        invalid_line.d = Vector3::new(zero, zero, infinity);
+        assert!(invalid_line.intersection(&tri).is_none());
+
+        // Non-finite origins and vertices must likewise return `None`; in
+        // particular, unordered NaN comparisons must never leak `Some`.
+        let mut invalid_origin = valid_line;
+        invalid_origin.p = Vector3::new(nan, quarter, one);
+        assert!(invalid_origin.intersection(&tri).is_none());
+        let nan_triangle = Tri3::new([
+            Vector3::new(zero, zero, zero),
+            Vector3::new(nan, zero, zero),
+            Vector3::new(zero, one, zero),
+        ]);
+        let infinite_triangle = Tri3::new([
+            Vector3::new(zero, zero, zero),
+            Vector3::new(infinity, zero, zero),
+            Vector3::new(zero, one, zero),
+        ]);
+        assert!(valid_line.intersection(&nan_triangle).is_none());
+        assert!(valid_line.intersection(&infinite_triangle).is_none());
+    }
 
     fn assert_orthonormal_basis(basis: [Vector3<f32>; 3], handedness: f32) {
         let [u, v, w] = basis;
@@ -588,6 +882,197 @@ mod tests {
     #[should_panic(expected = "basis direction must be non-zero")]
     fn test_basis_from_unit_lh_zero_panics() {
         super::basis_from_unit_lh(&Vector3::new(0.0f32, 0.0, 0.0));
+    }
+
+    /// Checks scale-metamorphic triangle intersections for `f32` geometry.
+    #[test]
+    fn test_triangle_intersection_world_scale_invariant_f32() {
+        // These scales make the old area-dependent determinant respectively
+        // tiny, ordinary, and enormous while preserving the same triangle.
+        assert_triangle_world_scale_invariance(&[1.0e-18f32, 1.0, 1.0e18], 2.0e-5);
+    }
+
+    /// Checks scale-metamorphic triangle intersections for `f64` geometry.
+    #[test]
+    fn test_triangle_intersection_world_scale_invariant_f64() {
+        // The wider range exercises underflow/overflow pressure specific to
+        // double precision rather than merely repeating the f32 magnitudes.
+        assert_triangle_world_scale_invariance(&[1.0e-150f64, 1.0, 1.0e150], 1.0e-12);
+    }
+
+    /// Checks direction-parameter invariance for `f32` lines and rays.
+    #[test]
+    fn test_triangle_intersection_direction_scale_invariant_f32() {
+        // Squaring the extreme direction magnitudes would underflow or
+        // overflow, while their represented line and ray remain unchanged.
+        assert_triangle_direction_scale_invariance(&[1.0e-20f32, 1.0, 1.0e20], 2.0e-5);
+    }
+
+    /// Checks direction-parameter invariance for `f64` lines and rays.
+    #[test]
+    fn test_triangle_intersection_direction_scale_invariant_f64() {
+        // Use exponents beyond the safe range of a raw squared norm.
+        assert_triangle_direction_scale_invariance(&[1.0e-200f64, 1.0, 1.0e200], 1.0e-12);
+    }
+
+    /// Regresses the audited small-triangle miss caused by comparing its raw
+    /// determinant, `0.0008²`, with a linear f32 epsilon.
+    #[test]
+    fn test_ray_triangle_intersection_accepts_well_shaped_small_triangle() {
+        // Every edge is non-zero and the right angle is well outside the
+        // angular degeneracy tolerance, regardless of its world-space area.
+        let edge_length = 0.0008f32;
+        let tri = Tri3::new([
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(edge_length, 0.0, 0.0),
+            Vector3::new(0.0, edge_length, 0.0),
+        ]);
+        let ray = Ray::new(
+            &Vector3::new(edge_length * 0.25, edge_length * 0.25, edge_length),
+            &Vector3::new(0.0, 0.0, -1.0),
+            EPS_F32,
+        )
+        .expect("the unit direction must define a ray");
+
+        // The normalized algorithm must report the interior hit rather than
+        // mistaking the small raw determinant for parallelism.
+        let (t, point) = ray
+            .intersection(&tri)
+            .expect("a well-shaped small triangle must remain intersectable");
+        assert!((t / edge_length - 1.0).abs() <= 2.0e-5);
+        assert!((point.x / edge_length - 0.25).abs() <= 2.0e-5);
+        assert!((point.y / edge_length - 0.25).abs() <= 2.0e-5);
+        assert!((point.z / edge_length).abs() <= 2.0e-5);
+    }
+
+    /// Confirms that translating the complete query does not disturb the
+    /// normalized Möller–Trumbore solve or its returned world-space point.
+    #[test]
+    fn test_ray_triangle_intersection_translated_fixture() {
+        // Place a two-unit right triangle well away from the origin so edge and
+        // origin-relative calculations cannot accidentally rely on zero offsets.
+        let tri = Tri3::new([
+            Vector3::new(10.0f32, -20.0, 30.0),
+            Vector3::new(12.0, -20.0, 30.0),
+            Vector3::new(10.0, -18.0, 30.0),
+        ]);
+        let ray = Ray::new(
+            &Vector3::new(10.5f32, -19.5, 35.0),
+            &Vector3::new(0.0, 0.0, -1.0),
+            EPS_F32,
+        )
+        .expect("the unit direction must define a ray");
+
+        // The ray travels five units to the translated triangle's interior.
+        let (t, point) = ray
+            .intersection(&tri)
+            .expect("translation must preserve the represented hit");
+        assert!((t - 5.0).abs() <= 1.0e-5);
+        assert!((point.x - 10.5).abs() <= 1.0e-5);
+        assert!((point.y + 19.5).abs() <= 1.0e-5);
+        assert!((point.z - 30.0).abs() <= 1.0e-5);
+    }
+
+    /// Locks in inclusive edge/vertex handling and rejection outside the
+    /// barycentric boundary after the normalized orientation rewrite.
+    #[test]
+    fn test_ray_triangle_intersection_barycentric_boundaries() {
+        // Use one ordinary triangle and cast parallel rays through an edge, a
+        // vertex, and a point beyond the hypotenuse respectively.
+        let tri = Tri3::new([
+            Vector3::new(0.0f32, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+        let direction = Vector3::new(0.0f32, 0.0, -1.0);
+        let edge_ray = Ray::new(&Vector3::new(0.5f32, 0.0, 1.0), &direction, EPS_F32)
+            .expect("the edge ray direction must be valid");
+        let vertex_ray = Ray::new(&Vector3::new(0.0f32, 0.0, 1.0), &direction, EPS_F32)
+            .expect("the vertex ray direction must be valid");
+        let outside_ray = Ray::new(&Vector3::new(0.75f32, 0.75, 1.0), &direction, EPS_F32)
+            .expect("the outside ray direction must be valid");
+
+        // Touching belongs to the triangle closure, while u + v = 1.5 is well
+        // beyond the documented epsilon-expanded barycentric boundary.
+        assert!(edge_ray.intersection(&tri).is_some());
+        assert!(vertex_ray.intersection(&tri).is_some());
+        assert!(outside_ray.intersection(&tri).is_none());
+    }
+
+    /// Exercises both sides of the dimensionless ray/plane and triangle-edge
+    /// angular thresholds through the complete public triangle query.
+    #[test]
+    fn test_triangle_intersection_uses_angular_thresholds() {
+        let triangle = Tri3::new([
+            Vector3::new(0.0f32, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+
+        // A direction whose normal component is half epsilon is classified as
+        // parallel at every stored magnitude. The chosen start would otherwise
+        // reach the triangle interior after one half unit along +X.
+        let near_parallel_direction = Vector3::new(1.0f32, 0.0, -EPS_F32 * 0.5);
+        for scale in [1.0e-18f32, 1.0, 1.0e18] {
+            let mut line = Line::new(
+                &Vector3::new(-0.25f32, 0.25, EPS_F32 * 0.25),
+                &near_parallel_direction,
+                EPS_F32,
+            )
+            .expect("the order-one base direction must define a line");
+            line.d = near_parallel_direction * scale;
+            assert!(line.intersection(&triangle).is_none());
+        }
+
+        // Doubling the normal component places the direction beyond the
+        // parallel band, so the otherwise identical geometry has a valid hit.
+        let above_threshold_line = Line::new(
+            &Vector3::new(-0.25f32, 0.25, EPS_F32),
+            &Vector3::new(1.0, 0.0, -EPS_F32 * 2.0),
+            EPS_F32,
+        )
+        .expect("the above-threshold direction must define a line");
+        let (_, above_threshold_point) = above_threshold_line
+            .intersection(&triangle)
+            .expect("a direction beyond the angular band must intersect");
+        assert!((above_threshold_point.x - 0.25).abs() <= 2.0e-5);
+        assert!((above_threshold_point.y - 0.25).abs() <= 2.0e-5);
+        assert!(above_threshold_point.z.abs() <= 2.0e-5);
+
+        // Apply the same threshold policy to triangle shape. Half-epsilon edge
+        // separation is degenerate; twice-epsilon separation is a valid skinny
+        // triangle at small, ordinary, and large representable world scales.
+        for scale in [1.0e-18f32, 1.0, 1.0e18] {
+            let near_collinear = Tri3::new([
+                Vector3::new(0.0f32, 0.0, 0.0),
+                Vector3::new(scale, 0.0, 0.0),
+                Vector3::new(scale, scale * EPS_F32 * 0.5, 0.0),
+            ]);
+            let valid_skinny = Tri3::new([
+                Vector3::new(0.0f32, 0.0, 0.0),
+                Vector3::new(scale, 0.0, 0.0),
+                Vector3::new(scale, scale * EPS_F32 * 2.0, 0.0),
+            ]);
+            let line = Line::new(
+                &Vector3::new(scale * 0.5, scale * EPS_F32 * 0.5, scale),
+                &Vector3::new(0.0f32, 0.0, -1.0),
+                EPS_F32,
+            )
+            .expect("the unit direction must define a line");
+
+            assert!(line.intersection(&near_collinear).is_none());
+            assert!(line.intersection(&valid_skinny).is_some());
+        }
+    }
+
+    /// Checks that invalid triangle-query inputs fail closed for both public
+    /// floating-point scalar implementations.
+    #[test]
+    fn test_triangle_intersection_rejects_degenerate_and_nonfinite_inputs() {
+        // Exercise both scalar implementations because NaN propagation and
+        // exponent ranges differ even though the generic algorithm is shared.
+        assert_triangle_invalid_inputs_return_none::<f32>(f32::NAN, f32::INFINITY);
+        assert_triangle_invalid_inputs_return_none::<f64>(f64::NAN, f64::INFINITY);
     }
 
     #[test]

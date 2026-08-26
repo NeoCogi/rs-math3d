@@ -45,6 +45,9 @@
 //! - **Comprehensive float math**: Full suite of vector, matrix, and quaternion operations for
 //!   `f32` and `f64`
 //! - **Geometric primitives**: Rays, planes, triangles, spheres, and more
+//! - **Scale-stable orientation queries**: 3D intersection and normal-building
+//!   decisions use dimensionless angular tolerances with max-component-scaled
+//!   working vectors
 //!
 //! ## Quick Start
 //!
@@ -102,6 +105,20 @@
 //! error. If dependency feature unification enables multiple backends,
 //! precedence is `std`, then `libm`, then `system-libm`; the Unix restriction
 //! applies only when `system-libm` is the effective backend.
+//!
+//! ## Intersection tolerances
+//!
+//! The epsilon accepted by 3D line/ray-to-plane, shortest-line, triangle, and
+//! plane-normal routines is a finite, dimensionless angular tolerance in
+//! `0..=1`. Parallel tests use `|sin(theta)| <= epsilon`, and perpendicular
+//! tests use `|cos(theta)| <= epsilon`. The implementations normalize temporary
+//! vectors with max-component scaling, so rescaling a finite, nonzero direction
+//! stored in an already represented primitive does not decide whether an
+//! intersection exists.
+//!
+//! Intersection points retain their geometric meaning under direction
+//! rescaling. Returned line parameters retain the original equation
+//! `point + direction * t`, so scaling `direction` scales `t` inversely.
 //!
 //! ## Modules
 //!

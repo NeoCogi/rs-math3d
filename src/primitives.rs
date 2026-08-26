@@ -360,14 +360,15 @@ pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
     line1: &Line<T, Vector3<T>>,
     epsilon: T,
 ) -> Option<Segment<T, Vector3<T>>> {
-    // Normalize through max-component scaling so valid very small or very
-    // large directions do not underflow or overflow during classification.
+    // Decompose each direction exactly once through max-component scaling so
+    // valid very small or very large inputs do not underflow or overflow. The
+    // same decompositions serve both angular classification and the solve.
     let direction0 = try_normalized3(&line0.d)?;
     let direction1 = try_normalized3(&line1.d)?;
 
-    // Parallelism is an angular property. Comparing the raw cross-product
-    // magnitude to epsilon would attach arbitrary units to this decision.
-    if try_nearly_parallel3(&line0.d, &line1.d, epsilon)? {
+    // Parallelism is an angular property. Classify the already-normalized
+    // inputs instead of paying for a second pair of normalization passes.
+    if try_nearly_parallel_normalized3(&direction0, &direction1, epsilon)? {
         return None;
     }
 
@@ -511,11 +512,12 @@ impl<T: FloatScalar> Ray<T, Vector3<T>> {
     pub fn intersect_plane(&self, p: &Plane<T>, epsilon: T) -> Option<Vector3<T>> {
         let normal = p.normal();
 
-        // Robust temporary normalization keeps the angular decision and later
-        // arithmetic independent of either vector's stored magnitude.
+        // Decompose each operand once. Reusing these bounded representations
+        // keeps both classification and later arithmetic independent of the
+        // stored magnitudes without repeating normalization work.
         let normal_metric = try_normalized3(&normal)?;
         let direction_metric = try_normalized3(&self.direction)?;
-        if try_nearly_perpendicular3(&normal, &self.direction, epsilon)? {
+        if try_nearly_perpendicular_normalized3(&normal_metric, &direction_metric, epsilon)? {
             return None;
         }
 
@@ -755,11 +757,12 @@ impl<T: FloatScalar> Plane<T> {
     ) -> Option<(T, Vector3<T>)> {
         let normal = self.normal();
 
-        // Normalize without forming raw squared lengths, which may overflow or
-        // underflow even when both geometric directions are valid.
+        // Decompose each operand once without forming raw squared lengths,
+        // which may overflow or underflow even when both directions are valid.
+        // The normalized forms are reused for classification and the solve.
         let normal_metric = try_normalized3(&normal)?;
         let direction_metric = try_normalized3(&line.d)?;
-        if try_nearly_perpendicular3(&normal, &line.d, epsilon)? {
+        if try_nearly_perpendicular_normalized3(&normal_metric, &direction_metric, epsilon)? {
             return None;
         }
 
@@ -998,17 +1001,23 @@ fn try_normal_from_spanning_vectors<T: FloatScalar>(
     right: &Vector3<T>,
     epsilon: T,
 ) -> Option<Vector3<T>> {
-    // Classify the source vectors before dividing by their cross product. The
-    // Option result also rejects invalid vectors and invalid epsilon values.
-    if try_nearly_parallel3(left, right, epsilon)? {
+    // Decompose each source vector exactly once. The resulting bounded forms
+    // are reused for both angular classification and the cross product, while
+    // the Option results reject zero and non-finite vectors up front.
+    let left_metric = try_normalized3(left)?;
+    let right_metric = try_normalized3(right)?;
+
+    // Classify the prepared directions before normalizing their cross product.
+    // The helper also validates the caller-provided angular tolerance.
+    if try_nearly_parallel_normalized3(&left_metric, &right_metric, epsilon)? {
         return None;
     }
 
-    // Cross unit vectors so every intermediate stays bounded. A second robust
-    // normalization removes the sine-angle magnitude and returns only the
-    // orientation required by plane constructors.
-    let left_unit = try_normalized3(left)?.unit();
-    let right_unit = try_normalized3(right)?.unit();
+    // Cross the unit directions so every intermediate stays bounded. A final
+    // robust normalization removes the sine-angle magnitude and returns only
+    // the orientation required by plane constructors.
+    let left_unit = left_metric.unit();
+    let right_unit = right_metric.unit();
     let cross = Vector3::cross(&left_unit, &right_unit);
     Some(try_normalized3(&cross)?.unit())
 }

@@ -80,6 +80,9 @@ backend is active.
   keeps these decisions stable when valid directions, triangle offsets, or plane-spanning vectors
   are rescaled, including magnitudes whose raw squared lengths would overflow or underflow. Zero,
   non-finite operands, and invalid tolerances are rejected.
+- Each query reuses its temporary normalized representations for classification and result
+  calculation. Ordinary parallel tests compare bounded squared magnitudes without another square
+  root; an uncommon scaled fallback preserves the same behavior when those squares underflow.
 - Rescaling an already represented `Line`'s stored direction does not change its line/plane or
   line/triangle intersection point, but the returned `t` remains tied to the parameterization
   `p + d * t`; multiplying `d` by a nonzero scale therefore divides `t` by the same scale. `Ray`

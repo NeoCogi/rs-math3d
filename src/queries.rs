@@ -259,11 +259,13 @@ enum TriangleIntersectionKind {
 /// Intersects a parameterized line or ray with a triangle.
 ///
 /// This is a normalized form of Tomas Möller and Ben Trumbore's
-/// Möller–Trumbore algorithm. The direction and both triangle edges are
-/// normalized with overflow-safe component scaling before orientation decisions
-/// are made. Consequently, multiplying a valid direction or all triangle
-/// offsets by a finite, positive scale does not turn the raw determinant into
-/// an absolute length threshold.
+/// Möller–Trumbore algorithm. The direction and both triangle edges are each
+/// normalized exactly once with overflow-safe component scaling, and their
+/// decompositions are reused for every subsequent orientation and parameter
+/// calculation. The derived triangle normal is likewise normalized once.
+/// Consequently, multiplying a valid direction or all triangle offsets by a
+/// finite, positive scale does not turn the raw determinant into an absolute
+/// length threshold, while the query pays only four stable normalization costs.
 ///
 /// `epsilon` is dimensionless here: it is both the angular tolerance used to
 /// reject parallel/degenerate orientations and the tolerance around the
@@ -294,15 +296,9 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
     let edge1 = v1 - v0;
     let edge2 = v2 - v0;
 
-    // Triangle degeneracy is an angular property: two non-zero edges are
-    // degenerate when their normalized cross magnitude is within `epsilon`.
-    // The helper also rejects zero and non-finite edges through its `Option`.
-    if try_nearly_parallel3(&edge1, &edge2, epsilon)? {
-        return None;
-    }
-
-    // Retain each normalization's scale metadata. Besides supplying stable
-    // unit vectors, it later converts physical distances back into the
+    // Normalize each independent source vector exactly once. Retaining each
+    // decomposition's scale metadata both avoids repeated square roots in the
+    // angular predicates and later converts physical distances back into the
     // barycentric coordinates and original line parameter without forming a
     // potentially overflowing Euclidean length.
     let normalized_edge1 = try_normalized3(&edge1)?;
@@ -312,11 +308,29 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
     let edge2_unit = normalized_edge2.unit();
     let direction_unit = normalized_direction.unit();
 
+    // Triangle degeneracy is an angular property: two non-zero edges are
+    // degenerate when their normalized cross magnitude is within `epsilon`.
+    // Supplying the cached decompositions lets the predicate compare their
+    // unit directions without normalizing either edge for a second time.
+    if try_nearly_parallel_normalized3(&normalized_edge1, &normalized_edge2, epsilon)? {
+        return None;
+    }
+
     // The cross of the unit edges has the triangle's normal direction and a
-    // magnitude equal to the sine of their angle. Because degeneracy was
-    // rejected above, it is a valid operand for the perpendicularity test.
+    // magnitude equal to the sine of their angle. Normalize that derived value
+    // once after the degeneracy check, retaining the result for the following
+    // direction-versus-plane orientation decision.
     let triangle_normal = Vector3::cross(&edge1_unit, &edge2_unit);
-    if try_nearly_perpendicular3(direction, &triangle_normal, epsilon)? {
+    let normalized_triangle_normal = try_normalized3(&triangle_normal)?;
+
+    // A query direction perpendicular to the triangle normal lies parallel to
+    // the triangle plane. Both operands are already normalized, so the cached
+    // predicate reduces this decision to bounded unit-vector arithmetic.
+    if try_nearly_perpendicular_normalized3(
+        &normalized_direction,
+        &normalized_triangle_normal,
+        epsilon,
+    )? {
         return None;
     }
 

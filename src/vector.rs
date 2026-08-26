@@ -37,8 +37,11 @@
 //!
 //! Intersection code also uses crate-private, max-component-scaled 3D
 //! normalization helpers. Those helpers keep angular decisions independent of
-//! a vector's magnitude without changing the behavior of the public
-//! [`FloatVector`] normalization methods.
+//! a vector's magnitude and let each query reuse a prepared representation.
+//! Ordinary parallel predicates compare bounded squared magnitudes without an
+//! additional square root, while an underflow fallback retains subnormal
+//! behavior. None of this changes the public [`FloatVector`] normalization
+//! methods.
 //!
 //! # Examples
 //!
@@ -456,10 +459,10 @@ where
 ///
 /// - `scale` is the original vector's finite, strictly positive largest
 ///   component magnitude;
-/// - `scaled_length` is the length of `original / scale`, and is finite and at
-///   least one;
-/// - `unit` is `original / (scale * scaled_length)`, without requiring that
-///   potentially overflowing product to be formed.
+/// - `scaled_length` is the length of `original / scale`, and is finite and in
+///   the interval `[1, sqrt(3)]`;
+/// - `unit` is `(original / scale) / scaled_length`, without requiring the
+///   potentially overflowing original length to be formed.
 ///
 /// The type is crate-private because it supplies numerical machinery for
 /// geometric queries rather than a second public vector-normalization API.
@@ -470,6 +473,9 @@ pub(crate) struct Normalized3<T: FloatScalar> {
     /// Largest absolute component of the original vector.
     scale: T,
     /// Length of the max-component-scaled vector `original / scale`.
+    ///
+    /// Retaining this bounded factor lets parameter conversions avoid forming
+    /// the potentially overflowing product `scale * scaled_length`.
     scaled_length: T,
 }
 
@@ -500,9 +506,15 @@ impl<T: FloatScalar> Normalized3<T> {
         // preserves ratios between equally tiny or equally large values.
         let scale_adjusted = value / self.scale;
         if is_finite_scalar(scale_adjusted) {
-            // The remaining divisor is in [1, sqrt(3)], so this step cannot
-            // enlarge a finite intermediate for the built-in float types.
-            let quotient = scale_adjusted / self.scaled_length;
+            // Axis-aligned inputs have scaled length exactly one, a common case
+            // in CAD and game geometry where the second division can be elided.
+            // Otherwise the bounded divisor lies in `(1, sqrt(3)]` and cannot
+            // enlarge a finite intermediate.
+            let quotient = if self.scaled_length == <T as One>::one() {
+                scale_adjusted
+            } else {
+                scale_adjusted / self.scaled_length
+            };
             if is_finite_scalar(quotient) {
                 return Some(quotient);
             }
@@ -511,7 +523,11 @@ impl<T: FloatScalar> Normalized3<T> {
         // A value/scale intermediate can overflow even when the final quotient
         // is finite: for example, when scale < 1 but the complete vector length
         // is > 1. Dividing by the bounded factor first recovers that case.
-        let length_adjusted = value / self.scaled_length;
+        let length_adjusted = if self.scaled_length == <T as One>::one() {
+            value
+        } else {
+            value / self.scaled_length
+        };
         if !is_finite_scalar(length_adjusted) {
             return None;
         }
@@ -575,9 +591,15 @@ pub(crate) fn try_normalized3<T: FloatScalar>(vector: &Vector3<T>) -> Option<Nor
         return None;
     }
 
-    // Dividing the already bounded vector produces the requested direction
-    // without ever constructing the possibly unrepresentable original length.
-    let unit = scaled / scaled_length;
+    // Axis-aligned inputs already have unit length after max-component scaling,
+    // so preserve that common representation without three redundant divides.
+    // Other inputs use direct division: multiplying by a rounded reciprocal can
+    // move an exact inclusive angular boundary one representable value upward.
+    let unit = if scaled_length == <T as One>::one() {
+        scaled
+    } else {
+        scaled / scaled_length
+    };
     if !is_finite_vector3(&unit) {
         return None;
     }
@@ -589,6 +611,136 @@ pub(crate) fn try_normalized3<T: FloatScalar>(vector: &Vector3<T>) -> Option<Nor
     })
 }
 
+/// Validates a dimensionless angular tolerance shared by orientation predicates.
+///
+/// Sine and cosine magnitudes both occupy the closed interval `[0, 1]`.
+/// Centralizing this check keeps raw-vector and pre-normalized call paths
+/// identical while rejecting NaN, infinity, and nonsensical negative or
+/// greater-than-one tolerances before any orientation arithmetic.
+fn is_valid_angular_epsilon<T: FloatScalar>(angular_epsilon: T) -> bool {
+    // Comparisons with NaN are unordered, but the explicit finiteness check
+    // also makes that behavior clear for custom `FloatScalar` implementations.
+    is_finite_scalar(angular_epsilon)
+        && angular_epsilon >= <T as Zero>::zero()
+        && angular_epsilon <= <T as One>::one()
+}
+
+/// Tests pre-normalized vectors for parallelism within an angular tolerance.
+///
+/// `angular_epsilon` bounds `|sin(theta)|`. The ordinary path compares squared
+/// cross-product magnitudes, avoiding a square root in this hot predicate. A
+/// very small positive tolerance or cross product can square to zero; those
+/// rare cases use a max-component-scaled magnitude comparison so subnormal
+/// angular differences remain observable. An exact zero tolerance checks the
+/// cross components directly for the same reason.
+///
+/// `None` is returned only when the tolerance is invalid or orientation
+/// arithmetic unexpectedly produces a non-finite value. The operands already
+/// carry the finite, nonzero invariants established by [`try_normalized3`].
+pub(crate) fn try_nearly_parallel_normalized3<T: FloatScalar>(
+    left: &Normalized3<T>,
+    right: &Normalized3<T>,
+    angular_epsilon: T,
+) -> Option<bool> {
+    // Reject invalid policy values before doing the cross product. Callers can
+    // therefore safely expose failure as an invalid geometric query.
+    if !is_valid_angular_epsilon(angular_epsilon) {
+        return None;
+    }
+
+    // For unit inputs, each cross component is bounded and the cross magnitude
+    // is `|sin(theta)|`. Reusing stored units avoids normalizing either source
+    // vector again in callers that already need their length decompositions.
+    let cross = Vector3::cross(&left.unit(), &right.unit());
+    if !is_finite_vector3(&cross) {
+        return None;
+    }
+
+    let zero = <T as Zero>::zero();
+    if angular_epsilon == zero {
+        // Squaring a nonzero subnormal cross component can produce zero. Test
+        // the components themselves so epsilon zero means exact floating-point
+        // parallelism rather than "too small to survive a square".
+        return Some(cross.x == zero && cross.y == zero && cross.z == zero);
+    }
+
+    let epsilon_squared = angular_epsilon * angular_epsilon;
+    if epsilon_squared > zero {
+        // This is the normal, square-root-free path. Unit cross components keep
+        // the dot product finite for supported floating-point scalar types.
+        let sine_squared = Vector3::dot(&cross, &cross);
+        if !is_finite_scalar(sine_squared) {
+            return None;
+        }
+
+        if sine_squared > zero {
+            // Compare the squared quantities directly. This retains the exact
+            // caller-supplied threshold and removes a square root from the
+            // overwhelmingly common representable-epsilon path.
+            return Some(sine_squared <= epsilon_squared);
+        }
+
+        // A nonzero cross product can itself disappear when its components are
+        // squared, even though epsilon squared survived. Fall through to the
+        // same scaled comparison used for a subnormal epsilon in that case.
+    }
+
+    // A tolerance or nonzero cross magnitude whose square rounded to zero needs
+    // a scaled fallback. If the largest cross component already exceeds
+    // epsilon, its Euclidean magnitude necessarily exceeds epsilon as well and
+    // no square root is needed.
+    let cross_scale = T::max(cross.x.tabs(), T::max(cross.y.tabs(), cross.z.tabs()));
+    if cross_scale > angular_epsilon {
+        return Some(false);
+    }
+    if cross_scale == zero {
+        return Some(true);
+    }
+
+    // `cross_scale / epsilon` lies in `(0, 1]`. The full magnitude condition
+    //
+    //     cross_scale * scaled_length <= epsilon
+    //
+    // is equivalently `scaled_length <= epsilon / cross_scale`. The latter uses
+    // only bounded or positive ratios and never squares either subnormal value.
+    let cross_metric = try_normalized3(&cross)?;
+    let allowed_scaled_length = angular_epsilon / cross_scale;
+    Some(cross_metric.scaled_length <= allowed_scaled_length)
+}
+
+/// Tests pre-normalized vectors for perpendicularity within an angular tolerance.
+///
+/// `angular_epsilon` bounds `|cos(theta)|`. Since the dot product of unit
+/// vectors is already the cosine, this path needs neither a square root nor any
+/// additional normalization. The inclusive comparison preserves the public
+/// orientation-policy boundary.
+///
+/// `None` is returned when the tolerance is invalid or the dot product is
+/// unexpectedly non-finite.
+pub(crate) fn try_nearly_perpendicular_normalized3<T: FloatScalar>(
+    left: &Normalized3<T>,
+    right: &Normalized3<T>,
+    angular_epsilon: T,
+) -> Option<bool> {
+    // Cosine magnitudes use the same closed interval and validation rules as
+    // sine magnitudes in the parallel predicate.
+    if !is_valid_angular_epsilon(angular_epsilon) {
+        return None;
+    }
+
+    // Stored units make the absolute dot product dimensionless and invariant
+    // under independent nonzero scaling of either original vector.
+    let cosine = Vector3::dot(&left.unit(), &right.unit());
+    if !is_finite_scalar(cosine) {
+        return None;
+    }
+
+    // Compare the magnitude directly so the caller's inclusive tolerance is
+    // neither widened nor squared into an underflow-prone representation.
+    let cosine_magnitude = cosine.tabs();
+    Some(cosine_magnitude <= angular_epsilon)
+}
+
 /// Tests whether two finite, nonzero vectors are parallel within an angular tolerance.
 ///
 /// `angular_epsilon` is a dimensionless upper bound on `|sin(theta)|`, where
@@ -598,39 +750,18 @@ pub(crate) fn try_normalized3<T: FloatScalar>(vector: &Vector3<T>) -> Option<Nor
 ///
 /// `None` is returned if either vector is zero or non-finite, or when the
 /// tolerance is non-finite or outside the closed interval `[0, 1]`.
+#[cfg(test)]
 pub(crate) fn try_nearly_parallel3<T: FloatScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     angular_epsilon: T,
 ) -> Option<bool> {
-    // Angular sine magnitudes live in [0, 1]. Rejecting any other tolerance
-    // keeps the classification meaningful and prevents NaN comparisons.
-    if !is_finite_scalar(angular_epsilon)
-        || angular_epsilon < <T as Zero>::zero()
-        || angular_epsilon > <T as One>::one()
-    {
-        return None;
-    }
-
-    // Normalize with max-component scaling so independently rescaling either
-    // operand cannot change the classification through raw overflow/underflow.
-    let left_unit = try_normalized3(left)?.unit();
-    let right_unit = try_normalized3(right)?.unit();
-
-    // For unit vectors, the cross-product length is `|sin(theta)|`. Compute the
-    // length before comparison instead of squaring the caller's tolerance:
-    // squaring a valid tiny epsilon could underflow to zero and accidentally
-    // turn a near-parallel policy into an exact-parallel test.
-    let cross = Vector3::cross(&left_unit, &right_unit);
-    let sine_squared = Vector3::dot(&cross, &cross);
-    if !is_finite_scalar(sine_squared) {
-        return None;
-    }
-    let sine = sine_squared.tsqrt();
-    if !is_finite_scalar(sine) {
-        return None;
-    }
-    Some(sine <= angular_epsilon)
+    // Each raw operand is normalized exactly once. The normalized-input helper
+    // then performs only orientation arithmetic and can also be called directly
+    // by queries that need these same decompositions for later calculations.
+    let left_normalized = try_normalized3(left)?;
+    let right_normalized = try_normalized3(right)?;
+    try_nearly_parallel_normalized3(&left_normalized, &right_normalized, angular_epsilon)
 }
 
 /// Tests whether two finite, nonzero vectors are perpendicular within an angular tolerance.
@@ -642,32 +773,17 @@ pub(crate) fn try_nearly_parallel3<T: FloatScalar>(
 ///
 /// `None` is returned if either vector is zero or non-finite, or when the
 /// tolerance is non-finite or outside the closed interval `[0, 1]`.
+#[cfg(test)]
 pub(crate) fn try_nearly_perpendicular3<T: FloatScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     angular_epsilon: T,
 ) -> Option<bool> {
-    // Cosine magnitudes and their tolerance both live in [0, 1]. Validate the
-    // caller-provided bound before performing any vector arithmetic.
-    if !is_finite_scalar(angular_epsilon)
-        || angular_epsilon < <T as Zero>::zero()
-        || angular_epsilon > <T as One>::one()
-    {
-        return None;
-    }
-
-    // The stable unit representations remove both vectors' arbitrary positive
-    // scales while retaining their directions and relative signs.
-    let left_unit = try_normalized3(left)?.unit();
-    let right_unit = try_normalized3(right)?.unit();
-
-    // The absolute dot product of unit vectors is `|cos(theta)|`. Compare its
-    // magnitude directly so a tiny valid tolerance is not lost by squaring it.
-    let cosine = Vector3::dot(&left_unit, &right_unit);
-    if !is_finite_scalar(cosine) {
-        return None;
-    }
-    Some(cosine.tabs() <= angular_epsilon)
+    // Normalize each operand once and delegate to the reusable fast path. This
+    // wrapper remains useful to sites that do not otherwise need vector metrics.
+    let left_normalized = try_normalized3(left)?;
+    let right_normalized = try_normalized3(right)?;
+    try_nearly_perpendicular_normalized3(&left_normalized, &right_normalized, angular_epsilon)
 }
 
 /// Trait for 2D swizzle operations on vectors.
@@ -1161,6 +1277,69 @@ mod tests {
         }
     }
 
+    /// Verifies that squared comparisons retain subnormal angular information.
+    fn assert_subnormal_angular_epsilon_contract<T>(smallest_positive: T)
+    where
+        T: FloatScalar + core::fmt::Debug,
+    {
+        // A unit x direction crossed with `(1, delta, 0)` has a z component of
+        // `delta`, but squaring a minimum subnormal delta produces zero. These
+        // fixtures therefore force both exact-zero and positive-underflow
+        // branches of the normalized parallel predicate.
+        let zero = <T as Zero>::zero();
+        let one = <T as One>::one();
+        let two = T::two();
+        let x = Vector3::new(one, zero, zero);
+        let at_boundary = Vector3::new(one, smallest_positive, zero);
+        let beyond_boundary = Vector3::new(one, smallest_positive * two, zero);
+
+        // Prepare each input once to exercise the production fast path used by
+        // intersection queries, rather than relying only on its raw test wrapper.
+        let normalized_x = try_normalized3(&x).expect("the x axis must normalize");
+        let normalized_boundary =
+            try_normalized3(&at_boundary).expect("the subnormal direction must normalize");
+        let normalized_beyond =
+            try_normalized3(&beyond_boundary).expect("the doubled direction must normalize");
+
+        // The inclusive positive boundary remains true even though both the
+        // cross magnitude squared and epsilon squared round to zero.
+        assert_eq!(
+            try_nearly_parallel_normalized3(&normalized_x, &normalized_boundary, smallest_positive,),
+            Some(true),
+        );
+
+        // Exact epsilon zero must observe the nonzero subnormal cross component
+        // directly instead of confusing squared underflow with exact parallelism.
+        assert_eq!(
+            try_nearly_parallel_normalized3(&normalized_x, &normalized_boundary, zero),
+            Some(false),
+        );
+        assert_eq!(
+            try_nearly_parallel_normalized3(&normalized_x, &normalized_x, zero),
+            Some(true),
+        );
+
+        // Doubling the angular perturbation puts it outside the one-subnormal
+        // tolerance and confirms that the fallback does not accept every value
+        // whose square happens to underflow.
+        assert_eq!(
+            try_nearly_parallel_normalized3(&normalized_x, &normalized_beyond, smallest_positive,),
+            Some(false),
+        );
+
+        // The raw-vector wrapper must retain the same decisions while preparing
+        // each input exactly once internally.
+        assert_eq!(
+            try_nearly_parallel3(&x, &at_boundary, smallest_positive),
+            Some(true),
+        );
+        assert_eq!(try_nearly_parallel3(&x, &at_boundary, zero), Some(false));
+        assert_eq!(
+            try_nearly_parallel3(&x, &beyond_boundary, smallest_positive),
+            Some(false),
+        );
+    }
+
     /// Verifies max-component normalization across the full `f32` exponent range.
     #[test]
     fn test_stable_normalization_f32() {
@@ -1215,6 +1394,22 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
         );
+    }
+
+    /// Verifies the squared-epsilon fallback at the bottom of the `f32` range.
+    #[test]
+    fn test_subnormal_angular_epsilon_f32() {
+        // Bit pattern one is the smallest positive subnormal and therefore
+        // guarantees that multiplying it by itself rounds to zero.
+        assert_subnormal_angular_epsilon_contract(f32::from_bits(1));
+    }
+
+    /// Verifies the squared-epsilon fallback at the bottom of the `f64` range.
+    #[test]
+    fn test_subnormal_angular_epsilon_f64() {
+        // Mirror the f32 fixture at f64 width so generic code cannot accidentally
+        // depend on the exponent or mantissa range of one scalar type.
+        assert_subnormal_angular_epsilon_contract(f64::from_bits(1));
     }
 
     #[test]

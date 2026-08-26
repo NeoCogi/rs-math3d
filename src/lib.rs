@@ -116,6 +116,11 @@
 //! stored in an already represented primitive does not decide whether an
 //! intersection exists.
 //!
+//! A query prepares each required direction once and reuses that representation
+//! for its angular tests and result calculation. The ordinary parallel path
+//! compares bounded squared magnitudes without an additional square root, while
+//! a scaled fallback retains subnormal tolerance behavior.
+//!
 //! Intersection points retain their geometric meaning under direction
 //! rescaling. Returned line parameters retain the original equation
 //! `point + direction * t`, so scaling `direction` scales `t` inversely.

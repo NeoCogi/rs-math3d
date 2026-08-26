@@ -86,10 +86,15 @@ pub trait Scalar:
 /// floating-point numbers, including trigonometric functions and
 /// square root.
 ///
-/// # Implementation Note
+/// # Backend selection
 ///
-/// These functions are routed through the crate's selected math backend:
-/// `std`, `libm`, or `system-libm`.
+/// These functions are routed through a compile-time math backend. The default
+/// `std` backend supports hosted crates even when their source uses
+/// `#![no_std]`, provided they can explicitly link Rust's standard library.
+/// Programs that cannot link `std` must disable default features and enable
+/// `libm`; Unix users may instead opt into `system-libm`. A featureless build
+/// is rejected, and unified features use the precedence `std`, then `libm`,
+/// then `system-libm`.
 pub trait FloatScalar: Scalar {
     /// Returns a reasonable epsilon for comparisons.
     fn epsilon() -> Self;

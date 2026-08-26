@@ -11,7 +11,7 @@ utility traits for intersection and distance queries.
 - Quaternions and transforms for floating-point rotations and projections
 - Geometric primitives: rays, planes, triangles, boxes, spheres, line segments
 - Query traits for intersection and distance computations
-- `no_std` support with an optional `std` feature
+- Standard-library math by default, with an explicit std-free `no_std` configuration
 
 Integer vectors, boxes, rectangles, and matrix arithmetic are supported for discrete geometry
 and storage. Operations that require fractional results, such as normalization, inversion,
@@ -19,25 +19,58 @@ quaternions, transforms, rays, planes, and geometric queries, are restricted to 
 
 ## Usage
 
-Add to Cargo.toml:
+Hosted applications use the default `std` backend. This includes crates marked
+`#![no_std]` that run on a target with Rust's standard library and choose to
+import it explicitly (for example, Linux or Windows applications):
 
 ```toml
 [dependencies]
-rs-math3d = { version = "0.13.0", default-features = false }
+rs-math3d = "0.14.0"
 ```
 
-Select one math backend:
+For example, a hosted crate may keep its own `#![no_std]` attribute while
+opting back into an available standard library:
+
+```rust
+#![no_std]
+
+extern crate std;
+
+use rs_math3d::FloatScalar;
+use std::f32;
+
+pub fn quarter_turn_sine() -> f32 {
+    (f32::consts::FRAC_PI_2).tsin()
+}
+```
+
+The `#![no_std]` attribute alone therefore does not require `libm`; what matters
+is whether the final program can link `std`. Std-free or freestanding `no_std`
+applications must disable default features and explicitly select the pure-Rust
+`libm` backend:
 
 ```toml
-rs-math3d = { version = "0.13.0", default-features = false, features = ["std"] }
-rs-math3d = { version = "0.13.0", default-features = false, features = ["libm"] }
-rs-math3d = { version = "0.13.0", default-features = false, features = ["system-libm"] }
+[dependencies]
+rs-math3d = { version = "0.14.0", default-features = false, features = ["libm"] }
 ```
 
-When no math backend feature is selected, normal library builds fall back to `system-libm`.
-Test builds without an explicit backend use `std`.
-If more than one backend feature is enabled, precedence is `std`, then `libm`, then
-`system-libm`.
+Unix applications that intentionally want the target's C math library may
+select `system-libm` instead:
+
+```toml
+[dependencies]
+rs-math3d = { version = "0.14.0", default-features = false, features = ["system-libm"] }
+```
+
+`system-libm` is supported only on Unix targets and links the native `m`
+library for downstream binaries. It is not a portable freestanding backend;
+use `libm` for embedded, WebAssembly, or other targets without Rust's `std`.
+
+A build with default features disabled and no backend selected is rejected at
+compile time. If dependency feature unification enables more than one backend,
+precedence is `std`, then `libm`, then `system-libm`. Consequently,
+`system-libm`'s Unix restriction applies only when neither higher-precedence
+backend is active.
 
 ## Behavior Notes
 

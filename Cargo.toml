@@ -1,13 +1,13 @@
 [package]
 name = "rs-math3d"
-version = "0.13.0"
+version = "0.14.0"
 license = "BSD-3-Clause"
 authors = [
     "Raja Lehtihet <raja.lehtihet@gmail.com>",
     "Wael El Oraiby <wael.eloraiby@gmail.com>",
 ]
 edition = "2018"
-description = "Rust 3D Math (no dependency on std)"
+description = "2D/3D math for graphics and geometry, with explicit no_std support"
 repository = "https://github.com/NeoCogi/rs-math3d"
 readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -19,7 +19,13 @@ libm = { version = "0.2", optional = true }
 [lib]
 
 [features]
-default = []
+# Hosted applications, including `#![no_std]` crates that can explicitly link
+# Rust's standard library, use its floating-point operations by default.
+default = ["std"]
+# The standard-library backend also enables num-traits' standard-library support.
 std = ["num-traits/std"]
+# Std-free no_std builds must opt into the pure-Rust libm backend explicitly.
 libm = ["dep:libm"]
+# The system C math backend is selected only when std/libm are disabled and is
+# accepted only on Unix targets; source-level cfgs enforce that target policy.
 system-libm = []

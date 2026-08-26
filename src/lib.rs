@@ -28,13 +28,15 @@
 
 //! # rs-math3d
 //!
-//! A `no_std` 3D mathematics library for Rust, providing vectors, matrices,
-//! quaternions, and geometric primitives for computer graphics applications.
+//! A 2D/3D mathematics library for Rust, providing vectors, matrices,
+//! quaternions, and geometric primitives for graphics and geometry. Hosted
+//! builds use the standard library by default, while std-free `no_std` builds
+//! are supported through an explicit math backend.
 //!
 //! ## Features
 //!
-//! - **No standard library required**: Works without `std`, with float math supplied by the
-//!   `std`, `libm`, or `system-libm` backend
+//! - **Explicit std-free support**: Uses `std` by default and offers
+//!   freestanding `no_std` math through the opt-in `libm` backend
 //! - **Generic storage types**: Vectors, boxes, rectangles, and basic matrix arithmetic support
 //!   `f32`, `f64`, `i32`, and `i64`
 //! - **Float-only analytic math**: Normalization, inverses, quaternions, transforms, rays,
@@ -75,16 +77,31 @@
 //!
 //! ## Math Backends
 //!
-//! Floating-point transcendental functions are selected through one backend:
+//! Floating-point transcendental functions use one compile-time backend:
 //!
-//! - `std`: use Rust's standard-library float methods
-//! - `libm`: use the pure-software `libm` crate
-//! - `system-libm`: call the target's C math library
+//! - `std` is enabled by default and uses Rust's standard-library float methods.
+//! - `libm` is the portable std-free backend and must be selected explicitly
+//!   after disabling default features.
+//! - `system-libm` is an explicit Unix-only backend that calls and links the
+//!   target's native C math library.
 //!
-//! Library builds without any of these features fall back to `system-libm`.
-//! Test builds without an explicit backend use the `std` backend.
-//! If more than one backend feature is enabled, precedence is `std`, then `libm`,
-//! then `system-libm`.
+//! This crate always has a `#![no_std]` attribute. On hosted targets such as
+//! Linux and Windows, a `#![no_std]` crate may still explicitly import and link
+//! Rust's `std`; that case should keep the default `std` feature. The `libm`
+//! configuration is for programs that cannot link `std`, such as embedded or
+//! freestanding targets.
+//!
+//! A std-free `no_std` dependency therefore uses:
+//!
+//! ```toml
+//! [dependencies]
+//! rs-math3d = { version = "0.14.0", default-features = false, features = ["libm"] }
+//! ```
+//!
+//! Disabling default features without selecting a backend is a compile-time
+//! error. If dependency feature unification enables multiple backends,
+//! precedence is `std`, then `libm`, then `system-libm`; the Unix restriction
+//! applies only when `system-libm` is the effective backend.
 //!
 //! ## Modules
 //!
@@ -98,6 +115,10 @@
 //! - [`scalar`]: Traits for generic numeric operations
 
 #![no_std]
+// Keep the crate's source-level `no_std` contract in every configuration while
+// importing `std` explicitly for its default hosted math backend. Tests also
+// need `std` for the Rust test harness, but `math` still selects a backend only
+// from Cargo features, never from `cfg(test)`.
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 pub mod basis;

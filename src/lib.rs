@@ -116,6 +116,11 @@
 //! stored in an already represented primitive does not decide whether an
 //! intersection exists.
 //!
+//! Internal angular classifiers represent within-tolerance, outside-tolerance,
+//! and invalid states explicitly. A shared checked-query gate proceeds only for
+//! a valid outside-tolerance classification; within-tolerance and invalid
+//! classifications both map to `None` without being conflated internally.
+//!
 //! A query prepares each required direction once and reuses that representation
 //! for its angular tests and result calculation. The ordinary parallel path
 //! compares bounded squared magnitudes without an additional square root, while
@@ -146,6 +151,35 @@
 // from Cargo features, never from `cfg(test)`.
 #[cfg(any(test, feature = "std"))]
 extern crate std;
+
+/// Continues a checked query only for a valid classification outside its tolerance.
+///
+/// The supplied expression is evaluated exactly once. An `OutsideTolerance`
+/// value completes normally, while `WithinTolerance` and `Invalid` return
+/// `None` from the enclosing function or closure. Consequently, this macro is
+/// only valid inside a body whose return type is `Option<_>`.
+///
+/// The explicit `return_none_` prefix makes that non-local control flow visible
+/// at every call site. The macro remains crate-private because its policy and
+/// classification type are implementation details of checked geometry queries.
+macro_rules! return_none_unless_outside_angular_tolerance {
+    ($classification:expr $(,)?) => {{
+        // Matching the expression directly both evaluates it once and keeps
+        // the classification exhaustive if another state is added later.
+        match $classification {
+            // Only a valid relationship beyond the inclusive tolerance lets
+            // the enclosing checked query continue with its geometric solve.
+            $crate::vector::AngularClassification::OutsideTolerance => (),
+            // A relationship inside the rejected angular band has no result
+            // under the checked query's documented degeneracy policy.
+            $crate::vector::AngularClassification::WithinTolerance => return None,
+            // Invalid tolerance or arithmetic fails the checked query closed
+            // instead of being mistaken for either valid geometric outcome.
+            $crate::vector::AngularClassification::Invalid => return None,
+        }
+    }};
+}
+
 pub mod basis;
 mod math;
 pub mod matrix;

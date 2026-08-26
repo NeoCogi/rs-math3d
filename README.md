@@ -79,7 +79,10 @@ backend is active.
   line/ray-to-plane tests compare it with `|cos(theta)|`. Temporary max-component normalization
   keeps these decisions stable when valid directions, triangle offsets, or plane-spanning vectors
   are rescaled, including magnitudes whose raw squared lengths would overflow or underflow. Zero,
-  non-finite operands, and invalid tolerances are rejected.
+  non-finite operands, and invalid tolerances are rejected. Internal angular classifiers keep
+  within-tolerance, outside-tolerance, and invalid states distinct. A shared checked-query gate
+  proceeds only for the outside-tolerance state; within-tolerance and invalid states both map to
+  `None` without being conflated internally.
 - Each query reuses its temporary normalized representations for classification and result
   calculation. Ordinary parallel tests compare bounded squared magnitudes without another square
   root; an uncommon scaled fallback preserves the same behavior when those squares underflow.

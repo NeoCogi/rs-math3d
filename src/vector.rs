@@ -40,8 +40,11 @@
 //! a vector's magnitude and let each query reuse a prepared representation.
 //! Ordinary parallel predicates compare bounded squared magnitudes without an
 //! additional square root, while an underflow fallback retains subnormal
-//! behavior. None of this changes the public [`FloatVector`] normalization
-//! methods.
+//! behavior. Their internal result is an explicit classification—within the
+//! tolerance, outside it, or invalid—so invalid arithmetic cannot be confused
+//! with either geometric answer. Checked query call sites share one crate-local
+//! gate that continues only for a valid outside-tolerance classification. None
+//! of this changes the public [`FloatVector`] normalization methods.
 //!
 //! # Examples
 //!
@@ -563,6 +566,27 @@ impl<T: FloatScalar> Normalized3<T> {
     }
 }
 
+/// Result of comparing an angular relationship with a caller's tolerance.
+///
+/// Parallel classifiers compare `|sin(theta)|`, while perpendicular classifiers
+/// compare `|cos(theta)|`. Keeping the comparison result separate from the
+/// relationship being measured lets both hot paths share one explicit state
+/// type without computing an unnecessary second angular measure.
+///
+/// This enum is crate-private because it coordinates geometric query internals;
+/// public queries continue to report invalid or rejected geometry through their
+/// documented `Option` results.
+#[must_use = "angular classifications, including invalid states, must be handled"]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AngularClassification {
+    /// The selected sine or cosine magnitude is at most the inclusive tolerance.
+    WithinTolerance,
+    /// The selected sine or cosine magnitude is greater than the tolerance.
+    OutsideTolerance,
+    /// No classification is possible because input or derived arithmetic is invalid.
+    Invalid,
+}
+
 /// Returns whether a floating-point scalar is neither NaN nor infinity.
 ///
 /// `FloatScalar` deliberately exposes only the analytic operations needed by
@@ -652,7 +676,7 @@ fn is_valid_angular_epsilon<T: FloatScalar>(angular_epsilon: T) -> bool {
         && angular_epsilon <= <T as One>::one()
 }
 
-/// Tests pre-normalized vectors for parallelism within an angular tolerance.
+/// Classifies pre-normalized vectors for parallelism within an angular tolerance.
 ///
 /// `angular_epsilon` bounds `|sin(theta)|`. The ordinary path compares squared
 /// cross-product magnitudes, avoiding a square root in this hot predicate. A
@@ -661,18 +685,20 @@ fn is_valid_angular_epsilon<T: FloatScalar>(angular_epsilon: T) -> bool {
 /// angular differences remain observable. An exact zero tolerance checks the
 /// cross components directly for the same reason.
 ///
-/// `None` is returned only when the tolerance is invalid or orientation
-/// arithmetic unexpectedly produces a non-finite value. The operands already
-/// carry the finite, nonzero invariants established by [`try_normalized3`].
-pub(crate) fn try_nearly_parallel_normalized3<T: FloatScalar>(
+/// Returns [`AngularClassification::WithinTolerance`] when the sine magnitude
+/// is at most the inclusive tolerance, [`AngularClassification::OutsideTolerance`]
+/// when it is greater, and [`AngularClassification::Invalid`] when the tolerance
+/// or derived arithmetic is invalid. The operands already carry the finite,
+/// nonzero invariants established by [`try_normalized3`].
+pub(crate) fn classify_nearly_parallel_normalized3<T: FloatScalar>(
     left: &Normalized3<T>,
     right: &Normalized3<T>,
     angular_epsilon: T,
-) -> Option<bool> {
+) -> AngularClassification {
     // Reject invalid policy values before doing the cross product. Callers can
-    // therefore safely expose failure as an invalid geometric query.
+    // distinguish an invalid query from either valid angular comparison.
     if !is_valid_angular_epsilon(angular_epsilon) {
-        return None;
+        return AngularClassification::Invalid;
     }
 
     // For unit inputs, each cross component is bounded and the cross magnitude
@@ -680,7 +706,7 @@ pub(crate) fn try_nearly_parallel_normalized3<T: FloatScalar>(
     // vector again in callers that already need their length decompositions.
     let cross = Vector3::cross(&left.unit(), &right.unit());
     if !is_finite_vector3(&cross) {
-        return None;
+        return AngularClassification::Invalid;
     }
 
     let zero = <T as Zero>::zero();
@@ -688,7 +714,11 @@ pub(crate) fn try_nearly_parallel_normalized3<T: FloatScalar>(
         // Squaring a nonzero subnormal cross component can produce zero. Test
         // the components themselves so epsilon zero means exact floating-point
         // parallelism rather than "too small to survive a square".
-        return Some(cross.x == zero && cross.y == zero && cross.z == zero);
+        return if cross.x == zero && cross.y == zero && cross.z == zero {
+            AngularClassification::WithinTolerance
+        } else {
+            AngularClassification::OutsideTolerance
+        };
     }
 
     let epsilon_squared = angular_epsilon * angular_epsilon;
@@ -697,14 +727,18 @@ pub(crate) fn try_nearly_parallel_normalized3<T: FloatScalar>(
         // the dot product finite for supported floating-point scalar types.
         let sine_squared = Vector3::dot(&cross, &cross);
         if !is_finite_scalar(sine_squared) {
-            return None;
+            return AngularClassification::Invalid;
         }
 
         if sine_squared > zero {
             // Compare the squared quantities directly. This retains the exact
             // caller-supplied threshold and removes a square root from the
             // overwhelmingly common representable-epsilon path.
-            return Some(sine_squared <= epsilon_squared);
+            return if sine_squared <= epsilon_squared {
+                AngularClassification::WithinTolerance
+            } else {
+                AngularClassification::OutsideTolerance
+            };
         }
 
         // A nonzero cross product can itself disappear when its components are
@@ -718,10 +752,10 @@ pub(crate) fn try_nearly_parallel_normalized3<T: FloatScalar>(
     // no square root is needed.
     let cross_scale = T::max(cross.x.tabs(), T::max(cross.y.tabs(), cross.z.tabs()));
     if cross_scale > angular_epsilon {
-        return Some(false);
+        return AngularClassification::OutsideTolerance;
     }
     if cross_scale == zero {
-        return Some(true);
+        return AngularClassification::WithinTolerance;
     }
 
     // `cross_scale / epsilon` lies in `(0, 1]`. The full magnitude condition
@@ -730,87 +764,112 @@ pub(crate) fn try_nearly_parallel_normalized3<T: FloatScalar>(
     //
     // is equivalently `scaled_length <= epsilon / cross_scale`. The latter uses
     // only bounded or positive ratios and never squares either subnormal value.
-    let cross_metric = try_normalized3(&cross)?;
+    let cross_metric = match try_normalized3(&cross) {
+        Some(metric) => metric,
+        None => return AngularClassification::Invalid,
+    };
     let allowed_scaled_length = angular_epsilon / cross_scale;
-    Some(cross_metric.scaled_length <= allowed_scaled_length)
+    if cross_metric.scaled_length <= allowed_scaled_length {
+        AngularClassification::WithinTolerance
+    } else {
+        AngularClassification::OutsideTolerance
+    }
 }
 
-/// Tests pre-normalized vectors for perpendicularity within an angular tolerance.
+/// Classifies pre-normalized vectors for perpendicularity within an angular tolerance.
 ///
 /// `angular_epsilon` bounds `|cos(theta)|`. Since the dot product of unit
 /// vectors is already the cosine, this path needs neither a square root nor any
 /// additional normalization. The inclusive comparison preserves the public
 /// orientation-policy boundary.
 ///
-/// `None` is returned when the tolerance is invalid or the dot product is
-/// unexpectedly non-finite.
-pub(crate) fn try_nearly_perpendicular_normalized3<T: FloatScalar>(
+/// Returns [`AngularClassification::WithinTolerance`] when the cosine magnitude
+/// is at most the inclusive tolerance, [`AngularClassification::OutsideTolerance`]
+/// when it is greater, and [`AngularClassification::Invalid`] when the tolerance
+/// or dot-product arithmetic is invalid.
+pub(crate) fn classify_nearly_perpendicular_normalized3<T: FloatScalar>(
     left: &Normalized3<T>,
     right: &Normalized3<T>,
     angular_epsilon: T,
-) -> Option<bool> {
+) -> AngularClassification {
     // Cosine magnitudes use the same closed interval and validation rules as
     // sine magnitudes in the parallel predicate.
     if !is_valid_angular_epsilon(angular_epsilon) {
-        return None;
+        return AngularClassification::Invalid;
     }
 
     // Stored units make the absolute dot product dimensionless and invariant
     // under independent nonzero scaling of either original vector.
     let cosine = Vector3::dot(&left.unit(), &right.unit());
     if !is_finite_scalar(cosine) {
-        return None;
+        return AngularClassification::Invalid;
     }
 
     // Compare the magnitude directly so the caller's inclusive tolerance is
     // neither widened nor squared into an underflow-prone representation.
     let cosine_magnitude = cosine.tabs();
-    Some(cosine_magnitude <= angular_epsilon)
+    if cosine_magnitude <= angular_epsilon {
+        AngularClassification::WithinTolerance
+    } else {
+        AngularClassification::OutsideTolerance
+    }
 }
 
-/// Tests whether two finite, nonzero vectors are parallel within an angular tolerance.
+/// Classifies two raw vectors for parallelism within an angular tolerance.
 ///
 /// `angular_epsilon` is a dimensionless upper bound on `|sin(theta)|`, where
 /// `theta` is the angle between the vectors. Parallel and anti-parallel vectors
 /// are treated identically. The inclusive comparison means a vector exactly on
 /// the requested boundary is classified as nearly parallel.
 ///
-/// `None` is returned if either vector is zero or non-finite, or when the
-/// tolerance is non-finite or outside the closed interval `[0, 1]`.
+/// [`AngularClassification::Invalid`] is returned if either vector is zero or
+/// non-finite, or when the tolerance is non-finite or outside `[0, 1]`.
 #[cfg(test)]
-pub(crate) fn try_nearly_parallel3<T: FloatScalar>(
+pub(crate) fn classify_nearly_parallel3<T: FloatScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     angular_epsilon: T,
-) -> Option<bool> {
+) -> AngularClassification {
     // Each raw operand is normalized exactly once. The normalized-input helper
     // then performs only orientation arithmetic and can also be called directly
     // by queries that need these same decompositions for later calculations.
-    let left_normalized = try_normalized3(left)?;
-    let right_normalized = try_normalized3(right)?;
-    try_nearly_parallel_normalized3(&left_normalized, &right_normalized, angular_epsilon)
+    let left_normalized = match try_normalized3(left) {
+        Some(metric) => metric,
+        None => return AngularClassification::Invalid,
+    };
+    let right_normalized = match try_normalized3(right) {
+        Some(metric) => metric,
+        None => return AngularClassification::Invalid,
+    };
+    classify_nearly_parallel_normalized3(&left_normalized, &right_normalized, angular_epsilon)
 }
 
-/// Tests whether two finite, nonzero vectors are perpendicular within an angular tolerance.
+/// Classifies two raw vectors for perpendicularity within an angular tolerance.
 ///
 /// `angular_epsilon` is a dimensionless upper bound on `|cos(theta)|`, where
 /// `theta` is the angle between the vectors. The inclusive comparison means a
 /// vector exactly on the requested boundary is classified as nearly
 /// perpendicular.
 ///
-/// `None` is returned if either vector is zero or non-finite, or when the
-/// tolerance is non-finite or outside the closed interval `[0, 1]`.
+/// [`AngularClassification::Invalid`] is returned if either vector is zero or
+/// non-finite, or when the tolerance is non-finite or outside `[0, 1]`.
 #[cfg(test)]
-pub(crate) fn try_nearly_perpendicular3<T: FloatScalar>(
+pub(crate) fn classify_nearly_perpendicular3<T: FloatScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     angular_epsilon: T,
-) -> Option<bool> {
+) -> AngularClassification {
     // Normalize each operand once and delegate to the reusable fast path. This
     // wrapper remains useful to sites that do not otherwise need vector metrics.
-    let left_normalized = try_normalized3(left)?;
-    let right_normalized = try_normalized3(right)?;
-    try_nearly_perpendicular_normalized3(&left_normalized, &right_normalized, angular_epsilon)
+    let left_normalized = match try_normalized3(left) {
+        Some(metric) => metric,
+        None => return AngularClassification::Invalid,
+    };
+    let right_normalized = match try_normalized3(right) {
+        Some(metric) => metric,
+        None => return AngularClassification::Invalid,
+    };
+    classify_nearly_perpendicular_normalized3(&left_normalized, &right_normalized, angular_epsilon)
 }
 
 /// Trait for 2D swizzle operations on vectors.
@@ -1049,6 +1108,7 @@ impl_swizzle3!(Vector4, x, y, z);
 
 #[cfg(test)]
 mod tests {
+    use super::AngularClassification::{Invalid, OutsideTolerance, WithinTolerance};
     use super::*;
     use crate::scalar::{FloatScalar, EPS_F32, EPS_F64};
 
@@ -1207,27 +1267,33 @@ mod tests {
 
         // Exact basis relationships establish parallel, anti-parallel,
         // perpendicular, and clearly oblique classifications.
-        assert_eq!(try_nearly_parallel3(&x, &x, angular_epsilon), Some(true));
         assert_eq!(
-            try_nearly_parallel3(&x, &negative_x, angular_epsilon),
-            Some(true)
-        );
-        assert_eq!(try_nearly_parallel3(&x, &y, angular_epsilon), Some(false));
-        assert_eq!(
-            try_nearly_parallel3(&x, &oblique, angular_epsilon),
-            Some(false)
+            classify_nearly_parallel3(&x, &x, angular_epsilon),
+            WithinTolerance
         );
         assert_eq!(
-            try_nearly_perpendicular3(&x, &y, angular_epsilon),
-            Some(true)
+            classify_nearly_parallel3(&x, &negative_x, angular_epsilon),
+            WithinTolerance
         );
         assert_eq!(
-            try_nearly_perpendicular3(&x, &x, angular_epsilon),
-            Some(false)
+            classify_nearly_parallel3(&x, &y, angular_epsilon),
+            OutsideTolerance
         );
         assert_eq!(
-            try_nearly_perpendicular3(&x, &oblique, angular_epsilon),
-            Some(false)
+            classify_nearly_parallel3(&x, &oblique, angular_epsilon),
+            OutsideTolerance
+        );
+        assert_eq!(
+            classify_nearly_perpendicular3(&x, &y, angular_epsilon),
+            WithinTolerance
+        );
+        assert_eq!(
+            classify_nearly_perpendicular3(&x, &x, angular_epsilon),
+            OutsideTolerance
+        );
+        assert_eq!(
+            classify_nearly_perpendicular3(&x, &oblique, angular_epsilon),
+            OutsideTolerance
         );
 
         // Perturbations on opposite sides of the tolerance verify that the
@@ -1237,42 +1303,46 @@ mod tests {
         let near_parallel = Vector3::new(one, half_epsilon, zero);
         let not_near_parallel = Vector3::new(one, twice_epsilon, zero);
         assert_eq!(
-            try_nearly_parallel3(&x, &near_parallel, angular_epsilon),
-            Some(true)
+            classify_nearly_parallel3(&x, &near_parallel, angular_epsilon),
+            WithinTolerance
         );
         assert_eq!(
-            try_nearly_parallel3(&x, &not_near_parallel, angular_epsilon),
-            Some(false)
+            classify_nearly_parallel3(&x, &not_near_parallel, angular_epsilon),
+            OutsideTolerance
         );
         let near_perpendicular = Vector3::new(half_epsilon, one, zero);
         let not_near_perpendicular = Vector3::new(twice_epsilon, one, zero);
         assert_eq!(
-            try_nearly_perpendicular3(&x, &near_perpendicular, angular_epsilon),
-            Some(true)
+            classify_nearly_perpendicular3(&x, &near_perpendicular, angular_epsilon),
+            WithinTolerance
         );
         assert_eq!(
-            try_nearly_perpendicular3(&x, &not_near_perpendicular, angular_epsilon),
-            Some(false)
+            classify_nearly_perpendicular3(&x, &not_near_perpendicular, angular_epsilon),
+            OutsideTolerance
         );
 
         // The 3-4-5 directions place sine or cosine exactly at 3/5. These
         // assertions lock in the documented inclusive boundary convention.
         let boundary = three / five;
         assert_eq!(
-            try_nearly_parallel3(&x, &Vector3::new(four, three, zero), boundary),
-            Some(true)
+            classify_nearly_parallel3(&x, &Vector3::new(four, three, zero), boundary),
+            WithinTolerance
         );
         assert_eq!(
-            try_nearly_parallel3(&x, &Vector3::new(four, three, zero), boundary * T::half(),),
-            Some(false)
+            classify_nearly_parallel3(&x, &Vector3::new(four, three, zero), boundary * T::half(),),
+            OutsideTolerance
         );
         assert_eq!(
-            try_nearly_perpendicular3(&x, &Vector3::new(three, four, zero), boundary),
-            Some(true)
+            classify_nearly_perpendicular3(&x, &Vector3::new(three, four, zero), boundary),
+            WithinTolerance
         );
         assert_eq!(
-            try_nearly_perpendicular3(&x, &Vector3::new(three, four, zero), boundary * T::half(),),
-            Some(false)
+            classify_nearly_perpendicular3(
+                &x,
+                &Vector3::new(three, four, zero),
+                boundary * T::half(),
+            ),
+            OutsideTolerance
         );
 
         // Independently rescale each operand across the scalar exponent range.
@@ -1284,33 +1354,36 @@ mod tests {
                 let scaled_negative_x = Vector3::new(-right_scale, zero, zero);
                 let scaled_y = Vector3::new(zero, right_scale, zero);
                 assert_eq!(
-                    try_nearly_parallel3(&scaled_x, &scaled_negative_x, angular_epsilon,),
-                    Some(true)
+                    classify_nearly_parallel3(&scaled_x, &scaled_negative_x, angular_epsilon,),
+                    WithinTolerance
                 );
                 assert_eq!(
-                    try_nearly_perpendicular3(&scaled_x, &scaled_y, angular_epsilon),
-                    Some(true)
+                    classify_nearly_perpendicular3(&scaled_x, &scaled_y, angular_epsilon),
+                    WithinTolerance
                 );
             }
         }
 
-        // Invalid tolerances and indeterminate operands must return `None`
-        // instead of being silently classified by unordered comparisons.
+        // Invalid tolerances and indeterminate operands must produce the named
+        // invalid state instead of being silently assigned a geometric answer.
         for invalid_epsilon in [-angular_epsilon, one + angular_epsilon, nan, infinity] {
-            assert_eq!(try_nearly_parallel3(&x, &y, invalid_epsilon), None);
-            assert_eq!(try_nearly_perpendicular3(&x, &y, invalid_epsilon), None);
+            assert_eq!(classify_nearly_parallel3(&x, &y, invalid_epsilon), Invalid);
+            assert_eq!(
+                classify_nearly_perpendicular3(&x, &y, invalid_epsilon),
+                Invalid
+            );
         }
         let zero_vector = Vector3::zero();
         let nan_vector = Vector3::new(nan, zero, zero);
         let infinite_vector = Vector3::new(zero, infinity, zero);
         for invalid_vector in [zero_vector, nan_vector, infinite_vector] {
             assert_eq!(
-                try_nearly_parallel3(&x, &invalid_vector, angular_epsilon),
-                None
+                classify_nearly_parallel3(&x, &invalid_vector, angular_epsilon),
+                Invalid
             );
             assert_eq!(
-                try_nearly_perpendicular3(&x, &invalid_vector, angular_epsilon),
-                None
+                classify_nearly_perpendicular3(&x, &invalid_vector, angular_epsilon),
+                Invalid
             );
         }
     }
@@ -1342,39 +1415,50 @@ mod tests {
         // The inclusive positive boundary remains true even though both the
         // cross magnitude squared and epsilon squared round to zero.
         assert_eq!(
-            try_nearly_parallel_normalized3(&normalized_x, &normalized_boundary, smallest_positive,),
-            Some(true),
+            classify_nearly_parallel_normalized3(
+                &normalized_x,
+                &normalized_boundary,
+                smallest_positive,
+            ),
+            WithinTolerance,
         );
 
         // Exact epsilon zero must observe the nonzero subnormal cross component
         // directly instead of confusing squared underflow with exact parallelism.
         assert_eq!(
-            try_nearly_parallel_normalized3(&normalized_x, &normalized_boundary, zero),
-            Some(false),
+            classify_nearly_parallel_normalized3(&normalized_x, &normalized_boundary, zero),
+            OutsideTolerance,
         );
         assert_eq!(
-            try_nearly_parallel_normalized3(&normalized_x, &normalized_x, zero),
-            Some(true),
+            classify_nearly_parallel_normalized3(&normalized_x, &normalized_x, zero),
+            WithinTolerance,
         );
 
         // Doubling the angular perturbation puts it outside the one-subnormal
         // tolerance and confirms that the fallback does not accept every value
         // whose square happens to underflow.
         assert_eq!(
-            try_nearly_parallel_normalized3(&normalized_x, &normalized_beyond, smallest_positive,),
-            Some(false),
+            classify_nearly_parallel_normalized3(
+                &normalized_x,
+                &normalized_beyond,
+                smallest_positive,
+            ),
+            OutsideTolerance,
         );
 
         // The raw-vector wrapper must retain the same decisions while preparing
         // each input exactly once internally.
         assert_eq!(
-            try_nearly_parallel3(&x, &at_boundary, smallest_positive),
-            Some(true),
+            classify_nearly_parallel3(&x, &at_boundary, smallest_positive),
+            WithinTolerance,
         );
-        assert_eq!(try_nearly_parallel3(&x, &at_boundary, zero), Some(false));
         assert_eq!(
-            try_nearly_parallel3(&x, &beyond_boundary, smallest_positive),
-            Some(false),
+            classify_nearly_parallel3(&x, &at_boundary, zero),
+            OutsideTolerance
+        );
+        assert_eq!(
+            classify_nearly_parallel3(&x, &beyond_boundary, smallest_positive),
+            OutsideTolerance,
         );
     }
 
@@ -1437,6 +1521,41 @@ mod tests {
             .expect("exact signed zero is valid under the strict policy");
         assert_eq!(divided_f64.to_bits(), negative_zero_f64.to_bits());
         assert_eq!(strict_f64.to_bits(), negative_zero_f64.to_bits());
+    }
+
+    /// Verifies the shared checked-query gate's exhaustive three-state policy.
+    #[test]
+    fn test_angular_tolerance_query_gate() {
+        // Model an Option-returning checked query with a closure so the macro's
+        // non-local return remains confined to one small, directly observable
+        // body. The cell records evaluation without making the closure mutable,
+        // allowing every invocation to verify the macro's exactly-once promise.
+        let evaluation_count = core::cell::Cell::new(0usize);
+        let apply_query_gate = |classification: AngularClassification| -> Option<()> {
+            // Incrementing inside the supplied expression catches an expansion
+            // that accidentally evaluates its argument more than once.
+            return_none_unless_outside_angular_tolerance!({
+                evaluation_count.set(evaluation_count.get() + 1);
+                classification
+            });
+
+            // Reaching `Some(())` proves that the gate allowed continuation;
+            // only OutsideTolerance is documented to reach this statement.
+            Some(())
+        };
+
+        // A relationship inside the inclusive tolerance is rejected as
+        // degenerate after evaluating its classification exactly once.
+        assert_eq!(apply_query_gate(WithinTolerance), None);
+        assert_eq!(evaluation_count.get(), 1);
+        // A valid relationship beyond the tolerance is the sole success state,
+        // and its fall-through path must not reevaluate the supplied expression.
+        assert_eq!(apply_query_gate(OutsideTolerance), Some(()));
+        assert_eq!(evaluation_count.get(), 2);
+        // Invalid tolerance or derived arithmetic must fail closed as `None`
+        // after the same single evaluation as either valid classification.
+        assert_eq!(apply_query_gate(Invalid), None);
+        assert_eq!(evaluation_count.get(), 3);
     }
 
     /// Verifies scale-invariant angular classification for `f32` vectors.

@@ -378,10 +378,15 @@ pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
     let direction1 = try_normalized3(&line1.d)?;
 
     // Parallelism is an angular property. Classify the already-normalized
-    // inputs instead of paying for a second pair of normalization passes.
-    if try_nearly_parallel_normalized3(&direction0, &direction1, epsilon)? {
-        return None;
-    }
+    // inputs instead of paying for a second pair of normalization passes. The
+    // shared gate rejects parallel directions, which do not define a unique
+    // closest segment, and invalid classifications; only a valid non-parallel
+    // pair proceeds to the bounded line solve.
+    return_none_unless_outside_angular_tolerance!(classify_nearly_parallel_normalized3(
+        &direction0,
+        &direction1,
+        epsilon,
+    ));
 
     let unit0 = direction0.unit();
     let unit1 = direction1.unit();
@@ -541,9 +546,16 @@ impl<T: FloatScalar> Ray<T, Vector3<T>> {
         // stored magnitudes without repeating normalization work.
         let normal_metric = try_normalized3(&normal)?;
         let direction_metric = try_normalized3(&self.direction)?;
-        if try_nearly_perpendicular_normalized3(&normal_metric, &direction_metric, epsilon)? {
-            return None;
-        }
+
+        // A direction perpendicular to the normal is parallel to the plane.
+        // The shared gate rejects that in-tolerance relationship and invalid
+        // arithmetic, allowing only a valid non-parallel direction to reach
+        // the intersection solve.
+        return_none_unless_outside_angular_tolerance!(classify_nearly_perpendicular_normalized3(
+            &normal_metric,
+            &direction_metric,
+            epsilon,
+        ));
 
         let unit_normal = normal_metric.unit();
         let unit_direction = direction_metric.unit();
@@ -795,9 +807,16 @@ impl<T: FloatScalar> Plane<T> {
         // The normalized forms are reused for classification and the solve.
         let normal_metric = try_normalized3(&normal)?;
         let direction_metric = try_normalized3(&line.d)?;
-        if try_nearly_perpendicular_normalized3(&normal_metric, &direction_metric, epsilon)? {
-            return None;
-        }
+
+        // A direction perpendicular to the normal is parallel to the plane.
+        // The shared gate rejects that in-tolerance relationship and invalid
+        // arithmetic, allowing only a valid non-parallel direction to reach
+        // the original-parameter intersection solve.
+        return_none_unless_outside_angular_tolerance!(classify_nearly_perpendicular_normalized3(
+            &normal_metric,
+            &direction_metric,
+            epsilon,
+        ));
 
         let unit_normal = normal_metric.unit();
         let unit_direction = direction_metric.unit();
@@ -1068,10 +1087,15 @@ fn try_normal_from_spanning_vectors<T: FloatScalar>(
     let right_metric = try_normalized3(right)?;
 
     // Classify the prepared directions before normalizing their cross product.
-    // The helper also validates the caller-provided angular tolerance.
-    if try_nearly_parallel_normalized3(&left_metric, &right_metric, epsilon)? {
-        return None;
-    }
+    // The helper also validates the caller-provided angular tolerance. The
+    // shared gate rejects in-tolerance spans, which cannot define a stable
+    // plane normal, and invalid arithmetic; only a valid separated pair reaches
+    // the unit-cross-product calculation.
+    return_none_unless_outside_angular_tolerance!(classify_nearly_parallel_normalized3(
+        &left_metric,
+        &right_metric,
+        epsilon,
+    ));
 
     // Cross the unit directions so every intermediate stays bounded. A final
     // robust normalization removes the sine-angle magnitude and returns only
@@ -1306,6 +1330,36 @@ mod tests {
         let l0 = Line::new(&p0, &d, EPS_F32).expect("line should be valid");
         let l1 = Line::new(&p1, &d, EPS_F32).expect("line should be valid");
         assert!(shortest_segment3d_between_lines3d(&l0, &l1, EPS_F32).is_none());
+    }
+
+    /// Verifies that every primitive consumer maps the classifier's explicit
+    /// invalid state to its documented checked-query failure.
+    #[test]
+    fn test_angular_classification_invalid_state_fails_primitives_closed() {
+        let origin = Vector3::new(0.0f32, 0.0, 0.0);
+        let x = Vector3::new(1.0f32, 0.0, 0.0);
+        let y = Vector3::new(0.0f32, 1.0, 0.0);
+        let negative_z = Vector3::new(0.0f32, 0.0, -1.0);
+
+        // The closest-lines consumer reaches its parallel classifier with two
+        // valid, non-parallel directions; only the NaN tolerance is invalid.
+        let line_x = Line::new(&origin, &x, EPS_F32).expect("x must define a line");
+        let line_y = Line::new(&origin, &y, EPS_F32).expect("y must define a line");
+        assert!(shortest_segment3d_between_lines3d(&line_x, &line_y, f32::NAN).is_none());
+
+        // Ray/line-to-plane consumers use perpendicularity against the plane
+        // normal. An invalid tolerance must fail before either valid solve can
+        // be mistaken for an in- or out-of-tolerance angular result.
+        let plane = Plane::new(&Vector3::new(0.0f32, 0.0, 1.0), &origin);
+        let start = Vector3::new(0.0f32, 0.0, 1.0);
+        let ray = Ray::new(&start, &negative_z, EPS_F32).expect("-z must define a ray");
+        let line = Line::new(&start, &negative_z, EPS_F32).expect("-z must define a line");
+        assert!(ray.intersect_plane(&plane, f32::INFINITY).is_none());
+        assert!(plane.intersect_line(&line, 2.0).is_none());
+
+        // Plane-normal construction consumes the parallel classifier. Its
+        // valid right-angle edges still fail when policy itself is negative.
+        assert!(try_tri_normal(&origin, &x, &y, -EPS_F32).is_none());
     }
 
     /// Verifies that closest-line classification depends on direction angle,

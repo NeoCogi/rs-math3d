@@ -311,10 +311,14 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
     // Triangle degeneracy is an angular property: two non-zero edges are
     // degenerate when their normalized cross magnitude is within `epsilon`.
     // Supplying the cached decompositions lets the predicate compare their
-    // unit directions without normalizing either edge for a second time.
-    if try_nearly_parallel_normalized3(&normalized_edge1, &normalized_edge2, epsilon)? {
-        return None;
-    }
+    // unit directions without normalizing either edge for a second time. The
+    // shared gate rejects degenerate or invalid classifications and allows only
+    // a valid separated edge pair to proceed to the triangle normal.
+    return_none_unless_outside_angular_tolerance!(classify_nearly_parallel_normalized3(
+        &normalized_edge1,
+        &normalized_edge2,
+        epsilon,
+    ));
 
     // The cross of the unit edges has the triangle's normal direction and a
     // magnitude equal to the sine of their angle. Normalize that derived value
@@ -325,14 +329,14 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
 
     // A query direction perpendicular to the triangle normal lies parallel to
     // the triangle plane. Both operands are already normalized, so the cached
-    // predicate reduces this decision to bounded unit-vector arithmetic.
-    if try_nearly_perpendicular_normalized3(
+    // predicate reduces this decision to bounded unit-vector arithmetic. The
+    // shared gate rejects in-plane or invalid classifications and lets only a
+    // valid direction outside the tolerance band reach the intersection solve.
+    return_none_unless_outside_angular_tolerance!(classify_nearly_perpendicular_normalized3(
         &normalized_direction,
         &normalized_triangle_normal,
         epsilon,
-    )? {
-        return None;
-    }
+    ));
 
     // Use only unit vectors in the determinant. Its magnitude now depends on
     // angles, not on direction length or triangle area, and remains bounded
@@ -1184,6 +1188,40 @@ mod tests {
         // exponent ranges differ even though the generic algorithm is shared.
         assert_triangle_invalid_inputs_return_none::<f32>(f32::NAN, f32::INFINITY);
         assert_triangle_invalid_inputs_return_none::<f64>(f64::NAN, f64::INFINITY);
+    }
+
+    /// Confirms that the shared triangle solver maps an explicit invalid
+    /// angular classification to `None` for both supported parameter domains.
+    #[test]
+    fn test_triangle_intersection_rejects_invalid_angular_tolerances() {
+        let triangle = Tri3::new([
+            Vector3::new(0.0f32, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ]);
+        let start = Vector3::new(0.25f32, 0.25, 1.0);
+        let direction = Vector3::new(0.0f32, 0.0, -1.0);
+
+        // Geometry is deliberately ordinary, isolating the enum's `Invalid`
+        // state to the non-finite or out-of-range tolerance in each iteration.
+        for epsilon in [-EPS_F32, 1.0 + EPS_F32, f32::NAN, f32::INFINITY] {
+            assert!(super::triangle_intersection_from_point_dir(
+                &start,
+                &direction,
+                &triangle,
+                epsilon,
+                super::TriangleIntersectionKind::Ray,
+            )
+            .is_none());
+            assert!(super::triangle_intersection_from_point_dir(
+                &start,
+                &direction,
+                &triangle,
+                epsilon,
+                super::TriangleIntersectionKind::Line,
+            )
+            .is_none());
+        }
     }
 
     #[test]

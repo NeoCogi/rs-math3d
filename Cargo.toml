@@ -1,6 +1,6 @@
 [package]
 name = "rs-math3d"
-version = "0.14.0"
+version = "0.20.0"
 license = "BSD-3-Clause"
 authors = [
     "Raja Lehtihet <raja.lehtihet@gmail.com>",
@@ -10,6 +10,8 @@ edition = "2018"
 description = "2D/3D math for graphics and geometry, with explicit no_std support"
 repository = "https://github.com/NeoCogi/rs-math3d"
 readme = "README.md"
+# Local agent instructions are workspace tooling, not part of the published crate.
+exclude = [".agents/**"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

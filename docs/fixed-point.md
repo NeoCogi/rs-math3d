@@ -279,7 +279,7 @@ Fixed analytic math is allocation-free and works with `core` alone:
 
 ```toml
 [dependencies]
-rs-math3d = { version = "0.14.0", default-features = false }
+rs-math3d = { version = "0.20.0", default-features = false }
 ```
 
 The crate's `f32`/`f64` analytic implementations require a floating backend:

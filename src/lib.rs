@@ -103,7 +103,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! rs-math3d = { version = "0.14.0", default-features = false, features = ["libm"] }
+//! rs-math3d = { version = "0.20.0", default-features = false, features = ["libm"] }
 //! ```
 //!
 //! Disabling default features selects a fixed-only analytic build; floating

@@ -258,6 +258,74 @@ macro_rules! cofactors4 {
     }};
 }
 
+/// Determinant-only schedule; evaluates only the first cofactor row.
+macro_rules! determinant2 {
+    ($this:expr,$sum:ident,$neg:ident $(,$q:tt)?) => {{
+        let m00 = $this.col[0].x;
+        let m01 = $this.col[1].x;
+        let m10 = $this.col[0].y;
+        let m11 = $this.col[1].y;
+        let c00=m11;
+        let c01=m10.$neg() $( $q )?;
+        let determinant = T::$sum(&[(m00,c00,false),(m01,c01,false)]) $( $q )?;
+        determinant
+    }};
+}
+
+/// Determinant-only schedule; evaluates only the first cofactor row.
+macro_rules! determinant3 {
+    ($this:expr,$sum:ident,$neg:ident $(,$q:tt)?) => {{
+        let m00 = $this.col[0].x;
+        let m01 = $this.col[1].x;
+        let m02 = $this.col[2].x;
+        let m10 = $this.col[0].y;
+        let m11 = $this.col[1].y;
+        let m12 = $this.col[2].y;
+        let m20 = $this.col[0].z;
+        let m21 = $this.col[1].z;
+        let m22 = $this.col[2].z;
+        let c00 = T::$sum(&[(m11,m22,false),(m12,m21,true)]) $( $q )?;
+        let c01 = T::$sum(&[(m10,m22,true),(m12,m20,false)]) $( $q )?;
+        let c02 = T::$sum(&[(m10,m21,false),(m11,m20,true)]) $( $q )?;
+        let determinant = T::$sum(&[(m00,c00,false),(m01,c01,false),(m02,c02,false)]) $( $q )?;
+        determinant
+    }};
+}
+
+/// Determinant-only schedule; evaluates only the first cofactor row.
+macro_rules! determinant4 {
+    ($this:expr,$sum:ident,$neg:ident $(,$q:tt)?) => {{
+        let m00 = $this.col[0].x;
+        let m01 = $this.col[1].x;
+        let m02 = $this.col[2].x;
+        let m03 = $this.col[3].x;
+        let m10 = $this.col[0].y;
+        let m11 = $this.col[1].y;
+        let m12 = $this.col[2].y;
+        let m13 = $this.col[3].y;
+        let m20 = $this.col[0].z;
+        let m21 = $this.col[1].z;
+        let m22 = $this.col[2].z;
+        let m23 = $this.col[3].z;
+        let m30 = $this.col[0].w;
+        let m31 = $this.col[1].w;
+        let m32 = $this.col[2].w;
+        let m33 = $this.col[3].w;
+        let b0 = T::$sum(&[(m20,m31,false),(m21,m30,true)]) $( $q )?;
+        let b1 = T::$sum(&[(m20,m32,false),(m22,m30,true)]) $( $q )?;
+        let b2 = T::$sum(&[(m20,m33,false),(m23,m30,true)]) $( $q )?;
+        let b3 = T::$sum(&[(m21,m32,false),(m22,m31,true)]) $( $q )?;
+        let b4 = T::$sum(&[(m21,m33,false),(m23,m31,true)]) $( $q )?;
+        let b5 = T::$sum(&[(m22,m33,false),(m23,m32,true)]) $( $q )?;
+        let c00 = T::$sum(&[(m11,b5,false),(m12,b4,true),(m13,b3,false)]) $( $q )?;
+        let c01 = T::$sum(&[(m10,b5,true),(m12,b2,false),(m13,b1,true)]) $( $q )?;
+        let c02 = T::$sum(&[(m10,b4,false),(m11,b2,true),(m13,b0,false)]) $( $q )?;
+        let c03 = T::$sum(&[(m10,b3,true),(m11,b1,false),(m12,b0,true)]) $( $q )?;
+        let determinant = T::$sum(&[(m00,c00,false),(m01,c01,false),(m02,c02,false),(m03,c03,false)]) $( $q )?;
+        determinant
+    }};
+}
+
 /// A 2x2 matrix stored in column-major order.
 ///
 /// # Layout
@@ -374,11 +442,11 @@ impl<T: Scalar> Matrix2<T> {
             if !self.col[column].x.is_finite() { return Err(MathError::NonFinite); }
             if !self.col[column].y.is_finite() { return Err(MathError::NonFinite); }
         });
-        Ok(cofactors2!(self, checked_sum_products, checked_neg, ?).1)
+        Ok(determinant2!(self, checked_sum_products, checked_neg, ?))
     }
 
     pub fn determinant(&self) -> T {
-        cofactors2!(self, sum_products, neg).1
+        determinant2!(self, sum_products, neg)
     }
 
     /// Returns the transpose of the matrix.
@@ -662,11 +730,11 @@ impl<T: Scalar> Matrix3<T> {
             if !self.col[column].y.is_finite() { return Err(MathError::NonFinite); }
             if !self.col[column].z.is_finite() { return Err(MathError::NonFinite); }
         });
-        Ok(cofactors3!(self, checked_sum_products, checked_neg, ?).1)
+        Ok(determinant3!(self, checked_sum_products, checked_neg, ?))
     }
 
     pub fn determinant(&self) -> T {
-        cofactors3!(self, sum_products, neg).1
+        determinant3!(self, sum_products, neg)
     }
 
     /// Returns the transpose of the matrix.
@@ -927,32 +995,17 @@ impl<T: RealScalar> Matrix3<T> {
     /// # Returns
     /// - `Some(matrix)` for a valid axis
     /// - `None` if the axis length is too small
-    pub fn of_axis_angle(axis: &Vector3<T>, angle: T, epsilon: T) -> Option<Self> {
-        let n = axis.checked_normalize(epsilon).ok()?;
-        let c = angle.checked_cos().ok()?;
-        let s = angle.checked_sin().ok()?;
-        let ux = n.x;
-        let uy = n.y;
-        let uz = n.z;
-        let uxx = ux * ux;
-        let uyy = uy * uy;
-        let uzz = uz * uz;
+    pub fn of_axis_angle(axis: &Vector3<T>, angle: T) -> Self {
+        crate::Quat::of_axis_angle(axis, angle).mat3()
+    }
 
-        let oc = <T as One>::one() - c;
-
-        let m0 = c + uxx * oc;
-        let m1 = uy * ux * oc + uz * s;
-        let m2 = uz * ux * oc - uy * s;
-
-        let m3 = ux * uy * oc - uz * s;
-        let m4 = c + uyy * oc;
-        let m5 = uz * uy * oc + ux * s;
-
-        let m6 = ux * uz * oc + uy * s;
-        let m7 = uy * uz * oc - ux * s;
-        let m8 = c + uzz * oc;
-
-        Some(Self::new(m0, m1, m2, m3, m4, m5, m6, m7, m8))
+    /// Axis-angle construction with explicit normalization and range checks.
+    pub fn checked_of_axis_angle(
+        axis: &Vector3<T>,
+        angle: T,
+        epsilon: T,
+    ) -> Result<Self, MathError> {
+        crate::Quat::checked_of_axis_angle(axis, angle, epsilon)?.checked_mat3()
     }
 }
 
@@ -1059,11 +1112,11 @@ impl<T: Scalar> Matrix4<T> {
             if !self.col[column].z.is_finite() { return Err(MathError::NonFinite); }
             if !self.col[column].w.is_finite() { return Err(MathError::NonFinite); }
         });
-        Ok(cofactors4!(self, checked_sum_products, checked_neg, ?).1)
+        Ok(determinant4!(self, checked_sum_products, checked_neg, ?))
     }
 
     pub fn determinant(&self) -> T {
-        cofactors4!(self, sum_products, neg).1
+        determinant4!(self, sum_products, neg)
     }
 
     /// Returns the transpose of the matrix.
@@ -1098,26 +1151,36 @@ impl<T: Scalar> Matrix4<T> {
     }
 
     /// Returns true if the matrix is affine (last row equals [0, 0, 0, 1]).
-    pub fn is_affine(&self, epsilon: T) -> bool {
-        let zero = <T as Zero>::zero();
-        if !(epsilon >= zero) {
-            return false;
+    /// Tests the affine last row with ordinary scalar arithmetic.
+    pub fn is_affine(&self, epsilon: T) -> bool
+    where
+        T: RealScalar,
+    {
+        self.col[0].w.tabs() <= epsilon
+            && self.col[1].w.tabs() <= epsilon
+            && self.col[2].w.tabs() <= epsilon
+            && (self.col[3].w - <T as One>::one()).tabs() <= epsilon
+    }
+    /// Tests affine structure with explicit finite/tolerance/range validation.
+    pub fn checked_is_affine(&self, epsilon: T) -> Result<bool, MathError>
+    where
+        T: RealScalar,
+    {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
+            return Err(MathError::InvalidTolerance);
         }
-        let absolute = |value: T| {
-            if value < zero {
-                value.checked_neg().ok()
-            } else {
-                Some(value)
-            }
-        };
-        let inside = |value: T| absolute(value).map_or(false, |v| v <= epsilon);
-        inside(self.col[0].w)
-            && inside(self.col[1].w)
-            && inside(self.col[2].w)
+        unroll_indices!(column in [0,1,2,3] {
+            let v=self.col[column];
+            if !v.x.is_finite() || !v.y.is_finite() || !v.z.is_finite() || !v.w.is_finite() { return Err(MathError::NonFinite); }
+        });
+        Ok(self.col[0].w.checked_abs()? <= epsilon
+            && self.col[1].w.checked_abs()? <= epsilon
+            && self.col[2].w.checked_abs()? <= epsilon
             && self.col[3]
                 .w
-                .checked_sub(<T as One>::one())
-                .map_or(false, inside)
+                .checked_sub(<T as One>::one())?
+                .checked_abs()?
+                <= epsilon)
     }
 
     /// Inverts using the default reciprocal/adjugate path.
@@ -1304,7 +1367,7 @@ impl<T: Scalar> Matrix4<T> {
     where
         T: RealScalar,
     {
-        if !self.is_affine(T::epsilon()) {
+        if !self.checked_is_affine(T::epsilon())? {
             return Err(MathError::Domain);
         }
         let rot = Matrix3::new(
@@ -1682,7 +1745,9 @@ mod tests {
     #[test]
     fn test_matrix3_axis_angle_zero_axis() {
         let axis = Vector3::<f32>::new(0.0, 0.0, 0.0);
-        assert!(Matrix3::of_axis_angle(&axis, 1.0, EPS_F32).is_none());
+        assert!(Matrix3::checked_of_axis_angle(&axis, 1.0, EPS_F32)
+            .ok()
+            .is_none());
     }
 
     #[test]

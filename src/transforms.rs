@@ -127,6 +127,25 @@ pub fn scale<T: Scalar>(scale: Vector3<T>) -> Matrix4<T> {
     )
 }
 
+/// Translation assembly with finite component validation.
+pub fn checked_translate<T: Scalar>(v: Vector3<T>) -> Result<Matrix4<T>, MathError> {
+    if !v.x.is_finite() || !v.y.is_finite() || !v.z.is_finite() {
+        return Err(MathError::NonFinite);
+    }
+    Ok(translate(v))
+}
+/// Scale assembly with finite component validation.
+pub fn checked_scale<T: Scalar>(v: Vector3<T>) -> Result<Matrix4<T>, MathError> {
+    if !v.x.is_finite() || !v.y.is_finite() || !v.z.is_finite() {
+        return Err(MathError::NonFinite);
+    }
+    Ok(scale(v))
+}
+/// Quaternion rotation with checked normalization and coefficient arithmetic.
+pub fn checked_rotation_from_quat<T: RealScalar>(q: &Quat<T>) -> Result<Matrix4<T>, MathError> {
+    q.checked_mat4()
+}
+
 /// Creates a 4x4 rotation matrix from a quaternion.
 ///
 /// Converts a quaternion to its equivalent rotation matrix.
@@ -137,22 +156,19 @@ pub fn rotation_from_quat<T: RealScalar>(q: &Quat<T>) -> Matrix4<T> {
     Quat::mat4(q)
 }
 
-/// Creates a 4x4 rotation matrix from an axis and angle.
-///
-/// # Parameters
-/// - `axis`: The rotation axis (will be normalized)
-/// - `angle`: The rotation angle in radians
-/// - `epsilon`: Minimum axis length to treat as valid
-///
-/// # Returns
-/// - `Some(matrix)` for a valid axis
-/// - `None` if the axis length is too small
-pub fn rotation_from_axis_angle<T: RealScalar>(
+/// Constructs a rotation with unchecked axis normalization and analytic arithmetic.
+/// Requires a nonzero finite axis, finite radian angle and representable intermediates.
+pub fn rotation_from_axis_angle<T: RealScalar>(axis: &Vector3<T>, angle: T) -> Matrix4<T> {
+    Quat::of_axis_angle(axis, angle).mat4()
+}
+
+/// Axis-angle transform with explicit tolerance and checked arithmetic.
+pub fn checked_rotation_from_axis_angle<T: RealScalar>(
     axis: &Vector3<T>,
     angle: T,
     epsilon: T,
-) -> Option<Matrix4<T>> {
-    Quat::of_axis_angle(axis, angle, epsilon).map(|q| q.mat4())
+) -> Result<Matrix4<T>, MathError> {
+    Quat::checked_of_axis_angle(axis, angle, epsilon)?.checked_mat4()
 }
 
 /// Checked transform_vec3 construction/calculation for finite represented scalars.
@@ -175,7 +191,8 @@ pub fn checked_transform_vec3<T: RealScalar>(
 ///
 /// The vector is treated as a point (w=1) and the result is divided by w.
 pub fn transform_vec3<T: RealScalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
-    checked_transform_vec3(m, v).expect("transform_vec3 calculation failed")
+    let out = Matrix4::mul_matrix_vector(m, &Vector4::new(v.x, v.y, v.z, <T as One>::one()));
+    Vector3::new(out.x / out.w, out.y / out.w, out.z / out.w)
 }
 
 /// Checked project3 construction/calculation for finite represented scalars.
@@ -224,7 +241,13 @@ pub fn project3<T: RealScalar>(
     rt: &Vector2<T>,
     pt: &Vector3<T>,
 ) -> Vector3<T> {
-    checked_project3(world, persp, lb, rt, pt).expect("project3 calculation failed")
+    let point = transform_vec3(&Matrix4::mul_matrix_matrix(persp, world), pt);
+    let one = <T as One>::one();
+    Vector3::new(
+        (rt.x - lb.x) * ((point.x + one) * T::half()) + lb.x,
+        (rt.y - lb.y) * ((point.y + one) * T::half()) + lb.y,
+        (point.z + one) * T::half(),
+    )
 }
 
 /// Checked unproject3 construction/calculation for finite represented scalars.
@@ -238,7 +261,7 @@ pub fn checked_unproject3<T: RealScalar>(
     pt: &Vector3<T>,
 ) -> Result<Vector3<T>, MathError> {
     let combined = Matrix4::checked_mul_matrix_matrix(persp, world)?;
-    let inverse = if combined.is_affine(T::epsilon()) {
+    let inverse = if combined.checked_is_affine(T::epsilon())? {
         combined.checked_inverse_affine()?
     } else {
         combined.checked_inverse()?
@@ -276,7 +299,16 @@ pub fn unproject3<T: RealScalar>(
     rt: &Vector2<T>,
     pt: &Vector3<T>,
 ) -> Vector3<T> {
-    checked_unproject3(world, persp, lb, rt, pt).expect("unproject3 calculation failed")
+    let inverse = Matrix4::mul_matrix_matrix(persp, world).inverse();
+    let one = <T as One>::one();
+    transform_vec3(
+        &inverse,
+        &Vector3::new(
+            (pt.x - lb.x) / (rt.x - lb.x) * T::two() - one,
+            (pt.y - lb.y) / (rt.y - lb.y) * T::two() - one,
+            pt.z * T::two() - one,
+        ),
+    )
 }
 
 /// Checked frustum construction/calculation for finite represented scalars.
@@ -329,7 +361,29 @@ pub fn checked_frustum<T: RealScalar>(
 ///
 /// The frustum is defined by the near and far clipping planes.
 pub fn frustum<T: RealScalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
-    checked_frustum(lbn, rtf).expect("frustum calculation failed")
+    let zero = <T as Zero>::zero();
+    let one = <T as One>::one();
+    let width = rtf.x - lbn.x;
+    let height = rtf.y - lbn.y;
+    let depth = rtf.z - lbn.z;
+    Matrix4::new(
+        lbn.z / width * T::two(),
+        zero,
+        zero,
+        zero,
+        zero,
+        lbn.z / height * T::two(),
+        zero,
+        zero,
+        one + T::two() * (lbn.x / width),
+        one + T::two() * (lbn.y / height),
+        -(one + T::two() * (lbn.z / depth)),
+        -one,
+        zero,
+        zero,
+        -(lbn.z * (rtf.z / depth) * T::two()),
+        zero,
+    )
 }
 
 /// Checked ortho4 construction/calculation for finite represented scalars.
@@ -386,7 +440,29 @@ pub fn checked_ortho4<T: RealScalar>(
 ///
 /// Objects maintain their size regardless of depth in orthographic projection.
 pub fn ortho4<T: RealScalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) -> Matrix4<T> {
-    checked_ortho4(left, right, bottom, top, near, far).expect("ortho4 calculation failed")
+    let zero = <T as Zero>::zero();
+    let one = <T as One>::one();
+    let width = right - left;
+    let height = top - bottom;
+    let depth = far - near;
+    Matrix4::new(
+        T::two() / width,
+        zero,
+        zero,
+        zero,
+        zero,
+        T::two() / height,
+        zero,
+        zero,
+        zero,
+        zero,
+        -T::two() / depth,
+        zero,
+        -(one + T::two() * (left / width)),
+        -(one + T::two() * (bottom / height)),
+        -(one + T::two() * (near / depth)),
+        one,
+    )
 }
 
 /// Checked perspective construction/calculation for finite represented scalars.
@@ -450,7 +526,28 @@ pub fn checked_perspective<T: RealScalar>(
 ///
 /// Uses the standard OpenGL perspective projection formula.
 pub fn perspective<T: RealScalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T> {
-    checked_perspective(fovy, aspect, near, far).expect("perspective calculation failed")
+    let one = <T as One>::one();
+    let zero = <T as Zero>::zero();
+    let f = one / (fovy * T::half()).ttan();
+    let depth = far - near;
+    Matrix4::new(
+        f / aspect,
+        zero,
+        zero,
+        zero,
+        zero,
+        f,
+        zero,
+        zero,
+        zero,
+        zero,
+        -(one + T::two() * (near / depth)),
+        -one,
+        zero,
+        zero,
+        -(near * (far / depth) * T::two()),
+        zero,
+    )
 }
 
 /// Checked lookat construction/calculation for finite represented scalars.
@@ -487,23 +584,33 @@ pub fn checked_lookat<T: RealScalar>(
     ))
 }
 
-/// Creates a view matrix looking from eye position to target.
-///
-/// # Parameters
-/// - `eye`: Camera position
-/// - `dest`: Target position to look at
-/// - `up`: Up vector (typically (0, 1, 0))
-///
-/// The resulting matrix transforms from world space to view space.
-///
-/// # Preconditions
-/// - `eye` and `dest` must not be the same point
-/// - `up` must not be parallel, or nearly parallel, to the viewing direction
-///
-/// Panics when these preconditions or checked range requirements fail.
-/// Use [`checked_lookat`] to receive the numerical error.
+/// Builds a view matrix with ordinary arithmetic, without validation.
+/// Requires distinct eye/destination points, an independent up direction,
+/// and representable subtraction/cross/norm intermediates. See `checked_lookat` for errors.
 pub fn lookat<T: RealScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
-    checked_lookat(eye, dest, up).expect("lookat calculation failed")
+    let zero = <T as Zero>::zero();
+    let one = <T as One>::one();
+    let forward = (*dest - *eye).normalize();
+    let side = Vector3::cross(&forward, &up.normalize()).normalize();
+    let up = Vector3::cross(&side, &forward).normalize();
+    Matrix4::new(
+        side.x,
+        up.x,
+        -forward.x,
+        zero,
+        side.y,
+        up.y,
+        -forward.y,
+        zero,
+        side.z,
+        up.z,
+        -forward.z,
+        zero,
+        -Vector3::dot(&side, eye),
+        -Vector3::dot(&up, eye),
+        Vector3::dot(&forward, eye),
+        one,
+    )
 }
 
 /// Components of a nonsingular affine transformation.
@@ -530,19 +637,15 @@ pub struct AffineParts<T: RealScalar> {
     pub shear: Vector3<T>,
 }
 
-/// Decomposes a nonsingular affine matrix into translation, rotation, shear,
-/// and scale.
-///
-/// The returned parts reconstruct the input as `T * R * H * S`; see
-/// [`AffineParts`] for the shear convention. A reflected transform is
-/// canonicalized to three negative scale components and a proper rotation.
-///
-/// Returns `None` for projective matrices or when any QR pivot is at or below
-/// [`RealScalar::epsilon`].
-pub fn decompose_affine<T: RealScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>> {
+/// Decomposes a finite nonsingular affine matrix as `T * R * H * S`.
+/// Uses checked QR arithmetic, rejects pivots at or below scalar epsilon, and
+/// propagates arithmetic errors. Reflection is represented by three negative scales.
+pub fn checked_decompose_affine<T: RealScalar>(
+    m: &Matrix4<T>,
+) -> Result<AffineParts<T>, MathError> {
     let epsilon = T::epsilon();
-    if !m.is_affine(epsilon) {
-        return None;
+    if !m.checked_is_affine(epsilon)? {
+        return Err(MathError::Degenerate);
     }
 
     let a0 = Vector3::new(m.col[0].x, m.col[0].y, m.col[0].z);
@@ -551,84 +654,139 @@ pub fn decompose_affine<T: RealScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>>
 
     // Modified Gram-Schmidt gives A = R * U. Dividing the off-diagonal
     // entries of U by its diagonal separates U into H * S.
-    let scale_x = a0.checked_length().ok()?;
+    let scale_x = a0.checked_length()?;
     if scale_x.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
-        return None;
+        return Err(MathError::Degenerate);
     }
-    let mut r0 = Vector3::checked_div_vs(&a0, scale_x).ok()?;
+    let mut r0 = Vector3::checked_div_vs(&a0, scale_x)?;
 
-    let projection_xy = Vector3::checked_dot(&r0, &a1).ok()?;
+    let projection_xy = Vector3::checked_dot(&r0, &a1)?;
     let a1_orthogonal =
-        Vector3::checked_sub_vv(&a1, &Vector3::checked_mul_vs(&r0, projection_xy).ok()?).ok()?;
-    let scale_y = a1_orthogonal.checked_length().ok()?;
+        Vector3::checked_sub_vv(&a1, &Vector3::checked_mul_vs(&r0, projection_xy)?)?;
+    let scale_y = a1_orthogonal.checked_length()?;
     if scale_y.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
-        return None;
+        return Err(MathError::Degenerate);
     }
-    let mut r1 = Vector3::checked_div_vs(&a1_orthogonal, scale_y).ok()?;
-    let shear_xy = projection_xy.checked_div(scale_y).ok()?;
+    let mut r1 = Vector3::checked_div_vs(&a1_orthogonal, scale_y)?;
+    let shear_xy = projection_xy.checked_div(scale_y)?;
 
-    let projection_xz = Vector3::checked_dot(&r0, &a2).ok()?;
-    let a2_without_x =
-        Vector3::checked_sub_vv(&a2, &Vector3::checked_mul_vs(&r0, projection_xz).ok()?).ok()?;
-    let projection_yz = Vector3::checked_dot(&r1, &a2_without_x).ok()?;
-    let a2_orthogonal = Vector3::checked_sub_vv(
-        &a2_without_x,
-        &Vector3::checked_mul_vs(&r1, projection_yz).ok()?,
-    )
-    .ok()?;
-    let scale_z = a2_orthogonal.checked_length().ok()?;
+    let projection_xz = Vector3::checked_dot(&r0, &a2)?;
+    let a2_without_x = Vector3::checked_sub_vv(&a2, &Vector3::checked_mul_vs(&r0, projection_xz)?)?;
+    let projection_yz = Vector3::checked_dot(&r1, &a2_without_x)?;
+    let a2_orthogonal =
+        Vector3::checked_sub_vv(&a2_without_x, &Vector3::checked_mul_vs(&r1, projection_yz)?)?;
+    let scale_z = a2_orthogonal.checked_length()?;
     if scale_z.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
-        return None;
+        return Err(MathError::Degenerate);
     }
-    let mut r2 = Vector3::checked_div_vs(&a2_orthogonal, scale_z).ok()?;
-    let shear_xz = projection_xz.checked_div(scale_z).ok()?;
-    let shear_yz = projection_yz.checked_div(scale_z).ok()?;
+    let mut r2 = Vector3::checked_div_vs(&a2_orthogonal, scale_z)?;
+    let shear_xz = projection_xz.checked_div(scale_z)?;
+    let shear_yz = projection_yz.checked_div(scale_z)?;
 
     let mut scale = Vector3::new(scale_x, scale_y, scale_z);
-    let rotation_determinant =
-        Vector3::checked_dot(&r0, &Vector3::checked_cross(&r1, &r2).ok()?).ok()?;
-    if rotation_determinant
-        .checked_abs()
-        .ok()?
-        .partial_cmp(&epsilon)
+    let rotation_determinant = Vector3::checked_dot(&r0, &Vector3::checked_cross(&r1, &r2)?)?;
+    if rotation_determinant.checked_abs()?.partial_cmp(&epsilon)
         != Some(core::cmp::Ordering::Greater)
     {
-        return None;
+        return Err(MathError::Degenerate);
     }
 
     if rotation_determinant < <T as Zero>::zero() {
         // Negating both R and S leaves R * H * S unchanged. Flipping all
         // three axes preserves the crate's established reflection convention
         // while making R proper for quaternion conversion.
-        r0 = Vector3::checked_mul_vs(&r0, -<T as One>::one()).ok()?;
-        r1 = Vector3::checked_mul_vs(&r1, -<T as One>::one()).ok()?;
-        r2 = Vector3::checked_mul_vs(&r2, -<T as One>::one()).ok()?;
-        scale = Vector3::checked_mul_vs(&scale, -<T as One>::one()).ok()?;
+        r0 = Vector3::checked_mul_vs(&r0, -<T as One>::one())?;
+        r1 = Vector3::checked_mul_vs(&r1, -<T as One>::one())?;
+        r2 = Vector3::checked_mul_vs(&r2, -<T as One>::one())?;
+        scale = Vector3::checked_mul_vs(&scale, -<T as One>::one())?;
     }
 
     let rotation_matrix = Matrix3::new(r0.x, r0.y, r0.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z);
 
-    Some(AffineParts {
+    Ok(AffineParts {
         translation: Vector3::new(m.col[3].x, m.col[3].y, m.col[3].z),
-        rotation: Quat::of_matrix3(&rotation_matrix),
+        rotation: Quat::checked_of_matrix3(&rotation_matrix)?,
         scale,
         shear: Vector3::new(shear_xy, shear_xz, shear_yz),
     })
 }
 
-/// Decomposes an affine, shear-free transformation into scale, rotation, and
-/// translation.
-///
-/// This compatibility wrapper uses [`decompose_affine`] and returns `None`
-/// when any absolute shear coefficient is greater than
-/// [`RealScalar::epsilon`]. Coefficients inside that inclusive tolerance band
-/// are treated as numerical zero.
-pub fn decompose<T: RealScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
-    let parts = decompose_affine(m)?;
+/// Decomposes a nonsingular affine matrix without validation. Requires finite
+/// affine inputs, nonzero QR pivots and representable intermediate arithmetic.
+pub fn decompose_affine<T: RealScalar>(m: &Matrix4<T>) -> AffineParts<T> {
+    let a0 = Vector3::new(m.col[0].x, m.col[0].y, m.col[0].z);
+    let a1 = Vector3::new(m.col[1].x, m.col[1].y, m.col[1].z);
+    let a2 = Vector3::new(m.col[2].x, m.col[2].y, m.col[2].z);
+
+    // Modified Gram-Schmidt gives A = R * U. Dividing the off-diagonal
+    // entries of U by its diagonal separates U into H * S.
+    let scale_x = a0.length();
+    let mut r0 = Vector3::div_vs(&a0, scale_x);
+
+    let projection_xy = Vector3::dot(&r0, &a1);
+    let a1_orthogonal = Vector3::sub_vv(&a1, &Vector3::mul_vs(&r0, projection_xy));
+    let scale_y = a1_orthogonal.length();
+    let mut r1 = Vector3::div_vs(&a1_orthogonal, scale_y);
+    let shear_xy = projection_xy / scale_y;
+
+    let projection_xz = Vector3::dot(&r0, &a2);
+    let a2_without_x = Vector3::sub_vv(&a2, &Vector3::mul_vs(&r0, projection_xz));
+    let projection_yz = Vector3::dot(&r1, &a2_without_x);
+    let a2_orthogonal = Vector3::sub_vv(&a2_without_x, &Vector3::mul_vs(&r1, projection_yz));
+    let scale_z = a2_orthogonal.length();
+    let mut r2 = Vector3::div_vs(&a2_orthogonal, scale_z);
+    let shear_xz = projection_xz / scale_z;
+    let shear_yz = projection_yz / scale_z;
+
+    let mut scale = Vector3::new(scale_x, scale_y, scale_z);
+    let rotation_determinant = Vector3::dot(&r0, &Vector3::cross(&r1, &r2));
+    if rotation_determinant < <T as Zero>::zero() {
+        // Negating both R and S leaves R * H * S unchanged. Flipping all
+        // three axes preserves the crate's established reflection convention
+        // while making R proper for quaternion conversion.
+        r0 = Vector3::mul_vs(&r0, -<T as One>::one());
+        r1 = Vector3::mul_vs(&r1, -<T as One>::one());
+        r2 = Vector3::mul_vs(&r2, -<T as One>::one());
+        scale = Vector3::mul_vs(&scale, -<T as One>::one());
+    }
+
+    let rotation_matrix = Matrix3::new(r0.x, r0.y, r0.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z);
+
+    AffineParts {
+        translation: Vector3::new(m.col[3].x, m.col[3].y, m.col[3].z),
+        rotation: Quat::of_matrix3(&rotation_matrix),
+        scale,
+        shear: Vector3::new(shear_xy, shear_xz, shear_yz),
+    }
+}
+
+/// Returns a checked shear-free `(scale, rotation, translation)` decomposition.
+/// `Ok(None)` denotes shear above scalar epsilon; invalid affine geometry or
+/// arithmetic returns `MathError`.
+pub fn checked_decompose<T: RealScalar>(
+    m: &Matrix4<T>,
+) -> Result<Option<(Vector3<T>, Quat<T>, Vector3<T>)>, MathError> {
+    let parts = checked_decompose_affine(m)?;
     let epsilon = T::epsilon();
-    if parts.shear.x.checked_abs().ok()? > epsilon
-        || parts.shear.y.checked_abs().ok()? > epsilon
-        || parts.shear.z.checked_abs().ok()? > epsilon
+    if parts.shear.x.checked_abs()? > epsilon
+        || parts.shear.y.checked_abs()? > epsilon
+        || parts.shear.z.checked_abs()? > epsilon
+    {
+        return Ok(None);
+    }
+
+    Ok(Some((parts.scale, parts.rotation, parts.translation)))
+}
+
+/// Returns an unchecked shear-free `(scale, rotation, translation)` decomposition.
+/// Requires valid affine input and representable QR arithmetic. Returns `None`
+/// when any shear coefficient exceeds scalar epsilon.
+pub fn decompose<T: RealScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
+    let parts = decompose_affine(m);
+    let epsilon = T::epsilon();
+    if parts.shear.x.tabs() > epsilon
+        || parts.shear.y.tabs() > epsilon
+        || parts.shear.z.tabs() > epsilon
     {
         return None;
     }
@@ -680,7 +838,9 @@ mod tests {
     }
 
     fn assert_affine_roundtrip(matrix: &Matrix4<f32>) -> AffineParts<f32> {
-        let parts = decompose_affine(matrix).expect("matrix should decompose");
+        let parts = checked_decompose_affine(matrix)
+            .ok()
+            .expect("matrix should decompose");
         assert_matrix4_close(&recompose_affine(&parts), matrix, 0.0001);
         parts
     }
@@ -689,14 +849,18 @@ mod tests {
     pub fn test_decompose() {
         let ms = scale(Vector3::<f32>::new(4.0, 5.0, 6.0));
         let mt = translate(Vector3::<f32>::new(1.0, 2.0, 3.0));
-        let q = Quat::<f32>::of_axis_angle(&Vector3::new(1.0, 1.0, 1.0), 1.0, EPS_F32)
+        let q = Quat::<f32>::checked_of_axis_angle(&Vector3::new(1.0, 1.0, 1.0), 1.0, EPS_F32)
+            .ok()
             .expect("axis length too small");
         let mr = rotation_from_quat(&q);
 
         let m = mt * mr * ms;
         assert_affine_roundtrip(&m);
 
-        let (s, r, t) = decompose(&m).expect("TRS matrix should decompose");
+        let (s, r, t) = checked_decompose(&m)
+            .ok()
+            .flatten()
+            .expect("TRS matrix should decompose");
         let reconstructed = translate(t) * rotation_from_quat(&r) * scale(s);
         assert_matrix4_close(&reconstructed, &m, 0.0001);
     }
@@ -714,20 +878,21 @@ mod tests {
         }
 
         let translation = translate(Vector3::new(3.0, -2.0, 5.0));
-        let rotation = rotation_from_axis_angle(&Vector3::new(1.0, 2.0, 3.0), 0.7, EPS_F32)
+        let rotation = checked_rotation_from_axis_angle(&Vector3::new(1.0, 2.0, 3.0), 0.7, EPS_F32)
             .expect("axis should be valid");
         let matrix = translation
             * rotation
             * shear_matrix(Vector3::new(0.2, -0.3, 0.4))
             * scale(Vector3::new(2.0, 3.0, 4.0));
         assert_affine_roundtrip(&matrix);
-        assert!(decompose(&matrix).is_none());
+        assert!(checked_decompose(&matrix).ok().flatten().is_none());
     }
 
     #[test]
     fn test_decompose_affine_reflection_convention() {
-        let rotation = rotation_from_axis_angle(&Vector3::new(1.0, -2.0, 0.5), 1.1, EPS_F32)
-            .expect("axis should be valid");
+        let rotation =
+            checked_rotation_from_axis_angle(&Vector3::new(1.0, -2.0, 0.5), 1.1, EPS_F32)
+                .expect("axis should be valid");
         let shear = shear_matrix(Vector3::new(0.2, -0.15, 0.35));
         let scales = [
             Vector3::new(-2.0, 3.0, 4.0),
@@ -761,7 +926,10 @@ mod tests {
             Vector3::new(0.0, 0.0, EPS_F32),
         ] {
             let matrix = shear_matrix(shear);
-            let (s, r, t) = decompose(&matrix).expect("epsilon-band shear should be accepted");
+            let (s, r, t) = checked_decompose(&matrix)
+                .ok()
+                .flatten()
+                .expect("epsilon-band shear should be accepted");
             let reconstructed = translate(t) * rotation_from_quat(&r) * scale(s);
             assert_matrix4_close(&reconstructed, &matrix, EPS_F32);
         }
@@ -771,8 +939,13 @@ mod tests {
             Vector3::new(0.0, -EPS_F32 * 2.0, 0.0),
             Vector3::new(0.0, 0.0, EPS_F32 * 2.0),
         ] {
-            assert!(decompose(&shear_matrix(shear)).is_none());
-            assert!(decompose_affine(&shear_matrix(shear)).is_some());
+            assert!(checked_decompose(&shear_matrix(shear))
+                .ok()
+                .flatten()
+                .is_none());
+            assert!(checked_decompose_affine(&shear_matrix(shear))
+                .ok()
+                .is_some());
         }
     }
 
@@ -781,23 +954,26 @@ mod tests {
         let dependent_columns = Matrix4::new(
             1.0f32, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         );
-        assert!(decompose_affine(&dependent_columns).is_none());
-        assert!(decompose(&dependent_columns).is_none());
+        assert!(checked_decompose_affine(&dependent_columns).ok().is_none());
+        assert!(checked_decompose(&dependent_columns)
+            .ok()
+            .flatten()
+            .is_none());
 
         let near_zero_scale = scale(Vector3::new(EPS_F32, 1.0, 1.0));
-        assert!(decompose_affine(&near_zero_scale).is_none());
-        assert!(decompose(&near_zero_scale).is_none());
+        assert!(checked_decompose_affine(&near_zero_scale).ok().is_none());
+        assert!(checked_decompose(&near_zero_scale).ok().flatten().is_none());
 
         let mut projective = Matrix4::<f32>::identity();
         projective.col[0].w = 1.0;
-        assert!(decompose_affine(&projective).is_none());
-        assert!(decompose(&projective).is_none());
+        assert!(checked_decompose_affine(&projective).ok().is_none());
+        assert!(checked_decompose(&projective).ok().flatten().is_none());
     }
 
     #[test]
     fn test_rotation_from_axis_angle_zero_axis() {
         let axis = Vector3::<f32>::new(0.0, 0.0, 0.0);
-        assert!(rotation_from_axis_angle(&axis, 1.0, EPS_F32).is_none());
+        assert!(checked_rotation_from_axis_angle(&axis, 1.0, EPS_F32).is_err());
     }
 
     #[test]

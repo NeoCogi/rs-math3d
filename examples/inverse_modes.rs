@@ -35,10 +35,16 @@ use std::{hint::black_box, time::Instant};
 /// Times full inversion while preventing the optimizer from folding the input
 /// matrix or discarding the result. This is a comparative harness, not a promise
 /// about a particular machine, compiler, scalar type or matrix distribution.
-fn measure<T: RealScalar>(name: &str, matrix: Matrix4<T>, mode: InverseMode, iterations: u32) {
+fn measure<T: RealScalar, R>(
+    name: &str,
+    matrix: Matrix4<T>,
+    mode: InverseMode,
+    iterations: u32,
+    operation: impl Fn(Matrix4<T>, InverseMode) -> R,
+) {
     let start = Instant::now();
     for _ in 0..iterations {
-        black_box(black_box(matrix).inverse_with(black_box(mode)));
+        black_box(operation(black_box(matrix), black_box(mode)));
     }
     println!(
         "{} {:?}: {:.1} ns/inverse",
@@ -61,8 +67,60 @@ fn main() {
     let fixed = matrix
         .try_cast::<Fixed<i32, 16>>()
         .expect("fixture fits fixed scalar");
-    measure("f32", matrix, InverseMode::Reciprocal, iterations);
-    measure("S15.16", fixed, InverseMode::Reciprocal, iterations);
-    measure("f32", matrix, InverseMode::Rows, iterations);
-    measure("S15.16", fixed, InverseMode::Rows, iterations);
+    measure(
+        "f32 unchecked",
+        matrix,
+        InverseMode::Reciprocal,
+        iterations,
+        |m, mode| m.inverse_with(mode),
+    );
+    measure(
+        "f32 checked",
+        matrix,
+        InverseMode::Reciprocal,
+        iterations,
+        |m, mode| m.checked_inverse_with(mode).unwrap(),
+    );
+    measure(
+        "S15.16 unchecked",
+        fixed,
+        InverseMode::Reciprocal,
+        iterations,
+        |m, mode| m.inverse_with(mode),
+    );
+    measure(
+        "S15.16 checked",
+        fixed,
+        InverseMode::Reciprocal,
+        iterations,
+        |m, mode| m.checked_inverse_with(mode).unwrap(),
+    );
+    measure(
+        "f32 unchecked",
+        matrix,
+        InverseMode::Rows,
+        iterations,
+        |m, mode| m.inverse_with(mode),
+    );
+    measure(
+        "f32 checked",
+        matrix,
+        InverseMode::Rows,
+        iterations,
+        |m, mode| m.checked_inverse_with(mode).unwrap(),
+    );
+    measure(
+        "S15.16 unchecked",
+        fixed,
+        InverseMode::Rows,
+        iterations,
+        |m, mode| m.inverse_with(mode),
+    );
+    measure(
+        "S15.16 checked",
+        fixed,
+        InverseMode::Rows,
+        iterations,
+        |m, mode| m.checked_inverse_with(mode).unwrap(),
+    );
 }

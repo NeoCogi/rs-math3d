@@ -68,14 +68,14 @@
 //!
 //! // Create transformation matrices
 //! let translation = transforms::translate(Vector3::new(10.0, 0.0, 0.0));
-//! let rotation = transforms::rotation_from_axis_angle(
+//! let rotation = transforms::checked_rotation_from_axis_angle(
 //!     &Vector3::new(0.0, 1.0, 0.0),
 //!     PI / 4.0,
 //!     EPS_F32,
 //! ).unwrap();
 //!
 //! // Use quaternions for rotations
-//! let q = Quat::of_axis_angle(
+//! let q = Quat::checked_of_axis_angle(
 //!     &Vector3::new(0.0, 0.0, 1.0),
 //!     FRAC_PI_2,
 //!     EPS_F32,
@@ -152,6 +152,7 @@
 //! - [`scalar`]: Traits for generic numeric operations
 
 #![no_std]
+#![doc = include_str!("../docs/arithmetic.md")]
 // Keep the crate's source-level `no_std` contract in every configuration while
 // importing `std` explicitly for its default hosted math backend. Tests also
 // need `std` for the Rust test harness, but `math` still selects a backend only
@@ -163,34 +164,6 @@ extern crate std;
 // crate-private implementation machinery, independent of scalar representations.
 #[macro_use]
 mod unroll;
-
-/// Continues a checked query only for a valid classification outside its tolerance.
-///
-/// The supplied expression is evaluated exactly once. An `OutsideTolerance`
-/// value completes normally, while `WithinTolerance` and `Invalid` return
-/// `None` from the enclosing function or closure. Consequently, this macro is
-/// only valid inside a body whose return type is `Option<_>`.
-///
-/// The explicit `return_none_` prefix makes that non-local control flow visible
-/// at every call site. The macro remains crate-private because its policy and
-/// classification type are implementation details of checked geometry queries.
-macro_rules! return_none_unless_outside_angular_tolerance {
-    ($classification:expr $(,)?) => {{
-        // Matching the expression directly both evaluates it once and keeps
-        // the classification exhaustive if another state is added later.
-        match $classification {
-            // Only a valid relationship beyond the inclusive tolerance lets
-            // the enclosing checked query continue with its geometric solve.
-            $crate::vector::AngularClassification::OutsideTolerance => (),
-            // A relationship inside the rejected angular band has no result
-            // under the checked query's documented degeneracy policy.
-            $crate::vector::AngularClassification::WithinTolerance => return None,
-            // Invalid tolerance or arithmetic fails the checked query closed
-            // instead of being mistaken for either valid geometric outcome.
-            $crate::vector::AngularClassification::Invalid => return None,
-        }
-    }};
-}
 
 pub mod basis;
 mod cast;

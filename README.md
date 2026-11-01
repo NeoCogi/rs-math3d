@@ -109,56 +109,27 @@ precedence is `std`, then `libm`, then `system-libm`. Consequently,
 `system-libm`'s Unix restriction applies only when neither higher-precedence
 backend is active.
 
-## Behavior Notes
+## Arithmetic behavior
 
-- Orientation tolerances in 3D intersection and plane-normal routines are dimensionless and must be
-  finite values in `0..=1`. Parallel tests compare `epsilon` with `|sin(theta)|`, while
-  line/ray-to-plane tests compare it with `|cos(theta)|`. Temporary max-component normalization
-  keeps these decisions stable when valid directions, triangle offsets, or plane-spanning vectors
-  are rescaled, including magnitudes whose raw squared lengths would overflow or underflow. Zero,
-  non-finite operands, and invalid tolerances are rejected. Internal angular classifiers keep
-  within-tolerance, outside-tolerance, and invalid states distinct. A shared checked-query gate
-  proceeds only for the outside-tolerance state; within-tolerance and invalid states both map to
-  `None` without being conflated internally.
-- Each query reuses its temporary normalized representations for classification and result
-  calculation. Angular classifiers compare scalar-specific stable norms; fixed norms compare widened
-  squared integers so subquantum squares do not erase a nonzero tolerance.
-- Rescaling an already represented `Line`'s stored direction does not change its line/plane or
-  line/triangle intersection point, but the returned `t` remains tied to the parameterization
-  `p + d * t`; multiplying `d` by a nonzero scale therefore divides every representable `t` by
-  the same scale. `Ray` intersection points likewise do not depend on a positive rescaling of the
-  stored direction.
-  Plane intersections solve physical travel with a temporary unit direction, reconstruct the
-  point from that bounded representation, and convert travel back to the stored line's `t` only
-  when the API returns a line parameter. A negative direction scale reverses a ray rather than
-  merely reparameterizing it. If a line's original-direction parameter would overflow, or if a
-  mathematically nonzero parameter would underflow to zero, the query returns `None` instead of
-  returning a parameter that cannot reconstruct the reported point.
-- `Ray`/`Tri3` intersection is a true ray query: hits behind the ray origin are rejected.
-  Use the corresponding `Line`/`Tri3` intersection when you want the infinite-line result.
-- `transforms::decompose_affine` represents nonsingular affine matrices as translation,
-  proper rotation, `(xy, xz, yz)` upper-triangular shear, and scale in `T * R * H * S`
-  order. The older `transforms::decompose` tuple is a shear-free wrapper and returns `None`
-  when any shear coefficient exceeds the scalar epsilon.
-- `Quat::default()` is the identity rotation. `Quat::normalize` also maps an exact zero
-  quaternion to identity; use `Quat::try_normalize` when invalid or near-zero input must be
-  detected.
-- Orthonormal basis construction makes handedness explicit:
-  `basis_from_unit_rh`/`checked_basis_from_unit_rh` return `[u, v, w]` with `u × v = w`, while
-  the `_lh` variants return `[u, v, w]` with `u × v = -w`. These replace the old ambiguous
-  `basis_from_unit` and `checked_basis_from_unit` names.
-- Point-to-plane distance uses the general `abs(n · p + d) / |n|` equation and is therefore
-  invariant when all plane coefficients are scaled by the same nonzero value.
-- `ParametricPlane::project` solves the 2x2 Gram system of the plane axes, so projection
-  works for non-orthogonal axes as well as orthogonal ones.
-- `Sphere3::new` canonicalizes the radius with `abs(radius)`.
-- `Quat::mat3` and `Quat::mat4` normalize the quaternion before converting it to a matrix.
-- `Plane::from_quad` and `Plane::checked_from_quad` use a diagonal-derived representative plane.
-  They do not validate that the four vertices are coplanar.
-- `transforms::lookat` assumes `eye != dest` and an `up` vector that is not parallel to the
-  view direction. The convenience function panics on invalid input; `checked_lookat` reports a numerical error.
-- `Tri3::barycentric_coordinates` assumes a non-degenerate triangle. Degenerate triangles
-  panic in the convenience method; `checked_barycentric_coordinates` returns `MathError::Degenerate`.
+Ordinary methods and operators are unchecked by default. Use `checked_*` to
+receive `MathError` for invalid inputs or unrepresentable arithmetic. Fixed
+operators round nearest, ties to even, and wrap overflow consistently in debug
+and release. Fixed division by zero can panic; unchecked float arithmetic follows
+IEEE behavior. Ordinary normalization no longer substitutes identity for a zero
+quaternion. Conversions retain their documented `try_*` / `From` contracts.
+
+Matrices support `InverseMode::Reciprocal` (default) and `InverseMode::Rows`, with
+independent checked and unchecked implementations. Small kernels are explicitly
+expanded, and the adjugate path reuses cofactors/minors in its determinant.
+
+Checked geometric queries distinguish arithmetic failure from a geometric miss:
+`checked_intersection` returns `Result<Option<_>, MathError>`. Ordinary queries
+perform no validation. Angular tolerance is dimensionless in `0..=1`; linear
+tolerance uses world units. Right/left-handed basis construction is explicit.
+
+Read the [arithmetic API contract and migration guide](docs/arithmetic.md) and
+[signed fixed-point guide](docs/fixed-point.md) for format/range requirements,
+rounding, inverse modes and backend-free use.
 
 ## Example
 

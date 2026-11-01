@@ -133,13 +133,15 @@ explicit conversion first.
 
 Addition and subtraction are exact if the result fits. Multiplication,
 division, rescaling and numeric construction round nearest with ties to even.
-Negative values use the same symmetric rule. Operators panic on overflow or
-division by zero in both debug and release builds; `checked_add`, `checked_sub`,
+Negative values use the same symmetric rule. Ordinary operators wrap the rounded
+result modulo the signed storage width in both debug and release builds.
+Division and remainder by zero can panic. Explicit `checked_add`, `checked_sub`,
 `checked_mul`, `checked_div`, `checked_rem`, `checked_neg`, and `checked_abs` return errors instead.
 The positive counterpart of a signed minimum does not fit its representation.
 
-`trunc` rounds toward zero, `floor` toward negative infinity, and `checked_ceil`
-and `checked_round` check the integral result's range. Remainder follows truncating
+`trunc` rounds toward zero and `floor` toward negative infinity. `ceil`, `round`,
+and `abs` use ordinary wrapping arithmetic; `checked_ceil`, `checked_round`, and
+`checked_abs` reject an unrepresentable result. Remainder follows truncating
 division and has the dividend's sign.
 
 Dot/cross products, matrix products and Hamilton quaternion products accumulate
@@ -170,7 +172,8 @@ let scale = transforms::scale(Vector3::new(
     F::try_from_int(2)?, F::try_from_int(4)?, F::try_from_int(8)?,
 ));
 let unit = point.checked_normalize(F::DELTA)?;
-let fast = scale.checked_inverse()?; // Reciprocal is the default.
+let fast = scale.inverse(); // Unchecked reciprocal is the default.
+let checked = scale.checked_inverse()?;
 let rows = scale.checked_inverse_with(InverseMode::Rows)?;
 let restored = fast * (scale * point);
 assert_eq!(restored.x, point.x);
@@ -190,7 +193,17 @@ Every matrix size supports two inversion algorithms:
 Select with `checked_inverse_with` / `inverse_with`. The named checked methods
 `checked_inverse_reciprocal` and `checked_inverse_rows` are also available. Affine
 matrices expose `checked_inverse_affine_with` / `inverse_affine_with` as well as
-the default reciprocal variants. Unchecked convenience methods panic on error.
+the default reciprocal variants. Ordinary `inverse`, `inverse_with`,
+`inverse_reciprocal`, `inverse_rows`, and affine variants perform no validation
+and never delegate to checked inversions. They require nonsingular finite inputs
+and representable intermediates; invalid inputs can produce IEEE NaNs/infinities
+or wrapped fixed values, and a fixed zero divisor can panic. Checked variants
+validate the inputs and each arithmetic boundary and return `MathError`.
+
+The 3x3 adjugate computes its nine cofactors once and reuses the first row for
+the determinant: three products and two additions after the cofactors, rather
+than the expanded six triple products. The 4x4 schedule caches twelve 2x2
+minors. Determinant-only methods evaluate only the first cofactor row.
 
 The fixed reciprocal retains 127 internal reciprocal fraction bits. Preparation
 performs one division; applying it uses widened multiplication and remainder
@@ -210,8 +223,9 @@ have expanded paths. Three-axis/edge queries and eight-octant subdivision use
 explicit operations. These paths do not rely on compiler loop-unrolling
 heuristics, including in debug builds. Arithmetic/error evaluation order and
 fixed-point rounding remain unchanged; data-dependent checks still branch.
-Two-product fixed accumulation uses a shared, explicitly expanded kernel so
-wide bookkeeping is not duplicated in every row-elimination cell.
+Checked two-product fixed accumulation uses a shared, explicitly expanded
+wide kernel. Unchecked accumulation uses a wrapping `i128` sum and rounds once:
+discarded high bits cannot affect any supported final storage result.
 
 CORDIC's 97 steps are expanded into seven explicit chunk calls: six chunks of
 16 steps and one final step. The Q96 working state and chunk functions are shared
@@ -254,11 +268,11 @@ let triangle = Tri3::new([
     Vector3::new(one, zero, zero),
     Vector3::new(zero, one, zero),
 ]);
-let ray = Ray::new(
+let ray = Ray::checked_new(
     &Vector3::new(zero, zero, one),
     &Vector3::new(zero, zero, -one),
     F::DELTA,
-).unwrap();
+)?;
 match ray.checked_intersection(&triangle)? {
     Some((parameter, point)) => assert_eq!(point.z, zero),
     None => panic!("the fixture intersects"),
@@ -269,10 +283,12 @@ match ray.checked_intersection(&triangle)? {
 
 `checked_intersection` returns `Ok(None)` for a miss and `Err` for invalid or
 unrepresentable arithmetic. `checked_intersect` returns `Result<bool, MathError>`;
-`checked_distance` returns a checked distance. The shorter `intersection` and
-`distance` methods collapse errors to `None`; `intersect` panics on error.
-Option-returning primitive constructors and queries likewise reject invalid or
-unrepresentable calculations. Use checked methods when the cause matters.
+`checked_distance` returns `Result<T, MathError>`. Ordinary `distance` returns
+`T`, `intersect` returns `bool`, and `intersection` returns `Option` for geometric
+absence, all with unchecked arithmetic. Checked primitive constructors return
+`Result`; checked primitive intersection methods return `Result<Option<_>, MathError>`.
+Ordinary constructors and geometric methods never call their checked siblings.
+See [the arithmetic contract](arithmetic.md) for the complete API policy.
 
 Linear tolerances use world units. Angular tolerances are dimensionless finite
 values in `0..=1`: parallel tests compare `|sin(theta)|`, and perpendicular
@@ -282,8 +298,8 @@ NaN sentinel exists; unbounded slab endpoints are represented explicitly.
 
 Scale invariance applies within representation and quantization limits.
 Rescaling/rounding input can change its represented direction. Returned line
-parameters retain `point + direction * t`; a parameter that rounds nonzero
-travel to zero is rejected. Finite fixed inputs can still exceed intermediate
+parameters retain `point + direction * t`; checked queries reject parameters that round nonzero
+travel to zero. Ordinary queries assume their parameterization is representable. Finite fixed inputs can still exceed intermediate
 or output ranges, which checked arithmetic reports rather than wrapping.
 
 ## Analytic implementation and accuracy
@@ -297,9 +313,12 @@ magnitudes across multiple fractional widths.
 
 Tangent divides guarded components before final quantization; its error grows
 near poles, where a uniform absolute error bound is not useful. A result
-outside the destination range is an error. Negative square roots and arc cosine
-inputs outside `[-1, 1]` are domain errors. The `t*` analytic conveniences panic
-for invalid fixed calculations; their `try_*` counterparts report errors.
+outside the destination range is an error in checked arithmetic. `checked_sqrt`
+rejects negative inputs and `checked_acos` rejects inputs outside `[-1, 1]`.
+Ordinary `sqrt`, `sin`, `cos`, `sin_cos`, `tan`, `acos` and the generic `t*`
+methods perform no domain/range validation. Callers must satisfy the analytic
+domain and representability requirements; their results are otherwise unspecified
+numerically, and zero divisors can panic. Both tiers use integer-only algorithms.
 
 Constants and independent references are reproducible with
 `python3 tools/generate_fixed_constants.py`. Python Decimal is development

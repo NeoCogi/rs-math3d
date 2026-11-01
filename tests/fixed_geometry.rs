@@ -117,7 +117,9 @@ fn transforms_quaternions_and_affine_decomposition() {
     let one = f(1);
     let axis = Vector3::new(zero, zero, one);
     let angle: F = core::f64::consts::FRAC_PI_2.into();
-    let q = Quat::of_axis_angle(&axis, angle, F::DELTA).unwrap();
+    let q = Quat::checked_of_axis_angle(&axis, angle, F::DELTA)
+        .ok()
+        .unwrap();
     let rotated = q.mat3() * Vector3::new(one, zero, zero);
     close(rotated.x, 0.0, 4.0);
     close(rotated.y, 1.0, 4.0);
@@ -134,7 +136,7 @@ fn transforms_quaternions_and_affine_decomposition() {
         .unwrap();
     let restored = transforms::checked_transform_vec3(&inverse, &result).unwrap();
     assert_eq!((restored.x, restored.y, restored.z), (one, one, one));
-    let parts = transforms::decompose_affine(&matrix).unwrap();
+    let parts = transforms::checked_decompose_affine(&matrix).ok().unwrap();
     assert_eq!(
         (parts.scale.x, parts.scale.y, parts.scale.z),
         (f(2), f(4), f(8))
@@ -142,7 +144,7 @@ fn transforms_quaternions_and_affine_decomposition() {
     assert_eq!(parts.translation.x, f(2));
     let basis = Basis::of_mat4(&matrix);
     assert_eq!(basis.to_mat4().col[3].y, f(3));
-    let orthogonal = checked_basis_from_unit_rh(&axis, F::DELTA).unwrap();
+    let orthogonal = checked_basis_from_unit_rh(&axis, F::DELTA).ok().unwrap();
     close(Vector3::dot(&orthogonal[0], &orthogonal[1]), 0.0, 1.0);
     // S2.61 can represent an identity quaternion but cannot represent trace 4.
     type Precision = Fixed<i64, 61>;
@@ -187,9 +189,11 @@ fn checked_projection_and_camera_domains() {
     invalid.col[0].w = F::min_value();
     assert!(matches!(
         invalid.checked_inverse_affine(),
-        Err(MathError::Domain)
+        Err(MathError::Overflow)
     ));
-    assert!(transforms::decompose_affine(&invalid).is_none());
+    assert!(transforms::checked_decompose_affine(&invalid)
+        .ok()
+        .is_none());
     invalid.col[0].w = f(0);
     invalid.col[3].w = f(0);
     assert!(matches!(
@@ -220,6 +224,7 @@ fn primitive_construction_coordinates_and_distance() {
     assert_eq!(
         plane
             .checked_distance(&Vector3::new(f(0), f(0), f(3)))
+            .ok()
             .unwrap(),
         f(3)
     );
@@ -232,18 +237,28 @@ fn primitive_construction_coordinates_and_distance() {
     assert_eq!(
         segment
             .checked_distance(&Vector3::new(f(0), f(2), f(0)))
+            .ok()
             .unwrap(),
         f(2)
     );
     let tiny = Vector3::new(F::DELTA, f(0), f(0));
-    let tiny_line = Line::new(&zero, &tiny, F::ZERO).unwrap();
-    assert_eq!(tiny_line.normalize(F::ZERO).unwrap().d.x, F::ONE);
-    assert!(Matrix3::of_axis_angle(&tiny, F::ONE, F::ZERO).is_some());
+    let tiny_line = Line::checked_new(&zero, &tiny, F::ZERO).ok().unwrap();
+    assert_eq!(tiny_line.checked_normalize(F::ZERO).unwrap().d.x, F::ONE);
+    assert!(Matrix3::checked_of_axis_angle(&tiny, F::ONE, F::ZERO)
+        .ok()
+        .is_some());
     let normalized = tiny
-        .try_normalize_with_inv_len(F::ZERO, f(256), F::ZERO)
+        .checked_normalize_with_inv_len(F::ZERO, f(256), F::ZERO)
         .unwrap();
     assert_eq!(normalized.x, F::ONE);
-    assert_eq!(Ray::new(&zero, &tiny, F::ZERO).unwrap().direction.x, F::ONE);
+    assert_eq!(
+        Ray::checked_new(&zero, &tiny, F::ZERO)
+            .ok()
+            .unwrap()
+            .direction
+            .x,
+        F::ONE
+    );
     let bounds = Box3::new(&zero, &Vector3::new(f(2), f(2), f(2)));
     assert_eq!(bounds.center().x, f(1));
     assert_eq!(bounds.subdivide().len(), 8);
@@ -261,7 +276,9 @@ fn checked_queries_distinguish_misses_and_range_errors() {
     ]);
     let quarter = F::try_from_ratio(1, 4).unwrap();
     let start = Vector3::new(quarter, quarter, f(1));
-    let mut ray = Ray::new(&start, &Vector3::new(f(0), f(0), f(-1)), F::DELTA).unwrap();
+    let mut ray = Ray::checked_new(&start, &Vector3::new(f(0), f(0), f(-1)), F::DELTA)
+        .ok()
+        .unwrap();
     let hit = ray.checked_intersection(&triangle).unwrap().unwrap();
     assert_eq!(hit.0, f(1));
     assert_eq!(hit.1.z, f(0));
@@ -273,7 +290,9 @@ fn checked_queries_distinguish_misses_and_range_errors() {
         Err(MathError::Degenerate)
     ));
     let origin = Vector3::new(f(0), f(0), f(0));
-    let mut ray = Ray::new(&origin, &Vector3::new(f(1), f(0), f(0)), F::DELTA).unwrap();
+    let mut ray = Ray::checked_new(&origin, &Vector3::new(f(1), f(0), f(0)), F::DELTA)
+        .ok()
+        .unwrap();
     let bounds = Box3::new(
         &Vector3::new(f(1), f(-1), f(-1)),
         &Vector3::new(f(2), f(1), f(1)),
@@ -320,31 +339,51 @@ fn fixed_line_parameters_and_subquantum_angular_squares() {
     let normal = Vector3::new(f(0), f(0), f(1));
     let plane = Plane::new(&normal, &origin);
     let start = Vector3::new(f(0), f(0), f(2));
-    let mut line = Line::new(&start, &Vector3::new(f(0), f(0), f(-2)), F::DELTA).unwrap();
-    let first = plane.intersect_line(&line, F::DELTA).unwrap();
+    let mut line = Line::checked_new(&start, &Vector3::new(f(0), f(0), f(-2)), F::DELTA)
+        .ok()
+        .unwrap();
+    let first = plane
+        .checked_intersect_line(&line, F::DELTA)
+        .ok()
+        .flatten()
+        .unwrap();
     assert_eq!(first.0, f(1));
     assert_eq!(first.1.z, f(0));
     line.d = line.d * f(2);
-    let second = plane.intersect_line(&line, F::DELTA).unwrap();
+    let second = plane
+        .checked_intersect_line(&line, F::DELTA)
+        .ok()
+        .flatten()
+        .unwrap();
     assert_eq!(second.0, F::try_from_ratio(1, 2).unwrap());
     assert_eq!(second.1.z, first.1.z);
     let x = Vector3::new(f(1), f(0), f(0));
     let near_x = Vector3::new(f(1), F::DELTA, f(0));
     assert_eq!(F::DELTA * F::DELTA, F::ZERO);
-    let unit = checked_tri_normal(&origin, &x, &near_x, F::ZERO).unwrap();
+    let unit = checked_tri_normal(&origin, &x, &near_x, F::ZERO)
+        .ok()
+        .unwrap();
     assert_eq!(unit.z, F::ONE);
-    assert!(checked_tri_normal(&origin, &x, &near_x, F::DELTA).is_none());
+    assert!(checked_tri_normal(&origin, &x, &near_x, F::DELTA)
+        .ok()
+        .is_none());
     let tiny_x = Vector3::new(F::DELTA, f(0), f(0));
     let tiny_y = Vector3::new(f(0), F::DELTA, f(0));
     assert_eq!(
         checked_tri_normal(&origin, &tiny_x, &tiny_y, F::ZERO)
+            .ok()
             .unwrap()
             .z,
         F::ONE
     );
-    let line0 = Line::new(&origin, &x, F::DELTA).unwrap();
-    let line1 = Line::new(&normal, &Vector3::new(f(0), f(1), f(0)), F::DELTA).unwrap();
-    let closest = shortest_segment3d_between_lines3d(&line0, &line1, F::DELTA).unwrap();
+    let line0 = Line::checked_new(&origin, &x, F::DELTA).ok().unwrap();
+    let line1 = Line::checked_new(&normal, &Vector3::new(f(0), f(1), f(0)), F::DELTA)
+        .ok()
+        .unwrap();
+    let closest = checked_shortest_segment3d_between_lines3d(&line0, &line1, F::DELTA)
+        .ok()
+        .flatten()
+        .unwrap();
     assert_eq!(closest.e.z - closest.s.z, f(1));
 }
 

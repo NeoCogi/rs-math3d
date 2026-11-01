@@ -267,7 +267,7 @@ fn vector_fixed_accumulation_and_tiny_normalization() {
     assert_eq!(tiny.checked_length().unwrap(), F::DELTA);
     let unit = tiny.checked_normalize(F::ZERO).unwrap();
     assert_eq!(unit.x, F::ONE);
-    assert!(tiny.try_normalize(F::DELTA).is_none());
+    assert!(tiny.checked_normalize(F::DELTA).is_err());
     assert_eq!(
         tiny.checked_normalize(-F::DELTA).unwrap_err(),
         MathError::InvalidTolerance
@@ -381,6 +381,7 @@ fn prepared_reciprocals_match_exhaustive_checked_division() {
         let reciprocal = divisor.checked_reciprocal().unwrap();
         for numerator in i8::MIN..=i8::MAX {
             let value = F::from_bits(numerator);
+            assert_eq!(value.mul_reciprocal(divisor.reciprocal()), value / divisor);
             assert_eq!(
                 value.checked_mul_reciprocal(reciprocal),
                 value.checked_div(divisor)
@@ -402,10 +403,76 @@ fn prepared_reciprocals_match_exhaustive_checked_division() {
         let reciprocal = divisor.checked_reciprocal().unwrap();
         for numerator in [i64::MIN, -3, -1, 0, 1, 3, i64::MAX] {
             let value = Wide::from_bits(numerator);
+            assert_eq!(value.mul_reciprocal(divisor.reciprocal()), value / divisor);
             assert_eq!(
                 value.checked_mul_reciprocal(reciprocal),
                 value.checked_div(divisor)
             );
+        }
+    }
+}
+
+/// Intermediate sums exceed i128 while exact cancellation leaves a small
+/// result. The expected answers follow integer identities, independently of
+/// either accumulator implementation.
+#[test]
+fn wrapping_wide_accumulation_preserves_final_bits_and_cancellation() {
+    fn check<const F: u32>(expected_four_max: i64)
+    where
+        i64: Format<F>,
+    {
+        type R = i64;
+        let min = Fixed::<R, F>::from_bits(i64::MIN);
+        let max = Fixed::<R, F>::from_bits(i64::MAX);
+        assert_eq!(
+            Fixed::sum_products(&[(max, max, false); 4]).to_bits(),
+            expected_four_max
+        );
+        // 2*MIN^2 - 2*MAX^2 = 2^65-2, regardless of an overflowing partial sum.
+        let terms = [
+            (min, min, false),
+            (min, min, false),
+            (max, max, true),
+            (max, max, true),
+        ];
+        let numerator = (1u128 << 65) - 2;
+        let quotient = if F == 0 {
+            numerator
+        } else {
+            // At the only halfway case (F=2), the truncated quotient is
+            // odd, so ties-to-even also rounds upward.
+            (numerator + (1u128 << (F - 1))) >> F
+        };
+        assert_eq!(Fixed::sum_products(&terms).to_bits(), quotient as i64);
+        if quotient <= i64::MAX as u128 {
+            assert_eq!(
+                Fixed::checked_sum_products(&terms).unwrap().to_bits(),
+                quotient as i64
+            );
+        }
+    }
+    check::<0>(4);
+    check::<2>(1);
+    check::<8>(-(1i64 << 58));
+    check::<32>(-(1i64 << 34));
+    check::<61>(-32);
+    check::<63>(-8);
+}
+
+#[test]
+fn ordinary_analytic_operations_match_checked_valid_results() {
+    type F = Fixed<i16, 8>;
+    for bits in i16::MIN..=i16::MAX {
+        let x = F::from_bits(bits);
+        assert_eq!(x.sin_cos(), x.checked_sin_cos().unwrap());
+        if let Ok(value) = x.checked_sqrt() {
+            assert_eq!(x.sqrt(), value);
+        }
+        if let Ok(value) = x.checked_tan() {
+            assert_eq!(x.tan(), value);
+        }
+        if let Ok(value) = x.checked_acos() {
+            assert_eq!(x.acos(), value);
         }
     }
 }

@@ -52,34 +52,24 @@ use num_traits::{One, Zero};
 /// Query Traits
 ////////////////////////////////////////////////////////////////////////////////
 pub trait Distance<T, Other> {
-    /// Computes the distance to another value, or `None` if undefined.
-    fn distance(&self, other: &Other) -> Option<T> {
-        self.checked_distance(other).ok()
-    }
+    /// Computes distance using ordinary arithmetic, without input or range validation.
+    fn distance(&self, other: &Other) -> T;
     /// Computes distance without hiding the reason a calculation is undefined.
     fn checked_distance(&self, other: &Other) -> Result<T, MathError>;
 }
 
 /// Trait for boolean intersection tests.
 pub trait Intersect<T> {
-    /// Returns `true` when two objects intersect.
-    ///
-    /// Unless an implementation documents otherwise, touching at the boundary
-    /// counts as an intersection.
-    fn intersect(&self, other: &T) -> bool {
-        self.checked_intersect(other)
-            .expect("intersection test failed")
-    }
+    /// Tests intersection with unchecked arithmetic. Boundary contact counts as a hit.
+    fn intersect(&self, other: &T) -> bool;
     /// Distinguishes a valid boolean answer from unrepresentable arithmetic.
     fn checked_intersect(&self, other: &T) -> Result<bool, MathError>;
 }
 
 /// Trait for producing intersection results.
 pub trait Intersection<T, Other> {
-    /// Returns the intersection result, or `None` if there is no intersection.
-    fn intersection(&self, other: &Other) -> Option<T> {
-        self.checked_intersection(other).ok().flatten()
-    }
+    /// Returns an unchecked geometric intersection, or `None` for a geometric miss.
+    fn intersection(&self, other: &Other) -> Option<T>;
     /// Returns `Ok(None)` for a geometric miss, or an error for invalid or
     /// unrepresentable input/calculation. Prefer this method for diagnosis.
     fn checked_intersection(&self, other: &Other) -> Result<Option<T>, MathError>;
@@ -89,6 +79,10 @@ pub trait Intersection<T, Other> {
 /// Distance Queries
 ////////////////////////////////////////////////////////////////////////////////
 impl<T: RealScalar> Distance<T, Vector3<T>> for Plane<T> {
+    /// Computes distance using ordinary arithmetic, without input or range validation.
+    fn distance(&self, other: &Vector3<T>) -> T {
+        (Vector3::dot(&self.normal(), other) + self.constant()).tabs() / self.normal().length()
+    }
     fn checked_distance(&self, other: &Vector3<T>) -> Result<T, MathError> {
         let metric = checked_normalized3(&self.normal())?;
         let constant = metric.checked_divide_by_length(self.constant())?;
@@ -99,10 +93,12 @@ impl<T: RealScalar> Distance<T, Vector3<T>> for Plane<T> {
 }
 
 impl<T: RealScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
+    /// Computes distance using ordinary arithmetic, without input or range validation.
+    fn distance(&self, other: &Vector3<T>) -> T {
+        Segment::distance(self, other)
+    }
     fn checked_distance(&self, other: &Vector3<T>) -> Result<T, MathError> {
-        let (_, closest) = self
-            .closest_point_on_segment(other, T::epsilon())
-            .ok_or(MathError::Degenerate)?;
+        let (_, closest) = self.checked_closest_point_on_segment(other, T::epsilon())?;
         Vector3::checked_sub_vv(&closest, other)?.checked_length()
     }
 }
@@ -119,7 +115,7 @@ impl<T: RealScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
 // For zero directions the ray is parallel to the slab planes. In that case there
 // is no finite entry/exit parameter, so the query reduces to whether the origin
 // already lies inside the slab.
-fn update_slab_interval<T: RealScalar>(
+fn checked_update_slab_interval<T: RealScalar>(
     slab_min: T,
     slab_max: T,
     ray_start: T,
@@ -142,7 +138,67 @@ fn update_slab_interval<T: RealScalar>(
     Ok(tmin.unwrap() <= tmax.unwrap())
 }
 
+/// Updates a slab interval with ordinary arithmetic; parallel-axis handling is geometric.
+fn update_slab_interval<T: RealScalar>(
+    slab_min: T,
+    slab_max: T,
+    ray_start: T,
+    ray_dir: T,
+    tmin: &mut Option<T>,
+    tmax: &mut Option<T>,
+) -> bool {
+    if ray_dir == <T as Zero>::zero() {
+        return ray_start >= slab_min && ray_start <= slab_max;
+    }
+
+    let mut t0 = (slab_min - ray_start) / ray_dir;
+    let mut t1 = (slab_max - ray_start) / ray_dir;
+    if t0 > t1 {
+        core::mem::swap(&mut t0, &mut t1);
+    }
+
+    *tmin = Some(tmin.map_or(t0, |old| T::max(old, t0)));
+    *tmax = Some(tmax.map_or(t1, |old| T::min(old, t1)));
+    tmin.unwrap() <= tmax.unwrap()
+}
+
 impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
+    /// Tests intersection with unchecked arithmetic. Boundary contact counts as a hit.
+    fn intersect(&self, other: &Ray<T, Vector3<T>>) -> bool {
+        let mut lo = None;
+        let mut hi = None;
+        if !update_slab_interval(
+            self.min.x,
+            self.max.x,
+            other.start.x,
+            other.direction.x,
+            &mut lo,
+            &mut hi,
+        ) {
+            return false;
+        }
+        if !update_slab_interval(
+            self.min.y,
+            self.max.y,
+            other.start.y,
+            other.direction.y,
+            &mut lo,
+            &mut hi,
+        ) {
+            return false;
+        }
+        if !update_slab_interval(
+            self.min.z,
+            self.max.z,
+            other.start.z,
+            other.direction.z,
+            &mut lo,
+            &mut hi,
+        ) {
+            return false;
+        }
+        hi.map_or(true, |exit| exit >= <T as Zero>::zero())
+    }
     fn checked_intersect(&self, other: &Ray<T, Vector3<T>>) -> Result<bool, MathError> {
         // Slab test for an axis-aligned box.
         //
@@ -170,7 +226,7 @@ impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
         let mut tmin = None;
         let mut tmax = None;
 
-        if !update_slab_interval(
+        if !checked_update_slab_interval(
             self.min.x,
             self.max.x,
             other.start.x,
@@ -180,7 +236,7 @@ impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
         )? {
             return Ok(false);
         }
-        if !update_slab_interval(
+        if !checked_update_slab_interval(
             self.min.y,
             self.max.y,
             other.start.y,
@@ -190,7 +246,7 @@ impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
         )? {
             return Ok(false);
         }
-        if !update_slab_interval(
+        if !checked_update_slab_interval(
             self.min.z,
             self.max.z,
             other.start.z,
@@ -210,7 +266,30 @@ impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
 }
 
 impl<T: RealScalar> Intersect<Sphere3<T>> for Box3<T> {
+    /// Tests intersection with unchecked arithmetic. Boundary contact counts as a hit.
+    fn intersect(&self, other: &Sphere3<T>) -> bool {
+        let distance = |c: T, lo: T, hi: T| {
+            if c < lo {
+                lo - c
+            } else if c > hi {
+                c - hi
+            } else {
+                <T as Zero>::zero()
+            }
+        };
+        T::norm(&[
+            distance(other.center.x, self.min.x, self.max.x),
+            distance(other.center.y, self.min.y, self.max.y),
+            distance(other.center.z, self.min.z, self.max.z),
+        ]) <= other.radius
+    }
     fn checked_intersect(&self, other: &Sphere3<T>) -> Result<bool, MathError> {
+        if !other.radius.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        if other.radius < <T as Zero>::zero() {
+            return Err(MathError::Domain);
+        }
         let center = other.center;
         if !center.is_finite() || !self.min.is_finite() || !self.max.is_finite() {
             return Err(MathError::NonFinite);
@@ -239,12 +318,30 @@ fn is_in_0_to_1_range<T: RealScalar>(x: T) -> bool {
 }
 
 impl<T: RealScalar> Intersect<Tri3<T>> for Sphere3<T> {
+    /// Tests intersection with unchecked arithmetic. Boundary contact counts as a hit.
+    fn intersect(&self, tri: &Tri3<T>) -> bool {
+        let uvw = tri.barycentric_coordinates(&self.center);
+        let v = tri.vertices();
+        if is_in_0_to_1_range(uvw.x) && is_in_0_to_1_range(uvw.y) && is_in_0_to_1_range(uvw.z) {
+            Plane::from_tri(&v[0], &v[1], &v[2]).distance(&self.center) <= self.radius
+        } else {
+            let a = Segment::new(&v[0], &v[1]).distance(&self.center);
+            let b = Segment::new(&v[1], &v[2]).distance(&self.center);
+            let c = Segment::new(&v[2], &v[0]).distance(&self.center);
+            T::min(a, T::min(b, c)) <= self.radius
+        }
+    }
     fn checked_intersect(&self, tri: &Tri3<T>) -> Result<bool, MathError> {
+        if !self.radius.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        if self.radius < <T as Zero>::zero() {
+            return Err(MathError::Domain);
+        }
         let uvw = tri.checked_barycentric_coordinates(&self.center)?;
         let verts = tri.vertices();
         if is_in_0_to_1_range(uvw.x) && is_in_0_to_1_range(uvw.y) && is_in_0_to_1_range(uvw.z) {
-            let plane = Plane::checked_from_tri(&verts[0], &verts[1], &verts[2], T::epsilon())
-                .ok_or(MathError::Degenerate)?;
+            let plane = Plane::checked_from_tri(&verts[0], &verts[1], &verts[2], T::epsilon())?;
             Ok(plane.checked_distance(&self.center)? <= self.radius)
         } else {
             let d01 = Segment::new(&verts[0], &verts[1]).checked_distance(&self.center)?;
@@ -268,6 +365,51 @@ enum TriangleIntersectionKind {
     Line,
 }
 
+/// Normalized Moller-Trumbore solve with ordinary arithmetic. Angular/barycentric
+/// branches describe geometric misses; the caller owns input and range validity.
+fn triangle_intersection_unchecked<T: RealScalar>(
+    start: &Vector3<T>,
+    direction: &Vector3<T>,
+    tri: &Tri3<T>,
+    epsilon: T,
+    kind: TriangleIntersectionKind,
+) -> Option<(T, Vector3<T>)> {
+    let v = tri.vertices();
+    let e1 = normalized3(&(v[1] - v[0]));
+    let e2 = normalized3(&(v[2] - v[0]));
+    let direction = normalized3(direction);
+    let a = e1.unit();
+    let b = e2.unit();
+    let d = direction.unit();
+    let cross = Vector3::cross(&a, &b);
+    if cross.length() <= epsilon {
+        return None;
+    }
+    if Vector3::dot(&cross.normalize(), &d).tabs() <= epsilon {
+        return None;
+    }
+    let p = Vector3::cross(&d, &b);
+    let det = Vector3::dot(&a, &p);
+    let delta = *start - v[0];
+    let u = e1.divide_by_length_unchecked(Vector3::dot(&delta, &p) / det);
+    if u < -epsilon || u > <T as One>::one() + epsilon {
+        return None;
+    }
+    let q = Vector3::cross(&delta, &a);
+    let v = e2.divide_by_length_unchecked(Vector3::dot(&d, &q) / det);
+    if v < -epsilon || u + v > <T as One>::one() + T::two() * epsilon {
+        return None;
+    }
+    let travel = Vector3::dot(&b, &q) / det;
+    if matches!(kind, TriangleIntersectionKind::Ray) && travel < <T as Zero>::zero() {
+        return None;
+    }
+    Some((
+        direction.divide_by_length_unchecked(travel),
+        *start + d * travel,
+    ))
+}
+
 /// Intersects a parameterized line or ray with a triangle.
 ///
 /// This is a normalized form of Tomas Möller and Ben Trumbore's
@@ -286,9 +428,9 @@ enum TriangleIntersectionKind {
 ///
 /// `Ok(None)` is returned for a geometric miss or an orientation within the
 /// rejected angular band. Invalid input, degenerate directions and checked
-/// arithmetic failures return `MathError`. The public Option convenience API
-/// collapses these errors to `None`; its checked sibling retains their cause.
-fn triangle_intersection_from_point_dir<T: RealScalar>(
+/// arithmetic failures return `MathError`. The ordinary public query uses its
+/// separate unchecked solve; it does not collapse errors from this function.
+fn checked_triangle_intersection_from_point_dir<T: RealScalar>(
     start: &Vector3<T>,
     direction: &Vector3<T>,
     tri: &Tri3<T>,
@@ -366,11 +508,8 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // for every finite input accepted by the normalization helpers.
     let pvec = Vector3::checked_cross(&direction_unit, &edge2_unit)?;
     let det = Vector3::checked_dot(&edge1_unit, &pvec)?;
-    if !is_finite_scalar(det) || det == <T as Zero>::zero() {
-        // The angular checks mathematically imply a non-zero determinant. This
-        // exact guard handles the residual possibility of floating-point
-        // rounding collapsing it to zero without reintroducing a raw epsilon.
-        return Ok(None);
+    if det == <T as Zero>::zero() {
+        return Err(MathError::Degenerate);
     }
 
     // Express the line origin relative to the triangle origin. Explicitly
@@ -378,14 +517,14 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // products, since NaN would otherwise bypass every ordered comparison.
     let tvec = Vector3::checked_sub_vv(start, &v0)?;
     if !is_finite_vector3(&tvec) {
-        return Ok(None);
+        return Err(MathError::Overflow);
     }
 
     // Solving against unit edge 1 first yields a physical distance along that
     // edge. Divide by the original edge length to recover dimensionless `u`.
     let edge1_distance = Vector3::checked_dot(&tvec, &pvec)?.checked_div(det)?;
     if !is_finite_scalar(edge1_distance) {
-        return Ok(None);
+        return Err(MathError::Overflow);
     }
     let u = normalized_edge1.checked_divide_by_length(edge1_distance)?;
     if u < -epsilon || u > <T as One>::one().checked_add(epsilon)? {
@@ -396,14 +535,14 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // coordinate and the signed travel distance along the unit direction.
     let qvec = Vector3::checked_cross(&tvec, &edge1_unit)?;
     if !is_finite_vector3(&qvec) {
-        return Ok(None);
+        return Err(MathError::Overflow);
     }
 
     // As for `u`, the normalized solve first produces a physical distance;
     // divide by edge 2's original length to obtain dimensionless `v`.
     let edge2_distance = Vector3::checked_dot(&direction_unit, &qvec)?.checked_div(det)?;
     if !is_finite_scalar(edge2_distance) {
-        return Ok(None);
+        return Err(MathError::Overflow);
     }
     let v = normalized_edge2.checked_divide_by_length(edge2_distance)?;
     if v < -epsilon
@@ -417,7 +556,7 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // independent of the magnitude of the caller's stored direction.
     let tau = Vector3::checked_dot(&edge2_unit, &qvec)?.checked_div(det)?;
     if !is_finite_scalar(tau) {
-        return Ok(None);
+        return Err(MathError::Overflow);
     }
     if matches!(kind, TriangleIntersectionKind::Ray) && tau < <T as Zero>::zero() {
         return Ok(None);
@@ -438,7 +577,7 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // either of which can overflow or underflow before their scales cancel.
     let point = Vector3::checked_add_vv(start, &Vector3::checked_mul_vs(&direction_unit, tau)?)?;
     if !is_finite_scalar(t) || !is_finite_vector3(&point) {
-        return Ok(None);
+        return Err(MathError::Overflow);
     }
 
     // Staged division is ambiguous only at the zero/minimum-subnormal boundary:
@@ -454,7 +593,7 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
             || parameterized_point.y != point.y
             || parameterized_point.z != point.z
         {
-            return Ok(None);
+            return Err(MathError::Overflow);
         }
     }
 
@@ -463,16 +602,20 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
 }
 
 impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>> {
-    /// Returns the forward ray/triangle hit in the ray's stored parameterization.
-    ///
-    /// The triangle boundary is inclusive within the scalar epsilon. Zero,
-    /// non-finite, dimensionlessly degenerate, and near-parallel inputs return
-    /// `None`; every successful result has `t >= 0`. A hit also returns `None`
-    /// if its parameter in the ray's stored direction scale is not representable.
+    /// Returns an unchecked geometric intersection, or `None` for a geometric miss.
+    fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
+        triangle_intersection_unchecked(
+            &self.start,
+            &self.direction,
+            tri,
+            T::epsilon(),
+            TriangleIntersectionKind::Ray,
+        )
+    }
     fn checked_intersection(&self, tri: &Tri3<T>) -> Result<Option<(T, Vector3<T>)>, MathError> {
         // Select the ray domain while sharing all normalized orientation and
         // barycentric arithmetic with the infinite-line implementation.
-        triangle_intersection_from_point_dir(
+        checked_triangle_intersection_from_point_dir(
             &self.start,
             &self.direction,
             tri,
@@ -483,17 +626,20 @@ impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>
 }
 
 impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<T>> {
-    /// Returns the infinite-line/triangle hit in the line's stored parameterization.
-    ///
-    /// The triangle boundary is inclusive within the scalar epsilon. Zero,
-    /// non-finite, dimensionlessly degenerate, and near-parallel inputs return
-    /// `None`; negative and positive line parameters are both accepted. A hit
-    /// also returns `None` if its parameter in the line's stored direction scale
-    /// is not representable.
+    /// Returns an unchecked geometric intersection, or `None` for a geometric miss.
+    fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
+        triangle_intersection_unchecked(
+            &self.p,
+            &self.d,
+            tri,
+            T::epsilon(),
+            TriangleIntersectionKind::Line,
+        )
+    }
     fn checked_intersection(&self, tri: &Tri3<T>) -> Result<Option<(T, Vector3<T>)>, MathError> {
         // Select the unbounded line domain while sharing all normalized
         // orientation and barycentric arithmetic with the ray implementation.
-        triangle_intersection_from_point_dir(
+        checked_triangle_intersection_from_point_dir(
             &self.p,
             &self.d,
             tri,
@@ -504,7 +650,10 @@ impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<T
 }
 
 impl<T: RealScalar> Intersection<(T, Vector3<T>), Ray<T, Vector3<T>>> for Tri3<T> {
-    /// Returns the same forward hit with the [`Intersection`] operands reversed.
+    /// Returns an unchecked geometric intersection, or `None` for a geometric miss.
+    fn intersection(&self, ray: &Ray<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
+        ray.intersection(self)
+    }
     fn checked_intersection(
         &self,
         ray: &Ray<T, Vector3<T>>,
@@ -516,7 +665,10 @@ impl<T: RealScalar> Intersection<(T, Vector3<T>), Ray<T, Vector3<T>>> for Tri3<T
 }
 
 impl<T: RealScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3<T> {
-    /// Returns the same infinite-line hit with the [`Intersection`] operands reversed.
+    /// Returns an unchecked geometric intersection, or `None` for a geometric miss.
+    fn intersection(&self, line: &Line<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
+        line.intersection(self)
+    }
     fn checked_intersection(
         &self,
         line: &Line<T, Vector3<T>>,
@@ -527,107 +679,85 @@ impl<T: RealScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3<
     }
 }
 
-///
-/// Building an Orthonormal Basis from a Unit Vector
-/// John. F. Hughes & Thomas Moller
-/// Journal of Graphics Tools, 4:4, 33-35 (DOI: 10.1080/10867651.1999.10487513)
-///
-/// This implementation uses a symmetric variant of the Hughes-Moller
-/// construction: instead of branching on two specific components, it zeros the
-/// smallest-magnitude component and normalizes the resulting orthogonal helper
-/// vector. The proof sketch below applies to this variant.
-///
-/// Proof sketch for the branch construction:
-///
-/// Let `u = (x, y, z)` be the normalized input, so `||u|| = 1`.
-/// We choose the helper vector by zeroing the smallest-magnitude component:
-///
-/// - if `|x| <= |y|` and `|x| <= |z|`, choose `v0 = (0, -z, y)`
-/// - else if `|y| <= |x|` and `|y| <= |z|`, choose `v0 = (-z, 0, x)`
-/// - else choose `v0 = (-y, x, 0)`
-///
-/// In each branch, `u · v0 = 0`, so `v0` is orthogonal to `u`.
-/// The squared length is also bounded away from zero:
-///
-/// - first branch: `||v0||² = y² + z² = 1 - x²`
-/// - second branch: `||v0||² = x² + z² = 1 - y²`
-/// - third branch: `||v0||² = x² + y² = 1 - z²`
-///
-/// Because the selected component has minimal magnitude, its square is at most
-/// `1/3`. Therefore `||v0||² >= 2/3` in every branch, so `v0` is never zero for
-/// non-zero `u`, and normalizing it is always safe.
-///
-/// Let `v = normalize(v0)`. Then `u` and `v` are orthonormal. The public
-/// handedness-specific builders derive `w` from `u × v`, with the sign selected
-/// by their documented contract.
-///
+/// Prepares orthogonal unit axes with checked normalization and negation.
+/// The finite nonnegative epsilon rejects a zero or too-small source direction.
 fn checked_basis_uv<T: RealScalar>(
     unit: &Vector3<T>,
     epsilon: T,
-) -> Option<(Vector3<T>, Vector3<T>)> {
-    let u = unit.try_normalize(epsilon)?;
+) -> Result<(Vector3<T>, Vector3<T>), MathError> {
+    let u = unit.checked_normalize(epsilon)?;
     let x = u.x;
     let y = u.y;
     let z = u.z;
 
     let v = if x.tabs() <= y.tabs() && x.tabs() <= z.tabs() {
-        Vector3::new(<T as Zero>::zero(), -z, y)
+        Vector3::new(<T as Zero>::zero(), z.checked_neg()?, y)
     } else if y.tabs() <= x.tabs() && y.tabs() <= z.tabs() {
-        Vector3::new(-z, <T as Zero>::zero(), x)
+        Vector3::new(z.checked_neg()?, <T as Zero>::zero(), x)
     } else {
         // z.abs() < x.abs() && z.abs() <= y.abs()
-        Vector3::new(-y, x, <T as Zero>::zero())
+        Vector3::new(y.checked_neg()?, x, <T as Zero>::zero())
     };
-    let v = Vector3::normalize(&v);
-    Some((u, v))
+    let v = v.checked_normalize(<T as Zero>::zero())?;
+    Ok((u, v))
 }
 
-/// Builds a right-handed orthonormal basis from a non-zero input direction.
-///
-/// Returns `[u, v, w]`, where `u` is the normalized input and
-/// `u × v = w`. Returns `None` when `unit` is too small to normalize at the
-/// supplied epsilon.
+/// Builds `[u,v,w]` with `u × v = w` using checked arithmetic.
+/// A finite nonnegative epsilon rejects an invalid or too-small source direction.
 pub fn checked_basis_from_unit_rh<T: RealScalar>(
     unit: &Vector3<T>,
     epsilon: T,
-) -> Option<[Vector3<T>; 3]> {
+) -> Result<[Vector3<T>; 3], MathError> {
     let (u, v) = checked_basis_uv(unit, epsilon)?;
-    let w = Vector3::normalize(&Vector3::cross(&u, &v));
-    Some([u, v, w])
+    let w = Vector3::checked_cross(&u, &v)?.checked_normalize(<T as Zero>::zero())?;
+    Ok([u, v, w])
 }
 
-/// Builds a right-handed orthonormal basis from a non-zero input direction.
-///
-/// # Panics
-/// Panics if `unit` is too small to normalize. Use
-/// [`checked_basis_from_unit_rh`] when the input may be degenerate.
+/// Builds a right-handed orthonormal basis with unchecked arithmetic.
+/// Requires a nonzero finite input and representable norm/cross intermediates.
 pub fn basis_from_unit_rh<T: RealScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
-    checked_basis_from_unit_rh(unit, T::epsilon()).expect("basis direction must be non-zero")
+    let u = unit.normalize();
+    let z = <T as Zero>::zero();
+    let v = if u.x.tabs() <= u.y.tabs() && u.x.tabs() <= u.z.tabs() {
+        Vector3::new(z, -u.z, u.y)
+    } else if u.y.tabs() <= u.z.tabs() {
+        Vector3::new(-u.z, z, u.x)
+    } else {
+        Vector3::new(-u.y, u.x, z)
+    };
+    let v = v.normalize();
+    let w = Vector3::cross(&u, &v).normalize();
+    [u, v, w]
 }
 
-/// Builds a left-handed orthonormal basis from a non-zero input direction.
-///
-/// Returns `[u, v, w]`, where `u` is the normalized input and
-/// `u × v = -w`. Returns `None` when `unit` is too small to normalize at the
-/// supplied epsilon.
+/// Builds `[u,v,w]` with `u × v = -w` using checked arithmetic.
+/// A finite nonnegative epsilon rejects an invalid or too-small source direction.
 pub fn checked_basis_from_unit_lh<T: RealScalar>(
     unit: &Vector3<T>,
     epsilon: T,
-) -> Option<[Vector3<T>; 3]> {
+) -> Result<[Vector3<T>; 3], MathError> {
     let (u, v) = checked_basis_uv(unit, epsilon)?;
     // Negating only the cross-product axis reverses the ordered frame's
     // determinant without changing its first two orthonormal axes.
-    let w = -Vector3::normalize(&Vector3::cross(&u, &v));
-    Some([u, v, w])
+    let w = Vector3::checked_cross(&u, &v)?.checked_normalize(<T as Zero>::zero())?;
+    Ok([u, v, w.checked_neg()?])
 }
 
-/// Builds a left-handed orthonormal basis from a non-zero input direction.
-///
-/// # Panics
-/// Panics if `unit` is too small to normalize. Use
-/// [`checked_basis_from_unit_lh`] when the input may be degenerate.
+/// Builds a left-handed orthonormal basis with unchecked arithmetic.
+/// Requires a nonzero finite input and representable norm/cross intermediates.
 pub fn basis_from_unit_lh<T: RealScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
-    checked_basis_from_unit_lh(unit, T::epsilon()).expect("basis direction must be non-zero")
+    let u = unit.normalize();
+    let z = <T as Zero>::zero();
+    let v = if u.x.tabs() <= u.y.tabs() && u.x.tabs() <= u.z.tabs() {
+        Vector3::new(z, -u.z, u.y)
+    } else if u.y.tabs() <= u.z.tabs() {
+        Vector3::new(-u.z, z, u.x)
+    } else {
+        Vector3::new(-u.y, u.x, z)
+    };
+    let v = v.normalize();
+    let w = Vector3::cross(&u, &v).normalize();
+    [u, v, -w]
 }
 
 #[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
@@ -664,12 +794,15 @@ mod tests {
             ]);
             let start = Vector3::new(scale * quarter, scale * quarter, scale);
             let direction = Vector3::new(zero, zero, -one);
-            let ray = Ray::new(&start, &direction, epsilon)
+            let ray = Ray::checked_new(&start, &direction, epsilon)
+                .ok()
                 .expect("the unit test direction must define a ray");
 
             // A valid hit must survive at every representable world scale.
             let (t, point) = ray
-                .intersection(&tri)
+                .checked_intersection(&tri)
+                .ok()
+                .flatten()
                 .expect("world scaling must not change a ray/triangle hit");
 
             // Divide by the fixture scale before comparing so the assertion is
@@ -682,7 +815,9 @@ mod tests {
             // The symmetric trait implementation must remain a pure delegate
             // and therefore report the same parameter and point.
             let (symmetric_t, symmetric_point) = tri
-                .intersection(&ray)
+                .checked_intersection(&ray)
+                .ok()
+                .flatten()
                 .expect("symmetric triangle/ray query must also hit");
             assert!((symmetric_t / scale - one).tabs() <= tolerance);
             assert!(((symmetric_point.x - point.x) / scale).tabs() <= tolerance);
@@ -714,20 +849,26 @@ mod tests {
             // Construct valid public values first, then exercise their public
             // direction fields with magnitudes that constructor squaring could
             // not safely classify at the extremes.
-            let mut line = Line::new(&start, &unit_direction, epsilon)
+            let mut line = Line::checked_new(&start, &unit_direction, epsilon)
+                .ok()
                 .expect("the unit test direction must define a line");
             line.d = unit_direction * scale;
-            let mut ray = Ray::new(&start, &unit_direction, epsilon)
+            let mut ray = Ray::checked_new(&start, &unit_direction, epsilon)
+                .ok()
                 .expect("the unit test direction must define a ray");
             ray.direction = unit_direction * scale;
 
             // Both parameterized primitives represent the same forward hit;
             // multiplying the result by the direction scale recovers t = 1.
             let (line_t, line_point) = line
-                .intersection(&tri)
+                .checked_intersection(&tri)
+                .ok()
+                .flatten()
                 .expect("line hit must survive direction rescaling");
             let (ray_t, ray_point) = ray
-                .intersection(&tri)
+                .checked_intersection(&tri)
+                .ok()
+                .flatten()
                 .expect("ray hit must survive direction rescaling");
             assert!((line_t * scale - one).tabs() <= tolerance);
             assert!((ray_t * scale - one).tabs() <= tolerance);
@@ -759,7 +900,8 @@ mod tests {
         ]);
         let start = Vector3::new(quarter, quarter, one);
         let direction = Vector3::new(zero, zero, -one);
-        let valid_line = Line::new(&start, &direction, epsilon)
+        let valid_line = Line::checked_new(&start, &direction, epsilon)
+            .ok()
             .expect("the unit test direction must define a line");
 
         // Duplicate and collinear vertices have no two-dimensional interior.
@@ -773,24 +915,48 @@ mod tests {
             Vector3::new(one, zero, zero),
             Vector3::new(T::two(), zero, zero),
         ]);
-        assert!(valid_line.intersection(&duplicate).is_none());
-        assert!(valid_line.intersection(&collinear).is_none());
+        assert!(valid_line
+            .checked_intersection(&duplicate)
+            .ok()
+            .flatten()
+            .is_none());
+        assert!(valid_line
+            .checked_intersection(&collinear)
+            .ok()
+            .flatten()
+            .is_none());
 
         // A publicly mutable direction can violate constructor invariants; the
         // query must still reject exact zero and non-finite directions safely.
         let mut invalid_line = valid_line;
         invalid_line.d = Vector3::new(zero, zero, zero);
-        assert!(invalid_line.intersection(&tri).is_none());
+        assert!(invalid_line
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
+            .is_none());
         invalid_line.d = Vector3::new(zero, zero, nan);
-        assert!(invalid_line.intersection(&tri).is_none());
+        assert!(invalid_line
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
+            .is_none());
         invalid_line.d = Vector3::new(zero, zero, infinity);
-        assert!(invalid_line.intersection(&tri).is_none());
+        assert!(invalid_line
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
+            .is_none());
 
         // Non-finite origins and vertices must likewise return `None`; in
         // particular, unordered NaN comparisons must never leak `Some`.
         let mut invalid_origin = valid_line;
         invalid_origin.p = Vector3::new(nan, quarter, one);
-        assert!(invalid_origin.intersection(&tri).is_none());
+        assert!(invalid_origin
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
+            .is_none());
         let nan_triangle = Tri3::new([
             Vector3::new(zero, zero, zero),
             Vector3::new(nan, zero, zero),
@@ -801,8 +967,16 @@ mod tests {
             Vector3::new(infinity, zero, zero),
             Vector3::new(zero, one, zero),
         ]);
-        assert!(valid_line.intersection(&nan_triangle).is_none());
-        assert!(valid_line.intersection(&infinite_triangle).is_none());
+        assert!(valid_line
+            .checked_intersection(&nan_triangle)
+            .ok()
+            .flatten()
+            .is_none());
+        assert!(valid_line
+            .checked_intersection(&infinite_triangle)
+            .ok()
+            .flatten()
+            .is_none());
     }
 
     fn assert_orthonormal_basis(basis: [Vector3<f32>; 3], handedness: f32) {
@@ -857,11 +1031,12 @@ mod tests {
             &Vector3::new(0.0f32, 0.0, 0.0),
             &Vector3::new(1.0, 1.0, 1.0),
         );
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(1.0f32, 0.5, 0.5),
             &Vector3::new(1.0, 0.0, 0.0),
             EPS_F32,
         )
+        .ok()
         .expect("ray should be valid");
         assert!(b.intersect(&ray));
     }
@@ -872,11 +1047,12 @@ mod tests {
             &Vector3::new(0.0f32, 0.0, 0.0),
             &Vector3::new(1.0, 1.0, 1.0),
         );
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(0.0f32, 0.5, 0.5),
             &Vector3::new(0.0, 1.0, 0.0),
             EPS_F32,
         )
+        .ok()
         .expect("ray should be valid");
         assert!(b.intersect(&ray));
     }
@@ -887,11 +1063,12 @@ mod tests {
             &Vector3::new(0.0f32, 0.0, 0.0),
             &Vector3::new(1.0, 1.0, 1.0),
         );
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(2.0f32, 0.5, 0.5),
             &Vector3::new(0.0, 1.0, 0.0),
             EPS_F32,
         )
+        .ok()
         .expect("ray should be valid");
         assert!(!b.intersect(&ray));
     }
@@ -899,8 +1076,12 @@ mod tests {
     #[test]
     fn test_try_basis_from_unit_handedness_zero_none() {
         let zero = Vector3::new(0.0f32, 0.0, 0.0);
-        assert!(super::checked_basis_from_unit_rh(&zero, EPS_F32).is_none());
-        assert!(super::checked_basis_from_unit_lh(&zero, EPS_F32).is_none());
+        assert!(super::checked_basis_from_unit_rh(&zero, EPS_F32)
+            .ok()
+            .is_none());
+        assert!(super::checked_basis_from_unit_lh(&zero, EPS_F32)
+            .ok()
+            .is_none());
     }
 
     #[test]
@@ -914,11 +1095,13 @@ mod tests {
 
         for direction in directions {
             let expected_u = direction
-                .try_normalize(EPS_F32)
+                .checked_normalize(EPS_F32)
                 .expect("direction should normalize");
             let right = super::checked_basis_from_unit_rh(&direction, EPS_F32)
+                .ok()
                 .expect("right-handed basis should exist");
             let left = super::checked_basis_from_unit_lh(&direction, EPS_F32)
+                .ok()
                 .expect("left-handed basis should exist");
 
             assert_orthonormal_basis(right, 1.0);
@@ -939,26 +1122,28 @@ mod tests {
 
         for direction in directions {
             assert_orthonormal_basis(
-                super::checked_basis_from_unit_rh(&direction, EPS_F32).expect("basis"),
+                super::checked_basis_from_unit_rh(&direction, EPS_F32)
+                    .ok()
+                    .expect("basis"),
                 1.0,
             );
             assert_orthonormal_basis(
-                super::checked_basis_from_unit_lh(&direction, EPS_F32).expect("basis"),
+                super::checked_basis_from_unit_lh(&direction, EPS_F32)
+                    .ok()
+                    .expect("basis"),
                 -1.0,
             );
         }
     }
 
     #[test]
-    #[should_panic(expected = "basis direction must be non-zero")]
-    fn test_basis_from_unit_rh_zero_panics() {
-        super::basis_from_unit_rh(&Vector3::new(0.0f32, 0.0, 0.0));
+    fn test_checked_basis_from_unit_rh_zero_errors() {
+        assert!(super::checked_basis_from_unit_rh(&Vector3::new(0.0f32, 0.0, 0.0), 0.0).is_err());
     }
 
     #[test]
-    #[should_panic(expected = "basis direction must be non-zero")]
-    fn test_basis_from_unit_lh_zero_panics() {
-        super::basis_from_unit_lh(&Vector3::new(0.0f32, 0.0, 0.0));
+    fn test_checked_basis_from_unit_lh_zero_errors() {
+        assert!(super::checked_basis_from_unit_lh(&Vector3::new(0.0f32, 0.0, 0.0), 0.0).is_err());
     }
 
     /// Checks scale-metamorphic triangle intersections for `f32` geometry.
@@ -1007,27 +1192,35 @@ mod tests {
         // stored direction magnitude rounds to zero. Returning `t = 0` would
         // place the parameterized ray at its elevated origin instead of the
         // triangle, so the query must fail rather than return an inconsistent tuple.
-        let mut underflowing_ray = Ray::new(
+        let mut underflowing_ray = Ray::checked_new(
             &Vector3::new(0.0f32, 0.0, smallest_positive),
             &Vector3::new(0.0, 0.0, -1.0),
             EPS_F32,
         )
+        .ok()
         .expect("the unit direction must define a ray");
         underflowing_ray.direction = underflowing_ray.direction * f32::MAX;
-        assert!(underflowing_ray.intersection(&triangle).is_none());
+        assert!(underflowing_ray
+            .checked_intersection(&triangle)
+            .ok()
+            .flatten()
+            .is_none());
 
         // A length-two stored direction and two-subnormal physical travel yield
         // the minimum positive `t` exactly. Its public ray equation reconstructs
         // the triangle hit, so the exponent-boundary validation must retain it.
-        let mut minimum_parameter_ray = Ray::new(
+        let mut minimum_parameter_ray = Ray::checked_new(
             &Vector3::new(0.0f32, 0.0, smallest_positive * 2.0),
             &Vector3::new(0.0, 0.0, -1.0),
             EPS_F32,
         )
+        .ok()
         .expect("the unit direction must define a ray");
         minimum_parameter_ray.direction = minimum_parameter_ray.direction * 2.0;
         let (t, point) = minimum_parameter_ray
-            .intersection(&triangle)
+            .checked_intersection(&triangle)
+            .ok()
+            .flatten()
             .expect("a reconstructable minimum-subnormal parameter must be retained");
         assert_eq!(t.to_bits(), smallest_positive.to_bits());
         assert_eq!(point.x, 0.0);
@@ -1047,17 +1240,20 @@ mod tests {
             Vector3::new(edge_length, 0.0, 0.0),
             Vector3::new(0.0, edge_length, 0.0),
         ]);
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(edge_length * 0.25, edge_length * 0.25, edge_length),
             &Vector3::new(0.0, 0.0, -1.0),
             EPS_F32,
         )
+        .ok()
         .expect("the unit direction must define a ray");
 
         // The normalized algorithm must report the interior hit rather than
         // mistaking the small raw determinant for parallelism.
         let (t, point) = ray
-            .intersection(&tri)
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
             .expect("a well-shaped small triangle must remain intersectable");
         assert!((t / edge_length - 1.0).abs() <= 2.0e-5);
         assert!((point.x / edge_length - 0.25).abs() <= 2.0e-5);
@@ -1073,11 +1269,12 @@ mod tests {
         let a = Vector3::new(0.0f32, 0.0, 0.0);
         let b = Vector3::new(2.0, 0.0, 0.0);
         let c = Vector3::new(0.0, 1.0, 0.0);
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(smallest_positive, 0.25, 1.0),
             &Vector3::new(0.0, 0.0, -1.0),
             EPS_F32,
         )
+        .ok()
         .expect("the unit direction must define a ray");
 
         // The exact x-axis barycentric contribution is positive, but dividing
@@ -1089,7 +1286,9 @@ mod tests {
         for vertices in [[a, b, c], [b, c, a], [c, a, b]] {
             let tri = Tri3::new(vertices);
             let (t, point) = ray
-                .intersection(&tri)
+                .checked_intersection(&tri)
+                .ok()
+                .flatten()
                 .expect("barycentric underflow to an inclusive edge must remain a hit");
             assert_eq!(t, 1.0);
             assert_eq!(point.x, smallest_positive);
@@ -1109,16 +1308,19 @@ mod tests {
             Vector3::new(12.0, -20.0, 30.0),
             Vector3::new(10.0, -18.0, 30.0),
         ]);
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(10.5f32, -19.5, 35.0),
             &Vector3::new(0.0, 0.0, -1.0),
             EPS_F32,
         )
+        .ok()
         .expect("the unit direction must define a ray");
 
         // The ray travels five units to the translated triangle's interior.
         let (t, point) = ray
-            .intersection(&tri)
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
             .expect("translation must preserve the represented hit");
         assert!((t - 5.0).abs() <= 1.0e-5);
         assert!((point.x - 10.5).abs() <= 1.0e-5);
@@ -1138,18 +1340,29 @@ mod tests {
             Vector3::new(0.0, 1.0, 0.0),
         ]);
         let direction = Vector3::new(0.0f32, 0.0, -1.0);
-        let edge_ray = Ray::new(&Vector3::new(0.5f32, 0.0, 1.0), &direction, EPS_F32)
+        let edge_ray = Ray::checked_new(&Vector3::new(0.5f32, 0.0, 1.0), &direction, EPS_F32)
+            .ok()
             .expect("the edge ray direction must be valid");
-        let vertex_ray = Ray::new(&Vector3::new(0.0f32, 0.0, 1.0), &direction, EPS_F32)
+        let vertex_ray = Ray::checked_new(&Vector3::new(0.0f32, 0.0, 1.0), &direction, EPS_F32)
+            .ok()
             .expect("the vertex ray direction must be valid");
-        let outside_ray = Ray::new(&Vector3::new(0.75f32, 0.75, 1.0), &direction, EPS_F32)
+        let outside_ray = Ray::checked_new(&Vector3::new(0.75f32, 0.75, 1.0), &direction, EPS_F32)
+            .ok()
             .expect("the outside ray direction must be valid");
 
         // Touching belongs to the triangle closure, while u + v = 1.5 is well
         // beyond the documented epsilon-expanded barycentric boundary.
-        assert!(edge_ray.intersection(&tri).is_some());
-        assert!(vertex_ray.intersection(&tri).is_some());
-        assert!(outside_ray.intersection(&tri).is_none());
+        assert!(edge_ray.checked_intersection(&tri).ok().flatten().is_some());
+        assert!(vertex_ray
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
+            .is_some());
+        assert!(outside_ray
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
+            .is_none());
     }
 
     /// Exercises both sides of the dimensionless ray/plane and triangle-edge
@@ -1167,26 +1380,34 @@ mod tests {
         // reach the triangle interior after one half unit along +X.
         let near_parallel_direction = Vector3::new(1.0f32, 0.0, -EPS_F32 * 0.5);
         for scale in [1.0e-18f32, 1.0, 1.0e18] {
-            let mut line = Line::new(
+            let mut line = Line::checked_new(
                 &Vector3::new(-0.25f32, 0.25, EPS_F32 * 0.25),
                 &near_parallel_direction,
                 EPS_F32,
             )
+            .ok()
             .expect("the order-one base direction must define a line");
             line.d = near_parallel_direction * scale;
-            assert!(line.intersection(&triangle).is_none());
+            assert!(line
+                .checked_intersection(&triangle)
+                .ok()
+                .flatten()
+                .is_none());
         }
 
         // Doubling the normal component places the direction beyond the
         // parallel band, so the otherwise identical geometry has a valid hit.
-        let above_threshold_line = Line::new(
+        let above_threshold_line = Line::checked_new(
             &Vector3::new(-0.25f32, 0.25, EPS_F32),
             &Vector3::new(1.0, 0.0, -EPS_F32 * 2.0),
             EPS_F32,
         )
+        .ok()
         .expect("the above-threshold direction must define a line");
         let (_, above_threshold_point) = above_threshold_line
-            .intersection(&triangle)
+            .checked_intersection(&triangle)
+            .ok()
+            .flatten()
             .expect("a direction beyond the angular band must intersect");
         assert!((above_threshold_point.x - 0.25).abs() <= 2.0e-5);
         assert!((above_threshold_point.y - 0.25).abs() <= 2.0e-5);
@@ -1206,15 +1427,24 @@ mod tests {
                 Vector3::new(scale, 0.0, 0.0),
                 Vector3::new(scale, scale * EPS_F32 * 2.0, 0.0),
             ]);
-            let line = Line::new(
+            let line = Line::checked_new(
                 &Vector3::new(scale * 0.5, scale * EPS_F32 * 0.5, scale),
                 &Vector3::new(0.0f32, 0.0, -1.0),
                 EPS_F32,
             )
+            .ok()
             .expect("the unit direction must define a line");
 
-            assert!(line.intersection(&near_collinear).is_none());
-            assert!(line.intersection(&valid_skinny).is_some());
+            assert!(line
+                .checked_intersection(&near_collinear)
+                .ok()
+                .flatten()
+                .is_none());
+            assert!(line
+                .checked_intersection(&valid_skinny)
+                .ok()
+                .flatten()
+                .is_some());
         }
     }
 
@@ -1243,7 +1473,7 @@ mod tests {
         // Geometry is deliberately ordinary, isolating the enum's `Invalid`
         // state to the non-finite or out-of-range tolerance in each iteration.
         for epsilon in [-EPS_F32, 1.0 + EPS_F32, f32::NAN, f32::INFINITY] {
-            assert!(super::triangle_intersection_from_point_dir(
+            assert!(super::checked_triangle_intersection_from_point_dir(
                 &start,
                 &direction,
                 &triangle,
@@ -1251,7 +1481,7 @@ mod tests {
                 super::TriangleIntersectionKind::Ray,
             )
             .is_err());
-            assert!(super::triangle_intersection_from_point_dir(
+            assert!(super::checked_triangle_intersection_from_point_dir(
                 &start,
                 &direction,
                 &triangle,
@@ -1269,15 +1499,16 @@ mod tests {
             Vector3::new(1.0, 0.0, 0.0),
             Vector3::new(0.0, 1.0, 0.0),
         ]);
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(0.25f32, 0.25, 1.0),
             &Vector3::new(0.0, 0.0, 1.0),
             EPS_F32,
         )
+        .ok()
         .expect("ray should be valid");
 
-        assert!(ray.intersection(&tri).is_none());
-        assert!(tri.intersection(&ray).is_none());
+        assert!(ray.checked_intersection(&tri).ok().flatten().is_none());
+        assert!(tri.checked_intersection(&ray).ok().flatten().is_none());
     }
 
     #[test]
@@ -1289,14 +1520,20 @@ mod tests {
         ]);
         let start = Vector3::new(0.25f32, 0.25, EPS_F32 * 0.5);
         let direction = Vector3::new(0.0f32, 0.0, 1.0);
-        let ray = Ray::new(&start, &direction, EPS_F32).expect("ray should be valid");
-        let line = Line::new(&start, &direction, EPS_F32).expect("line should be valid");
+        let ray = Ray::checked_new(&start, &direction, EPS_F32)
+            .ok()
+            .expect("ray should be valid");
+        let line = Line::checked_new(&start, &direction, EPS_F32)
+            .ok()
+            .expect("line should be valid");
 
-        assert!(ray.intersection(&tri).is_none());
-        assert!(tri.intersection(&ray).is_none());
+        assert!(ray.checked_intersection(&tri).ok().flatten().is_none());
+        assert!(tri.checked_intersection(&ray).ok().flatten().is_none());
 
         let (line_t, _) = line
-            .intersection(&tri)
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
             .expect("infinite line should retain the negative hit");
         assert!(line_t < 0.0);
     }
@@ -1308,15 +1545,18 @@ mod tests {
             Vector3::new(1.0, 0.0, 0.0),
             Vector3::new(0.0, 1.0, 0.0),
         ]);
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(0.25f32, 0.25, 0.0),
             &Vector3::new(0.0, 0.0, 1.0),
             EPS_F32,
         )
+        .ok()
         .expect("ray should be valid");
 
         let (t, point) = ray
-            .intersection(&tri)
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
             .expect("the ray origin lies on the triangle");
         assert!(t >= 0.0);
         assert!(point.z.abs() < EPS_F32);
@@ -1329,15 +1569,24 @@ mod tests {
             Vector3::new(1.0, 0.0, 0.0),
             Vector3::new(0.0, 1.0, 0.0),
         ]);
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(0.25f32, 0.25, 1.0),
             &Vector3::new(0.0, 0.0, -1.0),
             EPS_F32,
         )
+        .ok()
         .expect("ray should be valid");
 
-        let (t0, p0) = ray.intersection(&tri).expect("ray should hit triangle");
-        let (t1, p1) = tri.intersection(&ray).expect("triangle should hit ray");
+        let (t0, p0) = ray
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
+            .expect("ray should hit triangle");
+        let (t1, p1) = tri
+            .checked_intersection(&ray)
+            .ok()
+            .flatten()
+            .expect("triangle should hit ray");
 
         assert!((t0 - 1.0).abs() < 0.001);
         assert!((p0.x - 0.25).abs() < 0.001);
@@ -1357,15 +1606,24 @@ mod tests {
             Vector3::new(1.0, 0.0, 0.0),
             Vector3::new(0.0, 1.0, 0.0),
         ]);
-        let line = Line::new(
+        let line = Line::checked_new(
             &Vector3::new(0.25f32, 0.25, 1.0),
             &Vector3::new(0.0, 0.0, 1.0),
             EPS_F32,
         )
+        .ok()
         .expect("line should be valid");
 
-        let (t0, p0) = line.intersection(&tri).expect("line should hit triangle");
-        let (t1, p1) = tri.intersection(&line).expect("triangle should hit line");
+        let (t0, p0) = line
+            .checked_intersection(&tri)
+            .ok()
+            .flatten()
+            .expect("line should hit triangle");
+        let (t1, p1) = tri
+            .checked_intersection(&line)
+            .ok()
+            .flatten()
+            .expect("triangle should hit line");
 
         assert!((t0 + 1.0).abs() < 0.001);
         assert!((p0.x - 0.25).abs() < 0.001);

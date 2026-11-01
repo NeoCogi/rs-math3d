@@ -62,6 +62,10 @@ pub const EPS_F64: f64 = 1.0 / (1024.0 * 1024.0 * 1024.0 * 1024.0);
 ///
 /// It is implemented for `i32`, `i64`, `f32`, `f64`, and fixed formats that can represent two.
 ///
+/// Ordinary operators and helpers use native unchecked arithmetic. Callers
+/// establish domains and intermediate range; `checked_*` methods validate
+/// explicitly and preserve errors before narrowing or returning invalid values.
+///
 /// # Required Methods
 ///
 /// Types implementing this trait must provide:
@@ -117,6 +121,10 @@ pub trait Scalar:
     fn min(l: Self, r: Self) -> Self;
     /// Returns the maximum of two values.
     fn max(l: Self, r: Self) -> Self;
+    /// Computes the square with range and input validation.
+    fn checked_squared(self) -> Result<Self, MathError> {
+        self.checked_mul(self)
+    }
     /// Returns the squared value (self * self).
     fn squared(self) -> Self {
         self * self
@@ -125,7 +133,7 @@ pub trait Scalar:
     fn tabs(self) -> Self;
 }
 
-/// Trait for fractional scalars with checked analytic operations.
+/// Fractional scalars with ordinary and explicitly checked analytic operations.
 ///
 /// Extends `Scalar` with trigonometric functions, square roots and stable norms.
 /// Fixed implementations use integer arithmetic. Floating implementations

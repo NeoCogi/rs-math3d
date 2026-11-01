@@ -136,7 +136,6 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
     fn checked_mul_vs(l: &Self, r: T) -> Result<Self, MathError>;
     /// Divides every component with zero/range checks.
     fn checked_div_vs(l: &Self, r: T) -> Result<Self, MathError>;
-    /// Computes a dot product with one fixed-point quantization.
     /// Checked componentwise multiplication.
     fn checked_mul_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
     /// Checked componentwise division.
@@ -147,6 +146,7 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
     fn checked_rem_vs(l: &Self, r: T) -> Result<Self, MathError>;
     /// Checked componentwise negation.
     fn checked_neg(&self) -> Result<Self, MathError>;
+    /// Computes a checked dot product with one fixed-point quantization.
     fn checked_dot(l: &Self, r: &Self) -> Result<T, MathError>;
 
     /// Returns a vector with the minimum components from both vectors.
@@ -187,7 +187,7 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
     /// ```
     ///
     /// # Note
-    /// Floating zero vectors yield NaN/Inf; fixed invalid arithmetic panics.
+    /// Floating zero vectors yield NaN/Inf; fixed overflow wraps and zero division panics.
     /// Prefer `checked_normalize` for explicit error handling.
     fn normalize(&self) -> Self;
 
@@ -216,14 +216,10 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
     fn checked_distance(l: &Self, r: &Self) -> Result<T, MathError> {
         Self::checked_sub_vv(l, r)?.checked_length()
     }
-    /// Returns a normalized vector or `None` when the length is too small.
-    fn try_normalize(&self, epsilon: T) -> Option<Self> {
-        self.checked_normalize(epsilon).ok()
-    }
-
     /// Returns a normalized vector or the zero vector when too small.
     fn normalize_or_zero(&self, epsilon: T) -> Self {
-        self.try_normalize(epsilon).unwrap_or_else(Self::zero)
+        self.checked_normalize(epsilon)
+            .unwrap_or_else(|_| Self::zero())
     }
 
     /// Normalizes using a precomputed inverse length (e.g., from rsqrt).
@@ -236,18 +232,22 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
     fn checked_norm_exceeds(&self, epsilon: T) -> Result<bool, MathError>;
 
     /// Normalizes with precomputed length squared and inverse length.
-    fn try_normalize_with_inv_len(&self, len_sq: T, inv_len: T, epsilon: T) -> Option<Self> {
-        if !len_sq.is_finite()
-            || len_sq < <T as Zero>::zero()
-            || !inv_len.is_finite()
-            || inv_len <= <T as Zero>::zero()
-        {
-            return None;
+    fn checked_normalize_with_inv_len(
+        &self,
+        len_sq: T,
+        inv_len: T,
+        epsilon: T,
+    ) -> Result<Self, MathError> {
+        if !len_sq.is_finite() || !inv_len.is_finite() {
+            return Err(MathError::NonFinite);
         }
-        if !self.checked_norm_exceeds(epsilon).ok()? {
-            return None;
+        if len_sq < <T as Zero>::zero() || inv_len <= <T as Zero>::zero() {
+            return Err(MathError::Domain);
         }
-        Self::checked_mul_vs(self, inv_len).ok()
+        if !self.checked_norm_exceeds(epsilon)? {
+            return Err(MathError::Degenerate);
+        }
+        Self::checked_mul_vs(self, inv_len)
     }
 }
 
@@ -543,6 +543,19 @@ where
     }
 }
 
+/// Decomposes a nonzero direction without validation. Scaling is a numerical
+/// algorithm choice, not an input check; zero/nonfinite input has native semantics.
+pub(crate) fn normalized3<T: RealScalar>(vector: &Vector3<T>) -> Normalized3<T> {
+    let scale = T::max(vector.x.tabs(), T::max(vector.y.tabs(), vector.z.tabs()));
+    let scaled = *vector / scale;
+    let scaled_length = scaled.length();
+    Normalized3 {
+        unit: scaled / scaled_length,
+        scale,
+        scaled_length,
+    }
+}
+
 /// A finite, nonzero 3D vector split into a unit direction and safe length factors.
 ///
 /// Directly computing `sqrt(x*x + y*y + z*z)` can overflow for a finite large
@@ -556,6 +569,8 @@ where
 /// - `unit` is `(original / scale) / scaled_length`, without requiring the
 ///   potentially overflowing original length to be formed.
 ///
+/// Checked construction validates these invariants; unchecked construction
+/// assumes valid inputs and representable arithmetic.
 /// The type is crate-private because it supplies numerical machinery for
 /// geometric queries rather than a second public vector-normalization API.
 #[derive(Clone, Copy, Debug)]
@@ -572,66 +587,20 @@ pub(crate) struct Normalized3<T: RealScalar> {
 }
 
 impl<T: RealScalar> Normalized3<T> {
+    /// Converts physical travel to the stored parameter without validation.
+    pub(crate) fn divide_by_length_unchecked(&self, value: T) -> T {
+        (value / self.scale) / self.scaled_length
+    }
     /// Returns the finite unit vector represented by this decomposition.
     pub(crate) fn unit(&self) -> Vector3<T> {
-        // `Normalized3` can only be constructed by `try_normalized3`, which
-        // establishes that every stored unit-vector component is finite.
+        // Checked construction establishes the invariants. Unchecked callers
+        // are responsible for nonzero finite inputs and representable arithmetic.
         self.unit
     }
 
-    /// Divides a finite scalar by the original vector's Euclidean length.
-    ///
-    /// The calculation avoids constructing `scale * scaled_length`, which can
-    /// overflow even when the requested quotient is representable. It first
-    /// divides by `scale` to preserve ratios between similarly tiny values. If
-    /// that intermediate overflows, it retries by dividing by the bounded
-    /// `scaled_length` first. `None` is returned when `value` is non-finite or
-    /// neither ordering produces a finite quotient. As with ordinary floating-
-    /// point division, a nonzero quotient below the scalar's representable
-    /// range may round to zero; callers whose result must distinguish that case
-    /// use [`Normalized3::divide_by_length_preserving_nonzero`] instead.
-    pub(crate) fn divide_by_length(&self, value: T) -> Option<T> {
-        // Reject NaN and infinity before arithmetic so they cannot silently
-        // contaminate an otherwise valid geometric query.
-        if !is_finite_scalar(value) {
-            return None;
-        }
-
-        // Divide quantities of comparable scale first. In particular, this
-        // preserves ratios between equally tiny or equally large values.
-        let scale_adjusted = value.checked_div(self.scale);
-        if let Ok(scale_adjusted) = scale_adjusted {
-            // Axis-aligned inputs have scaled length exactly one, a common case
-            // in CAD and game geometry where the second division can be elided.
-            // Otherwise the bounded divisor lies in `(1, sqrt(3)]` and cannot
-            // enlarge a finite intermediate.
-            let quotient = if self.scaled_length == <T as One>::one() {
-                scale_adjusted
-            } else {
-                scale_adjusted.checked_div(self.scaled_length).ok()?
-            };
-            if is_finite_scalar(quotient) {
-                return Some(quotient);
-            }
-        }
-
-        // A value/scale intermediate can overflow even when the final quotient
-        // is finite: for example, when scale < 1 but the complete vector length
-        // is > 1. Dividing by the bounded factor first recovers that case.
-        let length_adjusted = if self.scaled_length == <T as One>::one() {
-            value
-        } else {
-            value.checked_div(self.scaled_length).ok()?
-        };
-        if !is_finite_scalar(length_adjusted) {
-            return None;
-        }
-        let quotient = length_adjusted.checked_div(self.scale).ok()?;
-        is_finite_scalar(quotient).then_some(quotient)
-    }
-
-    /// Divides using two checked orderings so representable quotients survive
-    /// an overflowing first intermediate. No invalid scalar is constructed.
+    /// Divides physical travel by length using checked arithmetic.
+    /// Tries both division orderings so an overflowing first intermediate does not
+    /// reject a representable quotient. Nonfinite inputs and range failures propagate.
     pub(crate) fn checked_divide_by_length(&self, value: T) -> Result<T, MathError> {
         value
             .checked_div(self.scale)
@@ -643,28 +612,17 @@ impl<T: RealScalar> Normalized3<T> {
             })
     }
 
-    /// Divides by the original vector length without collapsing nonzero to zero.
-    ///
-    /// This stricter form has the same overflow-resistant arithmetic as
-    /// [`Normalized3::divide_by_length`], but returns `None` when a nonzero
-    /// numerator produces zero through underflow. Returned geometric parameters
-    /// use this distinction because `t = 0` means the query started exactly at
-    /// its reported point. An exactly zero numerator remains valid, and division
-    /// by the decomposition's positive length preserves its signed zero.
-    pub(crate) fn divide_by_length_preserving_nonzero(&self, value: T) -> Option<T> {
-        // Perform the shared two-ordering division first so finite overflow
-        // recovery and backend behavior remain identical between both APIs.
-        let quotient = self.divide_by_length(value)?;
-        let zero = <T as Zero>::zero();
-
-        // Distinguish a genuine zero numerator from a nonzero value whose
-        // quotient rounded to either positive or negative zero. The latter is
-        // not a usable original-scale parameter.
-        if value != zero && quotient == zero {
-            return None;
+    /// Converts physical travel to a stored parameter using checked division.
+    /// Returns `Overflow` when nonzero travel rounds to zero; exact zero retains its sign.
+    pub(crate) fn checked_divide_by_length_preserving_nonzero(
+        &self,
+        value: T,
+    ) -> Result<T, MathError> {
+        let quotient = self.checked_divide_by_length(value)?;
+        if value != <T as Zero>::zero() && quotient == <T as Zero>::zero() {
+            return Err(MathError::Overflow);
         }
-
-        Some(quotient)
+        Ok(quotient)
     }
 }
 
@@ -677,7 +635,7 @@ impl<T: RealScalar> Normalized3<T> {
 ///
 /// This enum is crate-private because it coordinates geometric query internals;
 /// public queries continue to report invalid or rejected geometry through their
-/// documented `Option` results.
+/// documented `Result` results.
 #[must_use = "angular classifications, including invalid states, must be handled"]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AngularClassification {
@@ -705,16 +663,6 @@ pub(crate) fn is_finite_vector3<T: RealScalar>(vector: &Vector3<T>) -> bool {
     // Test every component independently; accepting even one NaN or infinity
     // would make max-component scaling and orientation comparisons unordered.
     is_finite_scalar(vector.x) && is_finite_scalar(vector.y) && is_finite_scalar(vector.z)
-}
-
-/// Normalizes a finite, nonzero 3D vector without squaring its raw components.
-///
-/// The largest absolute component is removed before computing a squared
-/// length. The scaled components lie in `[-1, 1]`, so their squared sum cannot
-/// overflow and a nonzero subnormal input is not lost to underflow. `None` is
-/// returned for zero vectors and vectors containing NaN or infinity.
-pub(crate) fn try_normalized3<T: RealScalar>(vector: &Vector3<T>) -> Option<Normalized3<T>> {
-    checked_normalized3(vector).ok()
 }
 
 /// Validates a dimensionless angular tolerance shared by orientation predicates.
@@ -771,7 +719,7 @@ pub(crate) fn checked_normalized3<T: RealScalar>(
 /// is at most the inclusive tolerance, [`AngularClassification::OutsideTolerance`]
 /// when it is greater, and [`AngularClassification::Invalid`] when the tolerance
 /// or derived arithmetic is invalid. The operands already carry the finite,
-/// nonzero invariants established by [`try_normalized3`].
+/// nonzero invariants established by [`checked_normalized3`].
 pub(crate) fn classify_nearly_parallel_normalized3<T: RealScalar>(
     left: &Normalized3<T>,
     right: &Normalized3<T>,
@@ -857,13 +805,13 @@ pub(crate) fn classify_nearly_parallel3<T: RealScalar>(
     // Each raw operand is normalized exactly once. The normalized-input helper
     // then performs only orientation arithmetic and can also be called directly
     // by queries that need these same decompositions for later calculations.
-    let left_normalized = match try_normalized3(left) {
-        Some(metric) => metric,
-        None => return AngularClassification::Invalid,
+    let left_normalized = match checked_normalized3(left) {
+        Ok(metric) => metric,
+        Err(_) => return AngularClassification::Invalid,
     };
-    let right_normalized = match try_normalized3(right) {
-        Some(metric) => metric,
-        None => return AngularClassification::Invalid,
+    let right_normalized = match checked_normalized3(right) {
+        Ok(metric) => metric,
+        Err(_) => return AngularClassification::Invalid,
     };
     classify_nearly_parallel_normalized3(&left_normalized, &right_normalized, angular_epsilon)
 }
@@ -885,13 +833,13 @@ pub(crate) fn classify_nearly_perpendicular3<T: RealScalar>(
 ) -> AngularClassification {
     // Normalize each operand once and delegate to the reusable fast path. This
     // wrapper remains useful to sites that do not otherwise need vector metrics.
-    let left_normalized = match try_normalized3(left) {
-        Some(metric) => metric,
-        None => return AngularClassification::Invalid,
+    let left_normalized = match checked_normalized3(left) {
+        Ok(metric) => metric,
+        Err(_) => return AngularClassification::Invalid,
     };
-    let right_normalized = match try_normalized3(right) {
-        Some(metric) => metric,
-        None => return AngularClassification::Invalid,
+    let right_normalized = match checked_normalized3(right) {
+        Ok(metric) => metric,
+        Err(_) => return AngularClassification::Invalid,
     };
     classify_nearly_perpendicular_normalized3(&left_normalized, &right_normalized, angular_epsilon)
 }
@@ -1190,7 +1138,7 @@ mod tests {
 
         // A 3-4-5 vector checks the ordinary unit direction and the method that
         // divides a caller's value by the original, unscaled length.
-        let ordinary = try_normalized3(&Vector3::new(three, four, zero))
+        let ordinary = checked_normalized3(&Vector3::new(three, four, zero))
             .expect("a finite nonzero vector must normalize");
         let ordinary_unit = ordinary.unit();
         assert_scalar_close(ordinary_unit.x, three / five, tolerance);
@@ -1199,26 +1147,26 @@ mod tests {
         assert_scalar_close(ordinary_unit.length(), one, tolerance);
         assert_scalar_close(
             ordinary
-                .divide_by_length(ten)
+                .checked_divide_by_length(ten)
                 .expect("10 / length(3, 4, 0) is finite"),
             two,
             tolerance,
         );
-        assert_eq!(ordinary.divide_by_length(zero), Some(zero));
+        assert_eq!(ordinary.checked_divide_by_length(zero), Ok(zero));
 
         // A balanced vector with components 3/4 has scale below one but length
         // above one. Dividing MAX by scale first overflows even though dividing
         // MAX by the complete vector length is representable; the alternate
         // ordering must preserve that finite result.
         let three_quarters = three / four;
-        let balanced = try_normalized3(&Vector3::new(
+        let balanced = checked_normalized3(&Vector3::new(
             three_quarters,
             three_quarters,
             three_quarters,
         ))
         .expect("the balanced finite vector must normalize");
         let balanced_quotient = balanced
-            .divide_by_length(largest_finite)
+            .checked_divide_by_length(largest_finite)
             .expect("a representable quotient must survive intermediate overflow");
         assert!(is_finite_scalar(balanced_quotient));
         assert!(balanced_quotient > zero);
@@ -1226,14 +1174,14 @@ mod tests {
         // Axis vectors at both exponent extremes would underflow or overflow in
         // a raw sum-of-squares implementation, but max scaling keeps them unit.
         for magnitude in [smallest_positive, largest_finite] {
-            let normalized = try_normalized3(&Vector3::new(magnitude, zero, zero))
+            let normalized = checked_normalized3(&Vector3::new(magnitude, zero, zero))
                 .expect("a finite nonzero axis vector must normalize");
             assert_scalar_close(normalized.unit().x, one, tolerance);
             assert_scalar_close(normalized.unit().y, zero, tolerance);
             assert_scalar_close(normalized.unit().z, zero, tolerance);
             assert_scalar_close(
                 normalized
-                    .divide_by_length(magnitude)
+                    .checked_divide_by_length(magnitude)
                     .expect("a magnitude divided by itself is finite"),
                 one,
                 tolerance,
@@ -1242,29 +1190,36 @@ mod tests {
 
         // Invalid source vectors and invalid numerators are reported through
         // `None`; no NaN or infinity is allowed to escape the helper layer.
-        assert!(try_normalized3(&Vector3::<T>::zero()).is_none());
-        assert!(try_normalized3(&Vector3::new(nan, zero, zero)).is_none());
-        assert!(try_normalized3(&Vector3::new(infinity, zero, zero)).is_none());
-        assert!(ordinary.divide_by_length(nan).is_none());
-        assert!(ordinary.divide_by_length(infinity).is_none());
+        assert!(checked_normalized3(&Vector3::<T>::zero()).ok().is_none());
+        assert!(checked_normalized3(&Vector3::new(nan, zero, zero))
+            .ok()
+            .is_none());
+        assert!(checked_normalized3(&Vector3::new(infinity, zero, zero))
+            .ok()
+            .is_none());
+        assert!(ordinary.checked_divide_by_length(nan).is_err());
+        assert!(ordinary.checked_divide_by_length(infinity).is_err());
 
         // Dividing one by the smallest subnormal exceeds the scalar range. The
         // operation is valid mathematically but deliberately returns `None`
         // because this API promises a finite result.
-        let smallest = try_normalized3(&Vector3::new(smallest_positive, zero, zero))
+        let smallest = checked_normalized3(&Vector3::new(smallest_positive, zero, zero))
             .expect("the smallest positive axis vector must normalize");
-        assert!(smallest.divide_by_length(one).is_none());
+        assert!(smallest.checked_divide_by_length(one).is_err());
 
         // The opposite exponent pairing has a mathematical nonzero quotient
         // below the scalar's representable range. Returning zero would make a
         // geometric parameter inconsistent with its separately computed point,
         // so the helper must report that loss of information as failure.
-        let largest = try_normalized3(&Vector3::new(largest_finite, zero, zero))
+        let largest = checked_normalized3(&Vector3::new(largest_finite, zero, zero))
             .expect("the largest finite axis vector must normalize");
-        assert_eq!(largest.divide_by_length(smallest_positive), Some(zero));
+        assert_eq!(
+            largest.checked_divide_by_length(smallest_positive),
+            Ok(zero)
+        );
         assert!(largest
-            .divide_by_length_preserving_nonzero(smallest_positive)
-            .is_none());
+            .checked_divide_by_length_preserving_nonzero(smallest_positive)
+            .is_err());
     }
 
     /// Exercises dimensionless parallel/perpendicular classification for one scalar type.
@@ -1430,11 +1385,11 @@ mod tests {
 
         // Prepare each input once to exercise the production fast path used by
         // intersection queries, rather than relying only on its raw test wrapper.
-        let normalized_x = try_normalized3(&x).expect("the x axis must normalize");
+        let normalized_x = checked_normalized3(&x).expect("the x axis must normalize");
         let normalized_boundary =
-            try_normalized3(&at_boundary).expect("the subnormal direction must normalize");
+            checked_normalized3(&at_boundary).expect("the subnormal direction must normalize");
         let normalized_beyond =
-            try_normalized3(&beyond_boundary).expect("the doubled direction must normalize");
+            checked_normalized3(&beyond_boundary).expect("the doubled direction must normalize");
 
         // The inclusive positive boundary remains true even though both the
         // cross magnitude squared and epsilon squared round to zero.
@@ -1520,67 +1475,34 @@ mod tests {
     fn test_stable_length_division_preserves_signed_zero() {
         // Use a non-axis-aligned vector so preservation is checked across both
         // divisions in the ordinary path, not only its scaled-length-one shortcut.
-        let normalized_f32 = try_normalized3(&Vector3::new(3.0f32, 4.0, 0.0))
+        let normalized_f32 = checked_normalized3(&Vector3::new(3.0f32, 4.0, 0.0))
             .expect("the finite nonzero f32 vector must normalize");
         let negative_zero_f32 = -0.0f32;
         let divided_f32 = normalized_f32
-            .divide_by_length(negative_zero_f32)
+            .checked_divide_by_length(negative_zero_f32)
             .expect("signed zero divided by a positive length must remain finite");
         let strict_f32 = normalized_f32
-            .divide_by_length_preserving_nonzero(negative_zero_f32)
+            .checked_divide_by_length_preserving_nonzero(negative_zero_f32)
             .expect("exact signed zero is valid under the strict policy");
         assert_eq!(divided_f32.to_bits(), negative_zero_f32.to_bits());
         assert_eq!(strict_f32.to_bits(), negative_zero_f32.to_bits());
 
         // Repeat at f64 so backend-independent generic code cannot accidentally
         // preserve the sign for only one concrete scalar implementation.
-        let normalized_f64 = try_normalized3(&Vector3::new(3.0f64, 4.0, 0.0))
+        let normalized_f64 = checked_normalized3(&Vector3::new(3.0f64, 4.0, 0.0))
             .expect("the finite nonzero f64 vector must normalize");
         let negative_zero_f64 = -0.0f64;
         let divided_f64 = normalized_f64
-            .divide_by_length(negative_zero_f64)
+            .checked_divide_by_length(negative_zero_f64)
             .expect("signed zero divided by a positive length must remain finite");
         let strict_f64 = normalized_f64
-            .divide_by_length_preserving_nonzero(negative_zero_f64)
+            .checked_divide_by_length_preserving_nonzero(negative_zero_f64)
             .expect("exact signed zero is valid under the strict policy");
         assert_eq!(divided_f64.to_bits(), negative_zero_f64.to_bits());
         assert_eq!(strict_f64.to_bits(), negative_zero_f64.to_bits());
     }
 
     /// Verifies the shared checked-query gate's exhaustive three-state policy.
-    #[test]
-    fn test_angular_tolerance_query_gate() {
-        // Model an Option-returning checked query with a closure so the macro's
-        // non-local return remains confined to one small, directly observable
-        // body. The cell records evaluation without making the closure mutable,
-        // allowing every invocation to verify the macro's exactly-once promise.
-        let evaluation_count = core::cell::Cell::new(0usize);
-        let apply_query_gate = |classification: AngularClassification| -> Option<()> {
-            // Incrementing inside the supplied expression catches an expansion
-            // that accidentally evaluates its argument more than once.
-            return_none_unless_outside_angular_tolerance!({
-                evaluation_count.set(evaluation_count.get() + 1);
-                classification
-            });
-
-            // Reaching `Some(())` proves that the gate allowed continuation;
-            // only OutsideTolerance is documented to reach this statement.
-            Some(())
-        };
-
-        // A relationship inside the inclusive tolerance is rejected as
-        // degenerate after evaluating its classification exactly once.
-        assert_eq!(apply_query_gate(WithinTolerance), None);
-        assert_eq!(evaluation_count.get(), 1);
-        // A valid relationship beyond the tolerance is the sole success state,
-        // and its fall-through path must not reevaluate the supplied expression.
-        assert_eq!(apply_query_gate(OutsideTolerance), Some(()));
-        assert_eq!(evaluation_count.get(), 2);
-        // Invalid tolerance or derived arithmetic must fail closed as `None`
-        // after the same single evaluation as either valid classification.
-        assert_eq!(apply_query_gate(Invalid), None);
-        assert_eq!(evaluation_count.get(), 3);
-    }
 
     /// Verifies scale-invariant angular classification for `f32` vectors.
     #[test]
@@ -1667,13 +1589,13 @@ mod tests {
     }
 
     #[test]
-    fn test_vector_try_normalize() {
+    fn test_vector_checked_normalize() {
         let v = Vector3::<f32>::new(3.0, 4.0, 0.0);
-        let nv = v.try_normalize(EPS_F32).expect("should normalize");
+        let nv = v.checked_normalize(EPS_F32).expect("should normalize");
         assert!((nv.length() - 1.0).abs() < 0.001);
 
         let zero = Vector3::<f32>::zero();
-        assert!(zero.try_normalize(EPS_F32).is_none());
+        assert!(zero.checked_normalize(EPS_F32).ok().is_none());
         let zero_norm = zero.normalize_or_zero(EPS_F32);
         assert_eq!(zero_norm.x, 0.0);
         assert_eq!(zero_norm.y, 0.0);
@@ -1685,10 +1607,13 @@ mod tests {
         assert!((nv_fast.length() - 1.0).abs() < 0.001);
 
         let nv_fast_try = v
-            .try_normalize_with_inv_len(len_sq, inv_len, EPS_F32)
+            .checked_normalize_with_inv_len(len_sq, inv_len, EPS_F32)
             .expect("should normalize");
         assert!((nv_fast_try.length() - 1.0).abs() < 0.001);
-        assert!(zero.try_normalize_with_inv_len(0.0, 0.0, EPS_F32).is_none());
+        assert!(zero
+            .checked_normalize_with_inv_len(0.0, 0.0, EPS_F32)
+            .ok()
+            .is_none());
     }
 
     #[test]

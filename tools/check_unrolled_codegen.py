@@ -113,14 +113,19 @@ def main():
     names = []
     for label, scalar in [("f32", "f32"), ("f64", "f64"),
                           ("fixed32", "Fixed<i32,8>"), ("fixed64", "Fixed<i64,16>")]:
-        for dimension in (2, 3, 4):
-            name = f"unroll_rows_{label}_{dimension}"
-            matrix = f"Matrix{dimension}<{scalar}>"
-            source.append(f"#[no_mangle] pub fn {name}(m: &{matrix}) -> Result<{matrix},MathError> {{ m.checked_inverse_rows() }}")
+        for checked in (False, True):
+            prefix = "checked_" if checked else ""
+            for dimension in (2, 3, 4):
+                matrix = f"Matrix{dimension}<{scalar}>"
+                result = f"Result<{matrix},MathError>" if checked else matrix
+                for mode in ("rows", "reciprocal"):
+                    name = f"unroll_{prefix}{mode}_{label}_{dimension}"
+                    source.append(f"#[no_mangle] pub fn {name}(m: &{matrix}) -> {result} {{ m.{prefix}inverse_{mode}() }}")
+                    names.append(name)
+            name = f"unroll_{prefix}dot_{label}"
+            result = f"Result<{scalar},MathError>" if checked else scalar
+            source.append(f"#[no_mangle] pub fn {name}(a: &Vector4<{scalar}>, b: &Vector4<{scalar}>) -> {result} {{ Vector4::{prefix}dot(a,b) }}")
             names.append(name)
-        name = f"unroll_dot_{label}"
-        source.append(f"#[no_mangle] pub fn {name}(a: &Vector4<{scalar}>, b: &Vector4<{scalar}>) -> Result<{scalar},MathError> {{ Vector4::checked_dot(a,b) }}")
-        names.append(name)
     with tempfile.TemporaryDirectory(prefix="rs-math3d-unroll-codegen-") as temporary:
         temporary = Path(temporary)
         probe = temporary / "probes.rs"
@@ -140,7 +145,7 @@ def main():
         numeric_helpers = [(name, graph) for name, graph in graphs.items()
                           if any(marker in name for marker in (
                               "invert_rows2", "invert_rows3", "invert_rows4",
-                              "checked_inverse_rows", "checked_dot", "sum_products_pair"))]
+                              "inverse_rows", "inverse_reciprocal", "checked_dot", "sum_products_pair"))]
         for name, graph in numeric_helpers:
             assert_acyclic(name, graph)
         library_graphs = functions(library_ir)

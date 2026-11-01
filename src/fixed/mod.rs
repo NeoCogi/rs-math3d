@@ -123,11 +123,11 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
     }
     /// Returns the smallest representable number.
     pub fn min_value() -> Self {
-        Self::raw(R::MIN).expect("storage minimum")
+        Self::wrapping_raw(R::MIN)
     }
     /// Returns the largest representable number.
     pub fn max_value() -> Self {
-        Self::raw(R::MAX).expect("storage maximum")
+        Self::wrapping_raw(R::MAX)
     }
 
     /// Narrows a widened raw value only after checking its storage range.
@@ -242,11 +242,11 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
     }
     /// Truncates toward zero. The resulting integral value remains representable.
     pub fn trunc(self) -> Self {
-        Self::raw(self.bits.widen() / Self::scale() * Self::scale()).expect("truncation range")
+        Self::wrapping_raw(self.bits.widen() / Self::scale() * Self::scale())
     }
     /// Rounds toward negative infinity.
     pub fn floor(self) -> Self {
-        Self::raw(self.bits.widen().div_euclid(Self::scale()) * Self::scale()).expect("floor range")
+        Self::wrapping_raw(self.bits.widen().div_euclid(Self::scale()) * Self::scale())
     }
     /// Rounds toward positive infinity, returning an error at an upper boundary.
     pub fn checked_ceil(self) -> Result<Self, MathError> {
@@ -290,23 +290,17 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
     /// Accumulates widened products and rounds once, wrapping the final result.
     #[inline(always)]
     pub(crate) fn sum_products(terms: &[(Self, Self, bool)]) -> Self {
-        if let [left, right] = terms {
-            return Self::sum_products_pair(left, right);
-        }
-        let mut accumulator = Accumulator::default();
+        // Quantization commutes with adding 2^128: after shifting by F<=63,
+        // that difference is an even multiple of every supported storage
+        // modulus. Keep only low accumulator bits, round once, then narrow.
+        // This also handles exact sums that overflow a signed i128, without
+        // sign/magnitude bookkeeping or a checked arithmetic boundary.
+        let mut sum = 0i128;
         unroll_short_slice!(terms, &(a,b,subtract) => {
-            accumulator.add_wrapping(a.bits.widen() * b.bits.widen(), subtract);
+            let product=a.bits.widen()*b.bits.widen();
+            sum=if subtract {sum.wrapping_sub(product)} else {sum.wrapping_add(product)};
         });
-        Self::wrapping_raw(accumulator.finish_wrapping(F))
-    }
-
-    /// Shared straight-line two-product kernel for elimination and cofactors.
-    #[inline(never)]
-    fn sum_products_pair(left: &(Self, Self, bool), right: &(Self, Self, bool)) -> Self {
-        let mut accumulator = Accumulator::default();
-        accumulator.add_wrapping(left.0.bits.widen() * left.1.bits.widen(), left.2);
-        accumulator.add_wrapping(right.0.bits.widen() * right.1.bits.widen(), right.2);
-        Self::wrapping_raw(accumulator.finish_wrapping(F))
+        Self::wrapping_raw(signed_wrapping(round_shift(sum.unsigned_abs(), F), sum < 0))
     }
 
     /// Absolute value with wrapping at the signed storage minimum.

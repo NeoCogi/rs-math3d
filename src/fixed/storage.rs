@@ -45,7 +45,7 @@ mod sealed {
 /// A signed storage integer whose product fits in `i128`.
 ///
 /// This trait is sealed. Use `i8`, `i16`, `i32`, or `i64`; representation
-/// conversions always check range before narrowing.
+/// conversions expose checked and wrapping narrowing explicitly.
 pub trait Repr: sealed::Sealed + Copy + Default + Debug + Eq + Ord + Hash {
     /// Storage width, including its sign bit.
     const BITS: u32;

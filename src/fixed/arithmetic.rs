@@ -114,32 +114,6 @@ pub(super) struct Accumulator {
 }
 
 impl Accumulator {
-    /// Adds a product modulo the accumulator width without range validation.
-    pub(super) fn add_wrapping(&mut self, value: i128, subtract: bool) {
-        let magnitude = value.unsigned_abs();
-        let negative = (value < 0) != subtract;
-        if self.negative == negative {
-            let (low, carry) = self.low.overflowing_add(magnitude);
-            self.high = self.high.wrapping_add(carry as u128);
-            self.low = low;
-        } else if self.high != 0 || self.low >= magnitude {
-            let (low, borrow) = self.low.overflowing_sub(magnitude);
-            self.high = self.high.wrapping_sub(borrow as u128);
-            self.low = low;
-        } else {
-            self.low = magnitude - self.low;
-            self.negative = negative;
-        }
-        if self.high == 0 && self.low == 0 {
-            self.negative = false;
-        }
-    }
-
-    /// Rounds once and returns the low bits. High limbs cannot affect any of
-    /// the supported 64-bit destinations after shifting by at most 63 bits.
-    pub(super) fn finish_wrapping(self, frac: u32) -> i128 {
-        signed_wrapping(round_shift(self.low, frac), self.negative)
-    }
     /// Adds or subtracts one widened product without quantizing it.
     pub(super) fn add(&mut self, value: i128, subtract: bool) -> Result<(), MathError> {
         let magnitude = value.unsigned_abs();

@@ -292,7 +292,7 @@ impl<R: ScalarFormat<F>, const F: u32> Scalar for Fixed<R, F> {
         Self::sum_products(terms)
     }
     fn two() -> Self {
-        Self::try_from_int(2).expect("scalar format represents two")
+        Self::wrapping_raw(2 * Self::scale())
     }
     fn min(a: Self, b: Self) -> Self {
         core::cmp::min(a, b)
@@ -348,13 +348,13 @@ impl<R: RealFormat<F>, const F: u32> RealScalar for Fixed<R, F> {
         reciprocal.checked_apply(self)
     }
     fn epsilon() -> Self {
-        Self::raw(4).expect("real format represents four quanta")
+        Self::wrapping_raw(4)
     }
     fn half() -> Self {
-        Self::raw(Self::scale() / 2).expect("real format represents half")
+        Self::wrapping_raw(Self::scale() / 2)
     }
     fn quarter() -> Self {
-        Self::raw(Self::scale() / 4).expect("real format represents quarter")
+        Self::wrapping_raw(Self::scale() / 4)
     }
     fn tsqrt(self) -> Self {
         self.sqrt()

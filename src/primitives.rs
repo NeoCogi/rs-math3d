@@ -55,7 +55,7 @@
 //! use rs_math3d::EPS_F32;
 //!
 //! // Create a ray from origin pointing along +X axis
-//! let ray = Ray::new(
+//! let ray = Ray::checked_new(
 //!     &Vector3::new(0.0f32, 0.0, 0.0),
 //!     &Vector3::new(1.0, 0.0, 0.0),
 //!     EPS_F32,
@@ -93,7 +93,8 @@ pub struct Dimension<T: Scalar> {
 }
 
 impl<T: Scalar> Dimension<T> {
-    /// Creates a new dimension with the specified width and height.
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
     pub fn new(width: T, height: T) -> Self {
         Self { width, height }
     }
@@ -116,7 +117,50 @@ pub struct Rect<T: Scalar> {
 }
 
 impl<T: Scalar> Rect<T> {
-    /// Creates a new rectangle from position and dimensions.
+    /// Computes the maximum corner with checked arithmetic.
+    pub fn checked_max(&self) -> Result<Vector2<T>, MathError> {
+        Ok(Vector2::new(
+            self.x.checked_add(self.width)?,
+            self.y.checked_add(self.height)?,
+        ))
+    }
+    /// Builds sorted bounds, rejecting nonfinite or unrepresentable extents.
+    pub fn checked_from(a: &Vector2<T>, b: &Vector2<T>) -> Result<Self, MathError> {
+        let zero = <T as Zero>::zero();
+        let a = Vector2::checked_add_vv(a, &Vector2::new(zero, zero))?;
+        let b = Vector2::checked_add_vv(b, &Vector2::new(zero, zero))?;
+        let min = Vector2::min(&a, &b);
+        let max = Vector2::max(&a, &b);
+        Ok(Self::new(
+            min.x,
+            min.y,
+            max.x.checked_sub(min.x)?,
+            max.y.checked_sub(min.y)?,
+        ))
+    }
+    /// Checked rectangle overlap; a geometric miss is Ok(None).
+    pub fn checked_intersect(&self, other: &Self) -> Result<Option<Self>, MathError> {
+        let a = self.checked_max()?;
+        let b = other.checked_max()?;
+        let min = Vector2::max(&self.min(), &other.min());
+        let max = Vector2::min(&a, &b);
+        if max.x < min.x || max.y < min.y {
+            Ok(None)
+        } else {
+            Ok(Some(Self::checked_from(&min, &max)?))
+        }
+    }
+    /// Checked point containment, including representability of maximum bounds.
+    pub fn checked_contains(&self, p: &Vector2<T>) -> Result<bool, MathError> {
+        let max = self.checked_max()?;
+        if !p.x.is_finite() || !p.y.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        Ok(p.x >= self.x && p.y >= self.y && p.x <= max.x && p.y <= max.y)
+    }
+
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
     pub fn new(x: T, y: T, width: T, height: T) -> Self {
         Self {
             x,
@@ -186,9 +230,8 @@ pub struct Box3<T: Scalar> {
 }
 
 impl<T: Scalar> Box3<T> {
-    /// Creates a new box from two corner points.
-    ///
-    /// The points are automatically sorted to find min/max.
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
     pub fn new(v0: &Vector3<T>, v1: &Vector3<T>) -> Self {
         Self {
             min: Vector3::min(v0, v1),
@@ -229,6 +272,52 @@ impl<T: Scalar> Box3<T> {
 }
 
 impl<T: RealScalar> Box3<T> {
+    /// Computes the center with checked single-rounding product accumulation.
+    pub fn checked_center(&self) -> Result<Vector3<T>, MathError> {
+        Ok(Vector3::new(
+            T::checked_sum_products(&[
+                (self.max.x, T::half(), false),
+                (self.min.x, T::half(), false),
+            ])?,
+            T::checked_sum_products(&[
+                (self.max.y, T::half(), false),
+                (self.min.y, T::half(), false),
+            ])?,
+            T::checked_sum_products(&[
+                (self.max.z, T::half(), false),
+                (self.min.z, T::half(), false),
+            ])?,
+        ))
+    }
+    /// Computes half-extents with checked subtraction.
+    pub fn checked_extent(&self) -> Result<Vector3<T>, MathError> {
+        Vector3::checked_sub_vv(&self.max, &self.checked_center()?)
+    }
+    /// Subdivides with checked center arithmetic and the same octant ordering.
+    pub fn checked_subdivide(&self) -> Result<[Self; 8], MathError> {
+        let center = self.checked_center()?;
+        // Each literal corner emits one octant directly, preserving the public
+        // octant order without scratch corner arrays or runtime iteration.
+        macro_rules! octant {
+            ($x:ident,$y:ident,$z:ident) => {{
+                let corner = Vector3::new(self.$x.x, self.$y.y, self.$z.z);
+                Self::new(
+                    &Vector3::min(&center, &corner),
+                    &Vector3::max(&center, &corner),
+                )
+            }};
+        }
+        Ok([
+            octant!(min, max, min),
+            octant!(max, max, min),
+            octant!(max, max, max),
+            octant!(min, max, max),
+            octant!(min, min, min),
+            octant!(max, min, min),
+            octant!(max, min, max),
+            octant!(min, min, max),
+        ])
+    }
     /// Returns the center point of the box.
     pub fn center(&self) -> Vector3<T> {
         Vector3::new(
@@ -304,86 +393,168 @@ pub struct Line<T: Scalar, V: Vector<T>> {
     t: core::marker::PhantomData<T>,
 }
 
-impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
-    /// Creates a new line from a point and direction.
-    ///
-    /// Returns `None` if the direction is too small.
-    pub fn new(p: &V, d: &V, epsilon: T) -> Option<Self> {
-        if !p.is_finite() {
-            return None;
+/// Gate checked angular classifications without collapsing invalid inputs into misses.
+/// A normal needs an independent span; both collapsed and invalid spans are errors.
+macro_rules! checked_span_gate {
+    ($classification:expr) => {
+        match $classification {
+            AngularClassification::OutsideTolerance => {}
+            AngularClassification::WithinTolerance | AngularClassification::Invalid => {
+                return Err(MathError::Degenerate)
+            }
         }
-        d.checked_normalize(epsilon).ok()?;
-        Some(Self {
+    };
+}
+
+macro_rules! checked_angular_gate {
+    ($classification:expr) => {
+        match $classification {
+            AngularClassification::OutsideTolerance => {}
+            AngularClassification::WithinTolerance => return Ok(None),
+            AngularClassification::Invalid => return Err(MathError::Degenerate),
+        }
+    };
+}
+
+impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
+    pub fn new(p: &V, d: &V) -> Self {
+        Self {
+            p: *p,
+            d: *d,
+            t: core::marker::PhantomData,
+        }
+    }
+
+    /// Constructs a line by unchecked endpoint subtraction. Requires distinct endpoints.
+    pub fn from_start_end(s: &V, e: &V) -> Self {
+        Self::new(s, &(*e - *s))
+    }
+
+    /// Computes `(t, point)` with unchecked arithmetic, where `point = p + d*t`.
+    /// Requires a nonzero direction and representable dot products and divisions.
+    pub fn closest_point_on_line(&self, p: &V) -> (T, V) {
+        let t = V::dot(&(*p - self.p), &self.d) / V::dot(&self.d, &self.d);
+        (t, self.p + self.d * t)
+    }
+
+    /// Normalizes direction with ordinary arithmetic. Requires a nonzero direction.
+    pub fn normalize(&self) -> Self {
+        Self::new(&self.p, &self.d.normalize())
+    }
+
+    /// Constructs with input and arithmetic validation.
+    /// Returns `MathError` for nonfinite input, invalid tolerance, degeneracy or
+    /// unrepresentable arithmetic, as applicable. Linear epsilon is nonnegative.
+    pub fn checked_new(p: &V, d: &V, epsilon: T) -> Result<Self, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
+            return Err(MathError::InvalidTolerance);
+        }
+
+        if !p.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        d.checked_normalize(epsilon)?;
+        Ok(Self {
             p: *p,
             d: *d,
             t: core::marker::PhantomData,
         })
     }
-    /// Creates a line from two points.
-    ///
-    /// The line passes through both points, with direction from s to e.
-    ///
-    /// Returns `None` if the points are too close.
-    pub fn from_start_end(s: &V, e: &V, epsilon: T) -> Option<Self> {
-        let dir = V::checked_sub_vv(e, s).ok()?;
-        Self::new(s, &dir, epsilon)
-    }
-    /// Finds the closest point on the line to a given point.
-    ///
-    /// Returns:
-    /// - `t`: Parameter value where the closest point occurs
-    /// - Point: The closest point on the line
-    ///
-    /// Returns `None` if the line direction is too small.
-    pub fn closest_point_on_line(&self, p: &V, epsilon: T) -> Option<(T, V)> {
-        let direction = self.d.checked_normalize(epsilon).ok()?;
-        let delta = V::checked_sub_vv(p, &self.p).ok()?;
-        let travel = V::checked_dot(&direction, &delta).ok()?;
-        let t = travel.checked_div(self.d.checked_length().ok()?).ok()?;
-        let point =
-            V::checked_add_vv(&self.p, &V::checked_mul_vs(&direction, travel).ok()?).ok()?;
-        Some((t, point))
+
+    /// Constructs a line with checked subtraction and a finite nonnegative length tolerance.
+    /// Returns `Degenerate` when endpoints are too close; arithmetic failures propagate.
+    pub fn checked_from_start_end(s: &V, e: &V, epsilon: T) -> Result<Self, MathError> {
+        let dir = V::checked_sub_vv(e, s)?;
+        Self::checked_new(s, &dir, epsilon)
     }
 
-    /// Returns a line with normalized direction vector.
-    ///
-    /// Returns `None` if the direction is too small.
-    pub fn normalize(&self, epsilon: T) -> Option<Self> {
-        Some(Self {
+    /// Computes `(t, point)` with checked arithmetic and scale-aware normalization.
+    /// A finite nonnegative epsilon rejects a direction at or below that length.
+    pub fn checked_closest_point_on_line(&self, p: &V, epsilon: T) -> Result<(T, V), MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
+            return Err(MathError::InvalidTolerance);
+        }
+
+        let direction = self.d.checked_normalize(epsilon)?;
+        let delta = V::checked_sub_vv(p, &self.p)?;
+        let travel = V::checked_dot(&direction, &delta)?;
+        let t = travel.checked_div(self.d.checked_length()?)?;
+        let point = V::checked_add_vv(&self.p, &V::checked_mul_vs(&direction, travel)?)?;
+        Ok((t, point))
+    }
+
+    /// Normalizes direction with checked arithmetic.
+    /// Validates the origin and a finite nonnegative linear tolerance.
+    pub fn checked_normalize(&self, epsilon: T) -> Result<Self, MathError> {
+        if !self.p.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
+            return Err(MathError::InvalidTolerance);
+        }
+
+        Ok(Self {
             p: self.p,
-            d: self.d.checked_normalize(epsilon).ok()?,
+            d: self.d.checked_normalize(epsilon)?,
             t: core::marker::PhantomData,
         })
     }
 }
 
-/// Finds the shortest segment connecting two infinite 3D lines.
-///
-/// `epsilon` is a finite, dimensionless angular tolerance in `0..=1`. The
-/// function returns `None` when the tolerance is invalid, either direction is
-/// zero or non-finite, or the sine of the angle between the directions is at
-/// most `epsilon`.
-///
-/// Direction vectors are normalized only in temporary calculations. Their
-/// stored magnitudes and parameterizations are not changed, and independently
-/// rescaling either direction does not change the returned segment.
+/// Shortest connecting segment without input or arithmetic validation.
+/// Returns None when directions are parallel within the angular tolerance.
 pub fn shortest_segment3d_between_lines3d<T: RealScalar>(
     line0: &Line<T, Vector3<T>>,
     line1: &Line<T, Vector3<T>>,
     epsilon: T,
 ) -> Option<Segment<T, Vector3<T>>> {
+    let a = line0.d.normalize();
+    let b = line1.d.normalize();
+    let cross = Vector3::cross(&a, &b);
+    if cross.length() <= epsilon {
+        return None;
+    }
+    let denominator = Vector3::dot(&cross, &cross);
+    let separation = line0.p - line1.p;
+    let ab = Vector3::dot(&a, &b);
+    let p0 = Vector3::dot(&a, &separation);
+    let p1 = Vector3::dot(&b, &separation);
+    let d0 = (ab * p1 - p0) / denominator;
+    let d1 = (p1 - ab * p0) / denominator;
+    Some(Segment::new(&(line0.p + a * d0), &(line1.p + b * d1)))
+}
+
+/// Finds the shortest connecting segment with scale-aware checked arithmetic.
+/// Angular epsilon must be finite in `0..=1`. Returns `Ok(None)` for directions
+/// within the parallel tolerance band, and `MathError` for invalid origins,
+/// directions, tolerances or unrepresentable arithmetic. Stored directions
+/// and their parameterizations remain unchanged.
+pub fn checked_shortest_segment3d_between_lines3d<T: RealScalar>(
+    line0: &Line<T, Vector3<T>>,
+    line1: &Line<T, Vector3<T>>,
+    epsilon: T,
+) -> Result<Option<Segment<T, Vector3<T>>>, MathError> {
+    if !line0.p.is_finite() || !line1.p.is_finite() {
+        return Err(MathError::NonFinite);
+    }
+    if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+        return Err(MathError::InvalidTolerance);
+    }
+
     // Decompose each direction exactly once through max-component scaling so
     // valid very small or very large inputs do not underflow or overflow. The
     // same decompositions serve both angular classification and the solve.
-    let direction0 = try_normalized3(&line0.d)?;
-    let direction1 = try_normalized3(&line1.d)?;
+    let direction0 = checked_normalized3(&line0.d)?;
+    let direction1 = checked_normalized3(&line1.d)?;
 
     // Parallelism is an angular property. Classify the already-normalized
     // inputs instead of paying for a second pair of normalization passes. The
     // shared gate rejects parallel directions, which do not define a unique
     // closest segment, and invalid classifications; only a valid non-parallel
     // pair proceeds to the bounded line solve.
-    return_none_unless_outside_angular_tolerance!(classify_nearly_parallel_normalized3(
+    checked_angular_gate!(classify_nearly_parallel_normalized3(
         &direction0,
         &direction1,
         epsilon,
@@ -391,50 +562,42 @@ pub fn shortest_segment3d_between_lines3d<T: RealScalar>(
 
     let unit0 = direction0.unit();
     let unit1 = direction1.unit();
-    let separation = Vector3::checked_sub_vv(&line0.p, &line1.p).ok()?;
+    let separation = Vector3::checked_sub_vv(&line0.p, &line1.p)?;
 
     // For unit directions, the Gram determinant is |u0 x u1|^2. Computing it
     // from the cross product avoids the cancellation in 1 - dot(u0, u1)^2 for
     // nearly parallel lines.
-    let cross = Vector3::checked_cross(&unit0, &unit1).ok()?;
-    let denominator = Vector3::checked_dot(&cross, &cross).ok()?;
+    let cross = Vector3::checked_cross(&unit0, &unit1)?;
+    let denominator = Vector3::checked_dot(&cross, &cross)?;
     if !is_finite_scalar(denominator) || denominator <= <T as Zero>::zero() {
-        return None;
+        return Err(MathError::Overflow);
     }
 
     // Solve the two normal equations in distance-along-unit-direction space.
     // These parameters are independent of the magnitudes stored in line.d.
-    let direction_dot = Vector3::checked_dot(&unit0, &unit1).ok()?;
-    let projection0 = Vector3::checked_dot(&unit0, &separation).ok()?;
-    let projection1 = Vector3::checked_dot(&unit1, &separation).ok()?;
+    let direction_dot = Vector3::checked_dot(&unit0, &unit1)?;
+    let projection0 = Vector3::checked_dot(&unit0, &separation)?;
+    let projection1 = Vector3::checked_dot(&unit1, &separation)?;
     let distance0 = direction_dot
-        .checked_mul(projection1)
-        .ok()?
-        .checked_sub(projection0)
-        .ok()?
-        .checked_div(denominator)
-        .ok()?;
+        .checked_mul(projection1)?
+        .checked_sub(projection0)?
+        .checked_div(denominator)?;
     let distance1 = projection1
-        .checked_sub(direction_dot.checked_mul(projection0).ok()?)
-        .ok()?
-        .checked_div(denominator)
-        .ok()?;
+        .checked_sub(direction_dot.checked_mul(projection0)?)?
+        .checked_div(denominator)?;
     if !is_finite_scalar(distance0) || !is_finite_scalar(distance1) {
-        return None;
+        return Err(MathError::Overflow);
     }
 
     // Reconstruct the closest point on each line from unit directions. This
     // avoids multiplying an extreme stored direction by an inverse-scale t.
-    let start =
-        Vector3::checked_add_vv(&line0.p, &Vector3::checked_mul_vs(&unit0, distance0).ok()?)
-            .ok()?;
-    let end = Vector3::checked_add_vv(&line1.p, &Vector3::checked_mul_vs(&unit1, distance1).ok()?)
-        .ok()?;
+    let start = Vector3::checked_add_vv(&line0.p, &Vector3::checked_mul_vs(&unit0, distance0)?)?;
+    let end = Vector3::checked_add_vv(&line1.p, &Vector3::checked_mul_vs(&unit1, distance1)?)?;
     if !is_finite_vector3(&start) || !is_finite_vector3(&end) {
-        return None;
+        return Err(MathError::Overflow);
     }
 
-    Some(Segment::new(&start, &end))
+    Ok(Some(Segment::new(&start, &end)))
 }
 
 /// A line segment with defined start and end points.
@@ -449,7 +612,8 @@ pub struct Segment<T: Scalar, V: Vector<T>> {
 }
 
 impl<T: Scalar, V: Vector<T>> Segment<T, V> {
-    /// Creates a new segment from start to end point.
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
     pub fn new(s: &V, e: &V) -> Self {
         Self {
             s: *s,
@@ -460,36 +624,54 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
 }
 
 impl<T: RealScalar, V: RealVector<T>> Segment<T, V> {
-    /// Finds the closest point on the segment to a given point.
-    ///
-    /// Returns:
-    /// - `t`: Parameter value \[0,1\] where 0=start, 1=end
-    /// - Point: The closest point on the segment
-    ///
-    /// Returns `None` if the segment is too small.
-    pub fn closest_point_on_segment(&self, p: &V, epsilon: T) -> Option<(T, V)> {
-        let delta = V::checked_sub_vv(&self.e, &self.s).ok()?;
-        let direction = delta.checked_normalize(epsilon).ok()?;
-        let length = delta.checked_length().ok()?;
-        let offset = V::checked_sub_vv(p, &self.s).ok()?;
-        let travel = V::checked_dot(&direction, &offset).ok()?;
+    /// Computes `(t, point)` with unchecked arithmetic and clamps `t` to `[0,1]`.
+    /// Requires distinct endpoints and representable intermediate arithmetic.
+    pub fn closest_point_on_segment(&self, p: &V) -> (T, V) {
+        let d = self.e - self.s;
+        let t = T::min(
+            <T as One>::one(),
+            T::max(
+                <T as Zero>::zero(),
+                V::dot(&(*p - self.s), &d) / V::dot(&d, &d),
+            ),
+        );
+        (t, self.s + d * t)
+    }
+
+    /// Computes point distance using unchecked arithmetic. Requires distinct endpoints.
+    pub fn distance(&self, p: &V) -> T {
+        let (_, closest) = self.closest_point_on_segment(p);
+        (closest - *p).length()
+    }
+
+    /// Computes a clamped closest point with checked arithmetic.
+    /// Returns `Degenerate` for length at or below finite nonnegative epsilon.
+    pub fn checked_closest_point_on_segment(&self, p: &V, epsilon: T) -> Result<(T, V), MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
+            return Err(MathError::InvalidTolerance);
+        }
+
+        let delta = V::checked_sub_vv(&self.e, &self.s)?;
+        let direction = delta.checked_normalize(epsilon)?;
+        let length = delta.checked_length()?;
+        let offset = V::checked_sub_vv(p, &self.s)?;
+        let travel = V::checked_dot(&direction, &offset)?;
         if travel <= <T as Zero>::zero() {
-            return Some((<T as Zero>::zero(), self.s));
+            return Ok((<T as Zero>::zero(), self.s));
         }
         if travel >= length {
-            return Some((<T as One>::one(), self.e));
+            return Ok((<T as One>::one(), self.e));
         }
-        let t = travel.checked_div(length).ok()?;
-        let point =
-            V::checked_add_vv(&self.s, &V::checked_mul_vs(&direction, travel).ok()?).ok()?;
-        Some((t, point))
+        let t = travel.checked_div(length)?;
+        let point = V::checked_add_vv(&self.s, &V::checked_mul_vs(&direction, travel)?)?;
+        Ok((t, point))
     }
-    /// Computes the distance from a point to the segment.
-    ///
-    /// Returns `None` if the segment is too small.
-    pub fn distance(&self, p: &V, epsilon: T) -> Option<T> {
-        let (_, closest) = self.closest_point_on_segment(p, epsilon)?;
-        V::checked_sub_vv(&closest, p).ok()?.checked_length().ok()
+
+    /// Computes point distance with checked closest-point arithmetic.
+    /// The finite nonnegative epsilon rejects degenerate segment length.
+    pub fn checked_distance_with_epsilon(&self, p: &V, epsilon: T) -> Result<T, MathError> {
+        let (_, closest) = self.checked_closest_point_on_segment(p, epsilon)?;
+        V::checked_sub_vv(&closest, p)?.checked_length()
     }
 }
 
@@ -517,49 +699,85 @@ pub struct Ray<T: Scalar, V: Vector<T>> {
 }
 
 impl<T: RealScalar, V: RealVector<T>> Ray<T, V> {
-    /// Creates a new ray with normalized direction.
-    ///
-    /// Returns `None` if the direction is too small.
-    pub fn new(start: &V, direction: &V, epsilon: T) -> Option<Self> {
-        if !start.is_finite() {
-            return None;
-        }
-        Some(Self {
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
+    pub fn new(start: &V, direction: &V) -> Self {
+        Self {
             start: *start,
-            direction: direction.checked_normalize(epsilon).ok()?,
+            direction: direction.normalize(),
+            t: core::marker::PhantomData,
+        }
+    }
+
+    /// Constructs with input and arithmetic validation.
+    /// Returns `MathError` for nonfinite input, invalid tolerance, degeneracy or
+    /// unrepresentable arithmetic, as applicable. Linear epsilon is nonnegative.
+    pub fn checked_new(start: &V, direction: &V, epsilon: T) -> Result<Self, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
+            return Err(MathError::InvalidTolerance);
+        }
+
+        if !start.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        Ok(Self {
+            start: *start,
+            direction: direction.checked_normalize(epsilon)?,
             t: core::marker::PhantomData,
         })
     }
 }
 
 impl<T: RealScalar> Ray<T, Vector3<T>> {
-    /// Computes ray-plane intersection.
-    ///
-    /// Returns the intersection point, or `None` if the ray does not hit the
-    /// plane, either because it is parallel, points away, or contains invalid
-    /// non-finite data. A non-finite `epsilon` or one outside `0..=1` is also
-    /// rejected.
-    ///
-    /// `epsilon` is a dimensionless angular tolerance in the inclusive range
-    /// `0..=1`. The ray is treated as parallel when the absolute cosine between
-    /// the plane normal and ray direction is at most this value. Positive
-    /// rescaling of the stored direction therefore does not change the hit.
-    /// A negative scale reverses the ray and is not an equivalent
-    /// reparameterization.
+    /// Solves a forward ray-plane hit using unchecked arithmetic.
+    /// Returns `None` for an angularly parallel ray or a hit behind the origin.
+    /// Requires valid nonzero directions, finite angular epsilon in `0..=1`,
+    /// and representable arithmetic.
     pub fn intersect_plane(&self, p: &Plane<T>, epsilon: T) -> Option<Vector3<T>> {
+        let n = p.normal();
+        let unit = n.normalize();
+        let direction = self.direction.normalize();
+        let denominator = Vector3::dot(&unit, &direction);
+        if denominator.tabs() <= epsilon {
+            return None;
+        }
+        let distance =
+            -(p.constant() / n.length() + Vector3::dot(&unit, &self.start)) / denominator;
+        if distance < <T as Zero>::zero() {
+            None
+        } else {
+            Some(self.start + direction * distance)
+        }
+    }
+
+    /// Solves a forward ray-plane hit with checked arithmetic.
+    /// Returns `Ok(None)` for a geometric miss; invalid input, angular tolerance
+    /// or arithmetic returns `MathError`. Angular epsilon is finite in `0..=1`.
+    pub fn checked_intersect_plane(
+        &self,
+        p: &Plane<T>,
+        epsilon: T,
+    ) -> Result<Option<Vector3<T>>, MathError> {
+        if !self.start.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
         let normal = p.normal();
 
         // Decompose each operand once. Reusing these bounded representations
         // keeps both classification and later arithmetic independent of the
         // stored magnitudes without repeating normalization work.
-        let normal_metric = try_normalized3(&normal)?;
-        let direction_metric = try_normalized3(&self.direction)?;
+        let normal_metric = checked_normalized3(&normal)?;
+        let direction_metric = checked_normalized3(&self.direction)?;
 
         // A direction perpendicular to the normal is parallel to the plane.
         // The shared gate rejects that in-tolerance relationship and invalid
         // arithmetic, allowing only a valid non-parallel direction to reach
         // the intersection solve.
-        return_none_unless_outside_angular_tolerance!(classify_nearly_perpendicular_normalized3(
+        checked_angular_gate!(classify_nearly_perpendicular_normalized3(
             &normal_metric,
             &direction_metric,
             epsilon,
@@ -571,24 +789,19 @@ impl<T: RealScalar> Ray<T, Vector3<T>> {
         // Divide the complete plane equation by |normal|. Plane constructors
         // currently store a unit normal, but keeping this general also handles
         // internally constructed coefficient-scaled planes consistently.
-        let unit_constant = normal_metric.divide_by_length(p.constant())?;
-        let numerator = unit_constant
-            .checked_add(Vector3::checked_dot(&unit_normal, &self.start).ok()?)
-            .ok()?;
-        let denominator = Vector3::checked_dot(&unit_normal, &unit_direction).ok()?;
+        let unit_constant = normal_metric.checked_divide_by_length(p.constant())?;
+        let numerator =
+            unit_constant.checked_add(Vector3::checked_dot(&unit_normal, &self.start)?)?;
+        let denominator = Vector3::checked_dot(&unit_normal, &unit_direction)?;
         if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
-            return None;
+            return Err(MathError::Overflow);
         }
 
         // `distance` is physical travel along the unit ray direction, so its
         // sign is unaffected by positive rescaling of the stored direction.
-        let distance = numerator
-            .checked_neg()
-            .ok()?
-            .checked_div(denominator)
-            .ok()?;
-        if !is_finite_scalar(distance) || distance < <T as Zero>::zero() {
-            return None;
+        let distance = numerator.checked_neg()?.checked_div(denominator)?;
+        if distance < <T as Zero>::zero() {
+            return Ok(None);
         }
 
         // Reconstruct with the temporary unit direction. Multiplying by the
@@ -598,10 +811,12 @@ impl<T: RealScalar> Ray<T, Vector3<T>> {
         // this expression unchanged.
         let point = Vector3::checked_add_vv(
             &self.start,
-            &Vector3::checked_mul_vs(&unit_direction, distance).ok()?,
-        )
-        .ok()?;
-        is_finite_vector3(&point).then_some(point)
+            &Vector3::checked_mul_vs(&unit_direction, distance)?,
+        )?;
+        if !point.is_finite() {
+            return Err(MathError::Overflow);
+        }
+        Ok(Some(point))
     }
 }
 
@@ -618,10 +833,21 @@ pub struct Sphere3<T: RealScalar> {
 }
 
 impl<T: RealScalar> Sphere3<T> {
-    /// Creates a sphere from center and radius.
-    ///
-    /// The radius is canonicalized with `abs(radius)`, so negative inputs are
-    /// treated the same as their positive magnitude.
+    /// Constructs with input and arithmetic validation.
+    /// Returns `MathError` for nonfinite input, invalid tolerance, degeneracy or
+    /// unrepresentable arithmetic, as applicable. Linear epsilon is nonnegative.
+    pub fn checked_new(center: Vector3<T>, radius: T) -> Result<Self, MathError> {
+        if !center.is_finite() || !radius.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        Ok(Self {
+            center,
+            radius: radius.checked_abs()?,
+        })
+    }
+
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
     pub fn new(center: Vector3<T>, radius: T) -> Self {
         Self {
             center,
@@ -640,7 +866,8 @@ pub struct Tri3<T: RealScalar> {
 }
 
 impl<T: RealScalar> Tri3<T> {
-    /// Creates a triangle from three vertices.
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
     pub fn new(vertices: [Vector3<T>; 3]) -> Self {
         Self { vertices }
     }
@@ -649,8 +876,8 @@ impl<T: RealScalar> Tri3<T> {
         &self.vertices
     }
 
-    /// Computes barycentric coordinates with checked normalized Gram solving.
-    /// Degenerate axes and unrepresentable arithmetic are explicit errors.
+    /// Solves barycentric coordinates with a scale-aware checked Gram system.
+    /// Returns `Degenerate` for dependent edges and preserves arithmetic failures.
     pub fn checked_barycentric_coordinates(
         &self,
         point: &Vector3<T>,
@@ -666,15 +893,34 @@ impl<T: RealScalar> Tri3<T> {
         ))
     }
 
-    /// Computes barycentric coordinates of a point in the triangle plane.
-    ///
-    /// # Panics
-    /// Panics for degenerate triangles or unrepresentable arithmetic. Use
-    /// `checked_barycentric_coordinates` for a checked result.
+    /// Solves triangle coordinates using an unchecked Gram system.
+    /// Requires independent edges and representable intermediates; components sum to one.
     pub fn barycentric_coordinates(&self, pt: &Vector3<T>) -> Vector3<T> {
-        self.checked_barycentric_coordinates(pt)
-            .expect("barycentric coordinates failed")
+        let uv = span_coordinates(
+            &(self.vertices[1] - self.vertices[0]),
+            &(self.vertices[2] - self.vertices[0]),
+            &(*pt - self.vertices[0]),
+        );
+        Vector3::new(<T as One>::one() - uv.x - uv.y, uv.x, uv.y)
     }
+}
+
+/// Direct Gram solve without validating span independence or arithmetic range.
+fn span_coordinates<T: RealScalar>(
+    x: &Vector3<T>,
+    y: &Vector3<T>,
+    delta: &Vector3<T>,
+) -> Vector2<T> {
+    let a = Vector3::dot(x, x);
+    let b = Vector3::dot(x, y);
+    let c = Vector3::dot(y, y);
+    let d = Vector3::dot(delta, x);
+    let e = Vector3::dot(delta, y);
+    let det = T::sum_products(&[(a, c, false), (b, b, true)]);
+    Vector2::new(
+        T::sum_products(&[(d, c, false), (e, b, true)]) / det,
+        T::sum_products(&[(e, a, false), (d, b, true)]) / det,
+    )
 }
 
 /// Solves coefficients of a point offset in two independent spanning axes.
@@ -719,7 +965,8 @@ pub struct Plane<T: Scalar> {
 }
 
 impl<T: Scalar> Plane<T> {
-    /// Returns the plane normal vector.
+    /// Returns the plane normal; computed normals use unchecked arithmetic.
+    /// Computed normals require independent axes and representable intermediates.
     pub fn normal(&self) -> Vector3<T> {
         Vector3::new(self.a, self.b, self.c)
     }
@@ -730,87 +977,100 @@ impl<T: Scalar> Plane<T> {
 }
 
 impl<T: RealScalar> Plane<T> {
-    /// Creates a plane from a normal and a point on the plane.
-    ///
-    /// # Panics
-    /// Panics if `n` is too small to normalize. Use [`Plane::checked_new`] when the
-    /// input may be degenerate.
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
     pub fn new(n: &Vector3<T>, p: &Vector3<T>) -> Self {
-        Self::checked_new(n, p, T::epsilon()).expect("plane normal must be non-zero")
+        let n = n.normalize();
+        Self {
+            a: n.x,
+            b: n.y,
+            c: n.z,
+            d: -Vector3::dot(&n, p),
+        }
     }
 
-    /// Creates a plane from a normal and a point on the plane.
-    ///
-    /// Returns `None` if `n` is too small to normalize.
-    pub fn checked_new(n: &Vector3<T>, p: &Vector3<T>, epsilon: T) -> Option<Self> {
-        let norm = n.try_normalize(epsilon)?;
-        let d = Vector3::checked_dot(&norm, p).ok()?;
-        Some(Self {
+    /// Constructs with input and arithmetic validation.
+    /// Returns `MathError` for nonfinite input, invalid tolerance, degeneracy or
+    /// unrepresentable arithmetic, as applicable. Linear epsilon is nonnegative.
+    pub fn checked_new(n: &Vector3<T>, p: &Vector3<T>, epsilon: T) -> Result<Self, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
+            return Err(MathError::InvalidTolerance);
+        }
+
+        let norm = n.checked_normalize(epsilon)?;
+        let d = Vector3::checked_dot(&norm, p)?;
+        Ok(Self {
             a: norm.x,
             b: norm.y,
             c: norm.z,
-            d: d.checked_neg().ok()?,
+            d: d.checked_neg()?,
         })
     }
 
-    /// Creates a plane from triangle vertices.
-    ///
-    /// # Panics
-    /// Panics if the triangle is degenerate. Use [`Plane::checked_from_tri`] when
-    /// the input may be degenerate.
+    /// Constructs a plane from the oriented triangle normal without validation.
+    /// Requires independent edges and representable arithmetic.
     pub fn from_tri(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Self {
-        Self::checked_from_tri(v0, v1, v2, T::epsilon()).expect("triangle must define a plane")
+        Self::new(&tri_normal(v0, v1, v2), v0)
     }
 
-    /// Creates a plane from triangle vertices.
-    ///
-    /// Returns `None` if either edge is zero or non-finite, or if the sine of
-    /// the angle between the edges is at most the dimensionless `epsilon`
-    /// tolerance, which must be finite and in `0..=1`. Uniformly scaling
-    /// representable triangle offsets does not affect this degeneracy decision
-    /// or the resulting unit normal. Invalid tolerances also return `None`.
+    /// Constructs a triangle plane with checked arithmetic and normalization.
+    /// Angular epsilon must be finite in `0..=1`; collapsed spans are `Degenerate`.
     pub fn checked_from_tri(
         v0: &Vector3<T>,
         v1: &Vector3<T>,
         v2: &Vector3<T>,
         epsilon: T,
-    ) -> Option<Self> {
+    ) -> Result<Self, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
         // Build the normal through the shared scale-stable edge-orientation
         // path, then anchor the normalized plane equation at the first vertex.
         let n = checked_tri_normal(v0, v1, v2, epsilon)?;
         Self::checked_new(&n, v0, epsilon)
     }
-    /// Creates a plane from quad vertices.
-    ///
-    /// # Panics
-    /// Panics if the quad diagonals do not define a plane. Use
-    /// [`Plane::checked_from_quad`] when the input may be degenerate.
-    ///
-    /// This routine does not validate that the four vertices are coplanar.
-    /// For non-coplanar quads it returns the diagonal-derived representative
-    /// plane described by [`Plane::checked_from_quad`].
+
+    /// Constructs a representative plane from the centroid and diagonal normal.
+    /// Uses unchecked arithmetic and assumes independent diagonals. Does not validate coplanarity.
     pub fn from_quad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
-        Self::checked_from_quad(v0, v1, v2, v3, T::epsilon()).expect("quad must define a plane")
+        let q = T::quarter();
+        let center = Vector3::new(
+            T::sum_products(&[
+                (v0.x, q, false),
+                (v1.x, q, false),
+                (v2.x, q, false),
+                (v3.x, q, false),
+            ]),
+            T::sum_products(&[
+                (v0.y, q, false),
+                (v1.y, q, false),
+                (v2.y, q, false),
+                (v3.y, q, false),
+            ]),
+            T::sum_products(&[
+                (v0.z, q, false),
+                (v1.z, q, false),
+                (v2.z, q, false),
+                (v3.z, q, false),
+            ]),
+        );
+        Self::new(&quad_normal(v0, v1, v2, v3), &center)
     }
 
-    /// Creates a plane from quad vertices.
-    ///
-    /// Returns `None` if either diagonal is zero or non-finite, or if their
-    /// sine-angle magnitude is at most the dimensionless `epsilon` tolerance.
-    /// The tolerance must be finite and in `0..=1`; invalid values return
-    /// `None`. Diagonal magnitudes do not affect this decision.
-    ///
-    /// The plane normal is computed from the quad diagonals and anchored at the
-    /// vertex centroid. This is a representative plane for the quad and does
-    /// not validate coplanarity. For non-coplanar input, the returned plane is
-    /// not guaranteed to pass through any of the vertices.
+    /// Constructs a representative centroid/diagonal plane with checked arithmetic.
+    /// Angular epsilon must be finite in `0..=1`. Does not validate coplanarity.
     pub fn checked_from_quad(
         v0: &Vector3<T>,
         v1: &Vector3<T>,
         v2: &Vector3<T>,
         v3: &Vector3<T>,
         epsilon: T,
-    ) -> Option<Self> {
+    ) -> Result<Self, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
         // Derive a scale-stable unit normal from the diagonals before choosing
         // the centroid used to anchor the representative plane equation.
         let n = checked_quad_normal(v0, v1, v2, v3, epsilon)?;
@@ -821,70 +1081,92 @@ impl<T: RealScalar> Plane<T> {
                 (v1.x, q, false),
                 (v2.x, q, false),
                 (v3.x, q, false),
-            ])
-            .ok()?,
+            ])?,
             T::checked_sum_products(&[
                 (v0.y, q, false),
                 (v1.y, q, false),
                 (v2.y, q, false),
                 (v3.y, q, false),
-            ])
-            .ok()?,
+            ])?,
             T::checked_sum_products(&[
                 (v0.z, q, false),
                 (v1.z, q, false),
                 (v2.z, q, false),
                 (v3.z, q, false),
-            ])
-            .ok()?,
+            ])?,
         );
         Self::checked_new(&n, &c, epsilon)
     }
 
-    /// Computes the intersection of this plane with a ray.
-    ///
-    /// Returns the forward intersection point, including the ray origin, or
-    /// `None` for a parallel ray, a hit behind the origin, a zero direction, or
-    /// non-finite data. `epsilon` is the inclusive, dimensionless upper bound
-    /// on the absolute cosine between the plane normal and ray direction and
-    /// must be finite and in `0..=1`. Positive direction rescaling does not
-    /// change the returned point.
+    /// Returns a ray hit using unchecked plane arithmetic; `None` denotes a geometric miss.
+    /// Requires valid spans/directions, representable arithmetic and angular epsilon in `0..=1`.
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
-        // Keep one implementation of ray-domain and angular-tolerance policy;
-        // the ray owns the actual normalized intersection calculation.
         r.intersect_plane(self, epsilon)
     }
 
-    /// Computes the intersection of this plane with an infinite line.
-    ///
-    /// Returns the line's original parameter `t` and the intersection point, or
-    /// `None` for parallel, zero-direction, or non-finite input. The method also
-    /// returns `None` when the geometric hit is finite but its parameter in the
-    /// stored direction's scale would overflow or underflow.
-    ///
-    /// `epsilon` is a dimensionless angular tolerance in `0..=1`. Parallelism
-    /// is tested from normalized working vectors, so multiplying `line.d` by a
-    /// finite nonzero `k` leaves the point unchanged and changes a representable
-    /// returned parameter from `t` to `t / k`. Negative `k` values reverse the
-    /// parameter orientation but describe the same infinite line.
+    /// Returns an unchecked line hit as `(t, point)` in the stored parameterization.
+    /// `None` denotes angular parallelism. Requires valid inputs, representable
+    /// arithmetic/parameters and finite angular epsilon in `0..=1`.
     pub fn intersect_line(
         &self,
         line: &Line<T, Vector3<T>>,
         epsilon: T,
     ) -> Option<(T, Vector3<T>)> {
+        let n = self.normal();
+        let unit = n.normalize();
+        let direction = line.d.normalize();
+        let denominator = Vector3::dot(&unit, &direction);
+        if denominator.tabs() <= epsilon {
+            return None;
+        }
+        let distance = -(self.constant() / n.length() + Vector3::dot(&unit, &line.p)) / denominator;
+        Some((distance / line.d.length(), line.p + direction * distance))
+    }
+
+    /// Returns a checked ray hit. `Ok(None)` denotes a geometric miss;
+    /// invalid geometry, arithmetic or angular epsilon outside `0..=1` is an error.
+    pub fn checked_intersect_ray(
+        &self,
+        r: &Ray<T, Vector3<T>>,
+        epsilon: T,
+    ) -> Result<Option<Vector3<T>>, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
+        // Keep one implementation of ray-domain and angular-tolerance policy;
+        // the ray owns the actual normalized intersection calculation.
+        r.checked_intersect_plane(self, epsilon)
+    }
+
+    /// Returns a checked line hit as `(t, point)` in its original parameterization.
+    /// `Ok(None)` denotes angular parallelism. Invalid input/tolerance and
+    /// unrepresentable arithmetic or parameters return `MathError`.
+    pub fn checked_intersect_line(
+        &self,
+        line: &Line<T, Vector3<T>>,
+        epsilon: T,
+    ) -> Result<Option<(T, Vector3<T>)>, MathError> {
+        if !line.p.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
         let normal = self.normal();
 
         // Decompose each operand once without forming raw squared lengths,
         // which may overflow or underflow even when both directions are valid.
         // The normalized forms are reused for classification and the solve.
-        let normal_metric = try_normalized3(&normal)?;
-        let direction_metric = try_normalized3(&line.d)?;
+        let normal_metric = checked_normalized3(&normal)?;
+        let direction_metric = checked_normalized3(&line.d)?;
 
         // A direction perpendicular to the normal is parallel to the plane.
         // The shared gate rejects that in-tolerance relationship and invalid
         // arithmetic, allowing only a valid non-parallel direction to reach
         // the original-parameter intersection solve.
-        return_none_unless_outside_angular_tolerance!(classify_nearly_perpendicular_normalized3(
+        checked_angular_gate!(classify_nearly_perpendicular_normalized3(
             &normal_metric,
             &direction_metric,
             epsilon,
@@ -892,31 +1174,25 @@ impl<T: RealScalar> Plane<T> {
 
         let unit_normal = normal_metric.unit();
         let unit_direction = direction_metric.unit();
-        let unit_constant = normal_metric.divide_by_length(self.constant())?;
-        let numerator = unit_constant
-            .checked_add(Vector3::checked_dot(&unit_normal, &line.p).ok()?)
-            .ok()?;
-        let denominator = Vector3::checked_dot(&unit_normal, &unit_direction).ok()?;
+        let unit_constant = normal_metric.checked_divide_by_length(self.constant())?;
+        let numerator = unit_constant.checked_add(Vector3::checked_dot(&unit_normal, &line.p)?)?;
+        let denominator = Vector3::checked_dot(&unit_normal, &unit_direction)?;
         if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
-            return None;
+            return Err(MathError::Overflow);
         }
 
         // Solve first in physical distance along a unit direction. Dividing by
         // the stored direction length then restores the caller's original line
         // parameterization without using an overflow-prone raw length.
-        let distance = numerator
-            .checked_neg()
-            .ok()?
-            .checked_div(denominator)
-            .ok()?;
+        let distance = numerator.checked_neg()?.checked_div(denominator)?;
         if !is_finite_scalar(distance) {
-            return None;
+            return Err(MathError::Overflow);
         }
         // This is `distance / |line.d|`, evaluated from the bounded length
         // decomposition. It restores the parameter of the caller's exact
         // equation `line.p + line.d * t`, including the sign change produced
         // when the stored direction is reversed.
-        let t = direction_metric.divide_by_length_preserving_nonzero(distance)?;
+        let t = direction_metric.checked_divide_by_length_preserving_nonzero(distance)?;
 
         // Build the geometric result from physical travel rather than from the
         // potentially extreme reciprocal pair `line.d * t`. Both expressions
@@ -924,11 +1200,10 @@ impl<T: RealScalar> Plane<T> {
         // over a much wider range of stored direction magnitudes.
         let point = Vector3::checked_add_vv(
             &line.p,
-            &Vector3::checked_mul_vs(&unit_direction, distance).ok()?,
-        )
-        .ok()?;
+            &Vector3::checked_mul_vs(&unit_direction, distance)?,
+        )?;
         if !is_finite_vector3(&point) {
-            return None;
+            return Err(MathError::Overflow);
         }
 
         // Two staged divisions can round a value whose exact quotient lies on
@@ -941,17 +1216,16 @@ impl<T: RealScalar> Plane<T> {
         let zero = <T as Zero>::zero();
         if t != zero && t.tabs() * T::half() == zero {
             let parameterized_point =
-                Vector3::checked_add_vv(&line.p, &Vector3::checked_mul_vs(&line.d, t).ok()?)
-                    .ok()?;
+                Vector3::checked_add_vv(&line.p, &Vector3::checked_mul_vs(&line.d, t)?)?;
             if parameterized_point.x != point.x
                 || parameterized_point.y != point.y
                 || parameterized_point.z != point.z
             {
-                return None;
+                return Err(MathError::Overflow);
             }
         }
 
-        Some((t, point))
+        Ok(Some((t, point)))
     }
 }
 
@@ -970,7 +1244,8 @@ pub struct ParametricPlane<T: Scalar> {
 }
 
 impl<T: RealScalar> ParametricPlane<T> {
-    /// Creates a parametric plane from center and axes.
+    /// Constructs the value using ordinary arithmetic, without validation.
+    /// Callers supply valid finite coordinates and any required nonzero directions.
     pub fn new(center: &Vector3<T>, x_axis: &Vector3<T>, y_axis: &Vector3<T>) -> Self {
         Self {
             center: *center,
@@ -979,199 +1254,188 @@ impl<T: RealScalar> ParametricPlane<T> {
         }
     }
 
-    /// Converts the parametric plane to an infinite plane.
+    /// Builds an infinite plane without validation. Requires independent spanning axes.
     pub fn plane(&self) -> Plane<T> {
-        self.checked_plane(T::epsilon())
-            .expect("parametric plane axes must span a plane")
+        Plane::new(&self.normal(), &self.center)
     }
 
-    /// Converts the parametric plane to an infinite plane.
-    ///
-    /// Returns `None` if either axis is zero or non-finite, or if the axes are
-    /// parallel within the dimensionless angular `epsilon` tolerance. The
-    /// tolerance must be finite and in `0..=1`; invalid values return `None`.
-    pub fn checked_plane(&self, epsilon: T) -> Option<Plane<T>> {
+    /// Builds an infinite plane with checked span and coefficient arithmetic.
+    /// Angular epsilon must be finite in `0..=1`; dependent axes are `Degenerate`.
+    pub fn checked_plane(&self, epsilon: T) -> Result<Plane<T>, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
         // Build the normal with the same scale-invariant classification used by
         // intersection routines, then anchor the resulting plane at the center.
         let normal = self.checked_normal(epsilon)?;
         Plane::checked_new(&normal, &self.center, epsilon)
     }
 
-    /// Computes the unit normal defined by the two plane axes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if either axis is zero or non-finite, or if their sine-angle
-    /// magnitude is at most [`RealScalar::epsilon`]. Use
-    /// [`ParametricPlane::checked_normal`] for checked input.
+    /// Returns the plane normal; computed normals use unchecked arithmetic.
+    /// Computed normals require independent axes and representable intermediates.
     pub fn normal(&self) -> Vector3<T> {
-        // The infallible convenience API applies the scalar's default angular
-        // tolerance and makes its invalid-axis precondition explicit by panic.
-        self.checked_normal(T::epsilon())
-            .expect("parametric plane axes must span a plane")
+        Vector3::cross(&self.x_axis, &self.y_axis).normalize()
     }
 
-    /// Computes the unit normal defined by the two plane axes.
-    ///
-    /// Returns `None` if either axis is zero or non-finite, or if the sine of
-    /// their angle is at most the dimensionless `epsilon` tolerance. The
-    /// tolerance must be finite and in `0..=1`; invalid values return `None`.
-    /// Axis magnitudes do not affect the returned decision or unit normal.
-    pub fn checked_normal(&self, epsilon: T) -> Option<Vector3<T>> {
+    /// Computes the unit normal with checked arithmetic and a dimensionless span test.
+    /// Angular epsilon must be finite in `0..=1`; dependent axes are `Degenerate`.
+    pub fn checked_normal(&self, epsilon: T) -> Result<Vector3<T>, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
         // Delegate to the shared spanning-vector path so tiny and huge but
         // well-conditioned axes receive identical treatment.
         checked_normal_from_spanning_vectors(&self.x_axis, &self.y_axis, epsilon)
     }
 
-    /// Computes the intersection of this parametric plane with a ray.
-    ///
-    /// Returns the forward intersection point or `None` when the axes do not
-    /// define a plane, the ray is parallel or points away, or any relevant data
-    /// is non-finite. `epsilon` must be finite and in `0..=1` and is the
-    /// dimensionless angular tolerance for both the axis and ray/normal
-    /// orientation tests.
+    /// Returns a ray hit using unchecked plane arithmetic; `None` denotes a geometric miss.
+    /// Requires valid spans/directions, representable arithmetic and angular epsilon in `0..=1`.
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
-        // Validate and canonicalize the spanning axes once, then reuse the
-        // ordinary plane/ray query and its forward-ray semantics.
-        let plane = self.checked_plane(epsilon)?;
-        r.intersect_plane(&plane, epsilon)
+        self.plane().intersect_ray(r, epsilon)
     }
 
-    /// Computes the intersection of this parametric plane with an infinite line.
-    ///
-    /// Returns the line's original parameter `t` and intersection point, or
-    /// `None` when the axes do not define a plane, the line is parallel, or any
-    /// relevant data is non-finite. `epsilon` is a finite, dimensionless angular
-    /// tolerance in `0..=1`. Rescaling the line direction leaves the point
-    /// fixed and rescales `t` inversely.
+    /// Returns an unchecked line hit as `(t, point)` in the stored parameterization.
+    /// `None` denotes angular parallelism. Requires valid inputs, representable
+    /// arithmetic/parameters and finite angular epsilon in `0..=1`.
     pub fn intersect_line(
         &self,
         line: &Line<T, Vector3<T>>,
         epsilon: T,
     ) -> Option<(T, Vector3<T>)> {
+        self.plane().intersect_line(line, epsilon)
+    }
+
+    /// Returns a checked ray hit. `Ok(None)` denotes a geometric miss;
+    /// invalid geometry, arithmetic or angular epsilon outside `0..=1` is an error.
+    pub fn checked_intersect_ray(
+        &self,
+        r: &Ray<T, Vector3<T>>,
+        epsilon: T,
+    ) -> Result<Option<Vector3<T>>, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
+        // Validate and canonicalize the spanning axes once, then reuse the
+        // ordinary plane/ray query and its forward-ray semantics.
+        let plane = self.checked_plane(epsilon)?;
+        r.checked_intersect_plane(&plane, epsilon)
+    }
+
+    /// Returns a checked line hit as `(t, point)` in its original parameterization.
+    /// `Ok(None)` denotes angular parallelism. Invalid input/tolerance and
+    /// unrepresentable arithmetic or parameters return `MathError`.
+    pub fn checked_intersect_line(
+        &self,
+        line: &Line<T, Vector3<T>>,
+        epsilon: T,
+    ) -> Result<Option<(T, Vector3<T>)>, MathError> {
+        if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+            return Err(MathError::InvalidTolerance);
+        }
+
         // Convert through the checked unit-normal representation before
         // delegating to the single line/plane intersection implementation.
         let plane = self.checked_plane(epsilon)?;
-        plane.intersect_line(line, epsilon)
+        plane.checked_intersect_line(line, epsilon)
     }
 
-    /// Projects with a checked, dimensionless Gram system for independent axes.
-    /// Degenerate axes and unrepresentable arithmetic are explicit errors.
+    /// Solves oblique plane coordinates with a scale-aware checked Gram system.
+    /// Dependent axes and arithmetic failures are explicit errors.
     pub fn checked_project(&self, value: &Vector3<T>) -> Result<Vector2<T>, MathError> {
         let delta = Vector3::checked_sub_vv(value, &self.center)?;
         checked_span_coordinates(&self.x_axis, &self.y_axis, &delta)
     }
 
-    /// Projects a 3D point onto the plane's 2D coordinates, allowing oblique axes.
-    /// # Panics
-    /// Panics for dependent axes or unrepresentable arithmetic. Use `checked_project`
-    /// to inspect the numerical error.
+    /// Solves oblique plane coordinates without validation.
+    /// Requires independent axes and representable Gram-system intermediates.
     pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
-        self.checked_project(v)
-            .expect("parametric plane projection failed")
+        span_coordinates(&self.x_axis, &self.y_axis, &(*v - self.center))
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Computes the unit normal of a triangle.
-///
-/// The result depends on edge orientation, not triangle size.
-///
-/// # Panics
-///
-/// Panics if either edge is zero or non-finite, or if the edges are parallel
-/// within [`RealScalar::epsilon`]. Use [`checked_tri_normal`] for checked input.
-////////////////////////////////////////////////////////////////////////////////
+/// Computes the oriented triangle unit normal with unchecked arithmetic.
+/// Requires independent edges and representable cross/norm intermediates.
 pub fn tri_normal<T: RealScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
-    // Apply the scalar's default dimensionless tolerance while keeping the
-    // checked implementation authoritative for orientation and normalization.
-    checked_tri_normal(v0, v1, v2, T::epsilon()).expect("triangle must be non-degenerate")
+    Vector3::cross(&(*v1 - *v0), &(*v2 - *v0)).normalize()
 }
 
-/// Computes the unit normal of a triangle.
-///
-/// Returns `None` if either edge is zero or non-finite, or if the sine of the
-/// angle between the edges is at most the dimensionless `epsilon` tolerance.
-/// The tolerance must be finite and in `0..=1`; invalid values return `None`.
-/// Edge magnitudes do not affect the decision or returned unit normal.
+/// Computes a triangle unit normal with checked subtraction and normalization.
+/// Angular epsilon is finite in `0..=1`; collapsed spans return `Degenerate`.
 pub fn checked_tri_normal<T: RealScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
     epsilon: T,
-) -> Option<Vector3<T>> {
+) -> Result<Vector3<T>, MathError> {
+    if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+        return Err(MathError::InvalidTolerance);
+    }
+
     // Translate vertices into edge directions before applying a dimensionless
     // shape test; the absolute triangle area is not a degeneracy criterion.
-    let v10 = Vector3::checked_sub_vv(v1, v0).ok()?;
-    let v20 = Vector3::checked_sub_vv(v2, v0).ok()?;
+    let v10 = Vector3::checked_sub_vv(v1, v0)?;
+    let v20 = Vector3::checked_sub_vv(v2, v0)?;
     checked_normal_from_spanning_vectors(&v10, &v20, epsilon)
 }
 
-/// Computes the diagonal-derived unit normal of a quadrilateral.
-///
-/// Uses the cross product of the two diagonals for a more stable result.
-///
-/// For non-coplanar quads this is a representative diagonal-based normal, not a
-/// proof that the four vertices lie on a single plane.
-///
-/// # Panics
-///
-/// Panics if either diagonal is zero or non-finite, or if the diagonals are
-/// parallel within [`RealScalar::epsilon`]. Use [`checked_quad_normal`] for
-/// checked input.
+/// Computes the diagonal-derived quad unit normal without validation.
+/// Requires independent diagonals; does not establish coplanarity.
 pub fn quad_normal<T: RealScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
     v3: &Vector3<T>,
 ) -> Vector3<T> {
-    // Apply the scalar's default dimensionless tolerance while keeping the
-    // checked diagonal-orientation implementation authoritative.
-    checked_quad_normal(v0, v1, v2, v3, T::epsilon()).expect("quad must be non-degenerate")
+    Vector3::cross(&(*v2 - *v0), &(*v3 - *v1)).normalize()
 }
 
-/// Computes the diagonal-derived unit normal of a quadrilateral.
-///
-/// Returns `None` if either diagonal is zero or non-finite, or if the diagonals
-/// are parallel within the dimensionless angular `epsilon` tolerance. The
-/// tolerance must be finite and in `0..=1`; invalid values return `None`.
+/// Computes the diagonal-derived quad unit normal with checked arithmetic.
+/// Angular epsilon is finite in `0..=1`; collapsed spans return `Degenerate`.
 pub fn checked_quad_normal<T: RealScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
     v3: &Vector3<T>,
     epsilon: T,
-) -> Option<Vector3<T>> {
+) -> Result<Vector3<T>, MathError> {
+    if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+        return Err(MathError::InvalidTolerance);
+    }
+
     // Diagonal magnitudes depend on the caller's coordinate scale, so only
     // their validity and relative orientation participate in this decision.
-    let v20 = Vector3::checked_sub_vv(v2, v0).ok()?;
-    let v31 = Vector3::checked_sub_vv(v3, v1).ok()?;
+    let v20 = Vector3::checked_sub_vv(v2, v0)?;
+    let v31 = Vector3::checked_sub_vv(v3, v1)?;
     checked_normal_from_spanning_vectors(&v20, &v31, epsilon)
 }
 
-/// Produces a unit normal from two vectors that should span a plane.
-///
-/// `epsilon` is a dimensionless angular tolerance. The helper rejects zero or
-/// non-finite vectors and treats vectors whose sine-angle magnitude is at most
-/// `epsilon` as parallel. It uses only normalized temporary values, preventing
-/// the raw cross product from overflowing or underflowing with input scale.
+/// Builds a checked unit normal from independent finite spanning vectors.
+/// Normalizes each direction once, then classifies its sine-angle magnitude.
+/// Invalid angular epsilon or collapsed spans are errors before the final normalization.
 fn checked_normal_from_spanning_vectors<T: RealScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     epsilon: T,
-) -> Option<Vector3<T>> {
+) -> Result<Vector3<T>, MathError> {
+    if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+        return Err(MathError::InvalidTolerance);
+    }
+
     // Decompose each source vector exactly once. The resulting bounded forms
     // are reused for both angular classification and the cross product, while
     // the Option results reject zero and non-finite vectors up front.
-    let left_metric = try_normalized3(left)?;
-    let right_metric = try_normalized3(right)?;
+    let left_metric = checked_normalized3(left)?;
+    let right_metric = checked_normalized3(right)?;
 
     // Classify the prepared directions before normalizing their cross product.
     // The helper also validates the caller-provided angular tolerance. The
     // shared gate rejects in-tolerance spans, which cannot define a stable
     // plane normal, and invalid arithmetic; only a valid separated pair reaches
     // the unit-cross-product calculation.
-    return_none_unless_outside_angular_tolerance!(classify_nearly_parallel_normalized3(
+    checked_span_gate!(classify_nearly_parallel_normalized3(
         &left_metric,
         &right_metric,
         epsilon,
@@ -1182,8 +1446,8 @@ fn checked_normal_from_spanning_vectors<T: RealScalar>(
     // the orientation required by plane constructors.
     let left_unit = left_metric.unit();
     let right_unit = right_metric.unit();
-    let cross = Vector3::checked_cross(&left_unit, &right_unit).ok()?;
-    Some(try_normalized3(&cross)?.unit())
+    let cross = Vector3::checked_cross(&left_unit, &right_unit)?;
+    Ok(checked_normalized3(&cross)?.unit())
 }
 
 #[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
@@ -1337,23 +1601,26 @@ mod tests {
     fn test_line_new_zero_direction() {
         let p = Vector3::new(0.0f32, 0.0, 0.0);
         let d = Vector3::new(0.0f32, 0.0, 0.0);
-        assert!(Line::new(&p, &d, EPS_F32).is_none());
+        assert!(Line::checked_new(&p, &d, EPS_F32).ok().is_none());
     }
 
     #[test]
     fn test_line_from_start_end_zero_direction() {
         let p = Vector3::new(1.0f32, 2.0, 3.0);
-        assert!(Line::from_start_end(&p, &p, EPS_F32).is_none());
+        assert!(Line::checked_from_start_end(&p, &p, EPS_F32).ok().is_none());
     }
 
     #[test]
     fn test_line_closest_point_valid() {
         let p = Vector3::new(0.0f32, 0.0, 0.0);
         let d = Vector3::new(1.0f32, 0.0, 0.0);
-        let line = Line::new(&p, &d, EPS_F32).expect("line should be valid");
+        let line = Line::checked_new(&p, &d, EPS_F32)
+            .ok()
+            .expect("line should be valid");
         let target = Vector3::new(2.0f32, 1.0, 0.0);
         let (t, closest) = line
-            .closest_point_on_line(&target, EPS_F32)
+            .checked_closest_point_on_line(&target, EPS_F32)
+            .ok()
             .expect("closest point should exist");
         assert!((t - 2.0).abs() < 0.001);
         assert!((closest.x - 2.0).abs() < 0.001);
@@ -1368,15 +1635,19 @@ mod tests {
             d: Vector3::new(0.0f32, 0.0, 0.0),
             t: core::marker::PhantomData,
         };
-        assert!(line.normalize(EPS_F32).is_none());
+        assert!(line.checked_normalize(EPS_F32).ok().is_none());
     }
 
     #[test]
     fn test_line_normalize_valid_direction() {
         let p = Vector3::new(0.0f32, 0.0, 0.0);
         let d = Vector3::new(2.0f32, 0.0, 0.0);
-        let line = Line::new(&p, &d, EPS_F32).expect("line should be valid");
-        let norm = line.normalize(EPS_F32).expect("normalize should succeed");
+        let line = Line::checked_new(&p, &d, EPS_F32)
+            .ok()
+            .expect("line should be valid");
+        let norm = line
+            .checked_normalize(EPS_F32)
+            .expect("normalize should succeed");
         assert!((norm.d.length() - 1.0).abs() < 0.001);
     }
 
@@ -1385,15 +1656,21 @@ mod tests {
         let p = Vector3::new(0.0f32, 0.0, 0.0);
         let seg = Segment::new(&p, &p);
         let target = Vector3::new(1.0f32, 0.0, 0.0);
-        assert!(seg.distance(&target, EPS_F32).is_none());
-        assert!(seg.closest_point_on_segment(&target, EPS_F32).is_none());
+        assert!(seg
+            .checked_distance_with_epsilon(&target, EPS_F32)
+            .ok()
+            .is_none());
+        assert!(seg
+            .checked_closest_point_on_segment(&target, EPS_F32)
+            .ok()
+            .is_none());
     }
 
     #[test]
     fn test_ray_new_zero_direction() {
         let p = Vector3::new(0.0f32, 0.0, 0.0);
         let d = Vector3::new(0.0f32, 0.0, 0.0);
-        assert!(Ray::new(&p, &d, EPS_F32).is_none());
+        assert!(Ray::checked_new(&p, &d, EPS_F32).ok().is_none());
     }
 
     #[test]
@@ -1407,9 +1684,18 @@ mod tests {
         let p0 = Vector3::new(0.0f32, 0.0, 0.0);
         let p1 = Vector3::new(0.0f32, 1.0, 0.0);
         let d = Vector3::new(1.0f32, 0.0, 0.0);
-        let l0 = Line::new(&p0, &d, EPS_F32).expect("line should be valid");
-        let l1 = Line::new(&p1, &d, EPS_F32).expect("line should be valid");
-        assert!(shortest_segment3d_between_lines3d(&l0, &l1, EPS_F32).is_none());
+        let l0 = Line::checked_new(&p0, &d, EPS_F32)
+            .ok()
+            .expect("line should be valid");
+        let l1 = Line::checked_new(&p1, &d, EPS_F32)
+            .ok()
+            .expect("line should be valid");
+        assert!(
+            checked_shortest_segment3d_between_lines3d(&l0, &l1, EPS_F32)
+                .ok()
+                .flatten()
+                .is_none()
+        );
     }
 
     /// Verifies that every primitive consumer maps the classifier's explicit
@@ -1423,23 +1709,44 @@ mod tests {
 
         // The closest-lines consumer reaches its parallel classifier with two
         // valid, non-parallel directions; only the NaN tolerance is invalid.
-        let line_x = Line::new(&origin, &x, EPS_F32).expect("x must define a line");
-        let line_y = Line::new(&origin, &y, EPS_F32).expect("y must define a line");
-        assert!(shortest_segment3d_between_lines3d(&line_x, &line_y, f32::NAN).is_none());
+        let line_x = Line::checked_new(&origin, &x, EPS_F32)
+            .ok()
+            .expect("x must define a line");
+        let line_y = Line::checked_new(&origin, &y, EPS_F32)
+            .ok()
+            .expect("y must define a line");
+        assert!(
+            checked_shortest_segment3d_between_lines3d(&line_x, &line_y, f32::NAN)
+                .ok()
+                .flatten()
+                .is_none()
+        );
 
         // Ray/line-to-plane consumers use perpendicularity against the plane
         // normal. An invalid tolerance must fail before either valid solve can
         // be mistaken for an in- or out-of-tolerance angular result.
         let plane = Plane::new(&Vector3::new(0.0f32, 0.0, 1.0), &origin);
         let start = Vector3::new(0.0f32, 0.0, 1.0);
-        let ray = Ray::new(&start, &negative_z, EPS_F32).expect("-z must define a ray");
-        let line = Line::new(&start, &negative_z, EPS_F32).expect("-z must define a line");
-        assert!(ray.intersect_plane(&plane, f32::INFINITY).is_none());
-        assert!(plane.intersect_line(&line, 2.0).is_none());
+        let ray = Ray::checked_new(&start, &negative_z, EPS_F32)
+            .ok()
+            .expect("-z must define a ray");
+        let line = Line::checked_new(&start, &negative_z, EPS_F32)
+            .ok()
+            .expect("-z must define a line");
+        assert!(ray
+            .checked_intersect_plane(&plane, f32::INFINITY)
+            .ok()
+            .flatten()
+            .is_none());
+        assert!(plane
+            .checked_intersect_line(&line, 2.0)
+            .ok()
+            .flatten()
+            .is_none());
 
         // Plane-normal construction consumes the parallel classifier. Its
         // valid right-angle edges still fail when policy itself is negative.
-        assert!(checked_tri_normal(&origin, &x, &y, -EPS_F32).is_none());
+        assert!(checked_tri_normal(&origin, &x, &y, -EPS_F32).ok().is_none());
     }
 
     /// Verifies that closest-line classification depends on direction angle,
@@ -1455,22 +1762,26 @@ mod tests {
             (1.0e-18, 1.0e18),
             (-1.0e18, 1.0e-18),
         ] {
-            let mut line0 = Line::new(
+            let mut line0 = Line::checked_new(
                 &Vector3::new(0.0f32, 0.0, 0.0),
                 &Vector3::new(1.0, 0.0, 0.0),
                 EPS_F32,
             )
+            .ok()
             .expect("base line should be valid");
-            let mut line1 = Line::new(
+            let mut line1 = Line::checked_new(
                 &Vector3::new(1.0f32, 1.0, 1.0),
                 &Vector3::new(0.0, 1.0, 0.0),
                 EPS_F32,
             )
+            .ok()
             .expect("base line should be valid");
             line0.d = line0.d * scale0;
             line1.d = line1.d * scale1;
 
-            let segment = shortest_segment3d_between_lines3d(&line0, &line1, EPS_F32)
+            let segment = checked_shortest_segment3d_between_lines3d(&line0, &line1, EPS_F32)
+                .ok()
+                .flatten()
                 .expect("perpendicular lines must have a unique closest segment");
             assert!((segment.s.x - 1.0).abs() < 1.0e-5);
             assert!(segment.s.y.abs() < 1.0e-5);
@@ -1493,16 +1804,19 @@ mod tests {
         // Every direction describes the same infinite line. The geometric hit
         // is (1, 0, 0), while t*scale remains the base parameter 1.
         for scale in [1.0e-18f32, 1.0, 1.0e18, -1.0e18] {
-            let mut line = Line::new(
+            let mut line = Line::checked_new(
                 &Vector3::new(0.0f32, 0.0, 1.0),
                 &Vector3::new(1.0, 0.0, -1.0),
                 EPS_F32,
             )
+            .ok()
             .expect("base line should be valid");
             line.d = line.d * scale;
 
             let (t, point) = plane
-                .intersect_line(&line, EPS_F32)
+                .checked_intersect_line(&line, EPS_F32)
+                .ok()
+                .flatten()
                 .expect("non-parallel line should intersect the plane");
             assert!((t * scale - 1.0).abs() < 1.0e-5);
             assert!((point.x - 1.0).abs() < 1.0e-5);
@@ -1529,16 +1843,19 @@ mod tests {
         );
 
         for scale in [1.0e-150f64, 1.0e150] {
-            let mut line = Line::new(
+            let mut line = Line::checked_new(
                 &Vector3::new(0.0f64, 0.0, 1.0),
                 &Vector3::new(1.0, 0.0, -1.0),
                 EPS_F64,
             )
+            .ok()
             .expect("base line should be valid");
             line.d = line.d * scale;
 
             let (t, point) = plane
-                .intersect_line(&line, EPS_F64)
+                .checked_intersect_line(&line, EPS_F64)
+                .ok()
+                .flatten()
                 .expect("non-parallel line should intersect the plane");
             assert!((t * scale - 1.0).abs() < 1.0e-12);
             assert!((point.x - 1.0).abs() < 1.0e-12);
@@ -1562,25 +1879,33 @@ mod tests {
         // travel is representable, but dividing that distance by `f32::MAX`
         // rounds the mathematically positive parameter to zero. Returning that
         // zero beside the plane hit would violate `point = p + d * t`.
-        let offset_line = Line::new(
+        let offset_line = Line::checked_new(
             &Vector3::new(0.0f32, 0.0, smallest_positive),
             &maximum_downward_direction,
             EPS_F32,
         )
+        .ok()
         .expect("the maximum finite direction must define a line");
-        assert!(plane.intersect_line(&offset_line, EPS_F32).is_none());
+        assert!(plane
+            .checked_intersect_line(&offset_line, EPS_F32)
+            .ok()
+            .flatten()
+            .is_none());
 
         // A line that genuinely starts on the plane has physical distance zero,
         // so its exact stored parameter is also zero and remains a valid hit.
         // This distinguishes a real origin hit from the underflow rejected above.
-        let on_plane_line = Line::new(
+        let on_plane_line = Line::checked_new(
             &Vector3::new(0.0f32, 0.0, 0.0),
             &maximum_downward_direction,
             EPS_F32,
         )
+        .ok()
         .expect("the maximum finite direction must define a line");
         let (t, point) = plane
-            .intersect_line(&on_plane_line, EPS_F32)
+            .checked_intersect_line(&on_plane_line, EPS_F32)
+            .ok()
+            .flatten()
             .expect("an exactly on-plane line origin must remain a valid hit");
         assert_eq!(t, 0.0);
         assert_eq!(point.x, on_plane_line.p.x);
@@ -1590,14 +1915,17 @@ mod tests {
         // A minimum-subnormal parameter is not inherently invalid. Here the
         // stored direction times that parameter exactly reproduces the two-
         // subnormal physical travel, so the smallest positive `t` must survive.
-        let minimum_parameter_line = Line::new(
+        let minimum_parameter_line = Line::checked_new(
             &Vector3::new(0.0f32, 0.0, smallest_positive * 2.0),
             &Vector3::new(0.0, 0.0, -2.0),
             EPS_F32,
         )
+        .ok()
         .expect("the length-two direction must define a line");
         let (t, point) = plane
-            .intersect_line(&minimum_parameter_line, EPS_F32)
+            .checked_intersect_line(&minimum_parameter_line, EPS_F32)
+            .ok()
+            .flatten()
             .expect("a reconstructable minimum-subnormal parameter must be retained");
         assert_eq!(t.to_bits(), smallest_positive.to_bits());
         assert_eq!(point.z, 0.0);
@@ -1610,11 +1938,12 @@ mod tests {
         let smallest_positive = f32::from_bits(1);
         let direction = Vector3::new(1.6666666f32, 1.3844372, 0.0);
         let plane = Plane::new(&direction, &Vector3::new(0.0, 0.0, 0.0));
-        let line = Line::new(
+        let line = Line::checked_new(
             &Vector3::new(-smallest_positive, 0.0, 0.0),
             &direction,
             EPS_F32,
         )
+        .ok()
         .expect("the ordinary finite direction must define a line");
 
         // Both safe division orderings round the original-scale parameter up to
@@ -1622,7 +1951,11 @@ mod tests {
         // the zero side of that boundary. In floating arithmetic, the unit-
         // direction point and `line.p + line.d * t` then differ in x, so no
         // self-consistent `(t, point)` tuple can be returned.
-        assert!(plane.intersect_line(&line, EPS_F32).is_none());
+        assert!(plane
+            .checked_intersect_line(&line, EPS_F32)
+            .ok()
+            .flatten()
+            .is_none());
     }
 
     /// Verifies that equivalent non-unit plane equations produce the same line
@@ -1644,18 +1977,21 @@ mod tests {
             c: -6.0,
             d: 12.0,
         };
-        let line = Line::new(
+        let line = Line::checked_new(
             &Vector3::new(1.0f32, 2.0, 5.0),
             &Vector3::new(2.0, 0.0, -3.0),
             EPS_F32,
         )
+        .ok()
         .expect("the nonzero direction must define a line");
 
         // The original line equation reaches (3, 2, 2) at t = 1. Scaling all
         // plane coefficients cannot change either the parameter or the point.
         for candidate in [plane, negative_scaled_plane] {
             let (t, point) = candidate
-                .intersect_line(&line, EPS_F32)
+                .checked_intersect_line(&line, EPS_F32)
+                .ok()
+                .flatten()
                 .expect("the line must intersect either plane representation");
             assert!((t - 1.0).abs() < 1.0e-5);
             assert!((point.x - 3.0).abs() < 1.0e-5);
@@ -1677,45 +2013,64 @@ mod tests {
         // The angle is inside the tolerance band. Multiplying the full
         // direction changes no geometry and must not turn the miss into a hit.
         for scale in [1.0f32, 4.0, 1.0e12] {
-            let line = Line::new(
+            let line = Line::checked_new(
                 &Vector3::new(0.0f32, 0.0, 1.0),
                 &(base_direction * scale),
                 EPS_F32,
             )
+            .ok()
             .expect("direction length should pass constructor validation");
-            assert!(plane.intersect_line(&line, EPS_F32).is_none());
+            assert!(plane
+                .checked_intersect_line(&line, EPS_F32)
+                .ok()
+                .flatten()
+                .is_none());
         }
     }
 
     #[test]
     fn test_ray_intersect_plane_parallel() {
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(0.0f32, 0.0, 0.0),
             &Vector3::new(1.0, 0.0, 0.0),
             EPS_F32,
         )
+        .ok()
         .expect("ray should be valid");
         let plane = Plane::new(
             &Vector3::new(0.0f32, 1.0, 0.0),
             &Vector3::new(0.0, 0.0, 0.0),
         );
-        assert!(ray.intersect_plane(&plane, EPS_F32).is_none());
-        assert!(plane.intersect_ray(&ray, EPS_F32).is_none());
+        assert!(ray
+            .checked_intersect_plane(&plane, EPS_F32)
+            .ok()
+            .flatten()
+            .is_none());
+        assert!(plane
+            .checked_intersect_ray(&ray, EPS_F32)
+            .ok()
+            .flatten()
+            .is_none());
     }
 
     #[test]
     fn test_ray_intersect_plane_hit() {
-        let ray = Ray::new(
+        let ray = Ray::checked_new(
             &Vector3::new(0.0f32, -1.0, 0.0),
             &Vector3::new(0.0, 1.0, 0.0),
             EPS_F32,
         )
+        .ok()
         .expect("ray should be valid");
         let plane = Plane::new(
             &Vector3::new(0.0f32, 1.0, 0.0),
             &Vector3::new(0.0, 0.0, 0.0),
         );
-        let hit = ray.intersect_plane(&plane, EPS_F32).expect("should hit");
+        let hit = ray
+            .checked_intersect_plane(&plane, EPS_F32)
+            .ok()
+            .flatten()
+            .expect("should hit");
         assert!(hit.y.abs() < 0.001);
     }
 
@@ -1731,16 +2086,19 @@ mod tests {
         // Mutating the public direction field models callers that retain the
         // same ray geometry but choose a different positive parameter scale.
         for scale in [1.0e-18f32, 1.0, 1.0e18] {
-            let mut ray = Ray::new(
+            let mut ray = Ray::checked_new(
                 &Vector3::new(0.0f32, 0.0, 1.0),
                 &Vector3::new(1.0, 0.0, -1.0),
                 EPS_F32,
             )
+            .ok()
             .expect("base ray should be valid");
             ray.direction = ray.direction * scale;
 
             let point = ray
-                .intersect_plane(&plane, EPS_F32)
+                .checked_intersect_plane(&plane, EPS_F32)
+                .ok()
+                .flatten()
                 .expect("forward ray should intersect the plane");
             assert!((point.x - 1.0).abs() < 1.0e-5);
             assert!(point.y.abs() < 1.0e-5);
@@ -1756,20 +2114,29 @@ mod tests {
             &Vector3::new(0.0f32, 0.0, 1.0),
             &Vector3::new(0.0, 0.0, 0.0),
         );
-        let mut ray = Ray::new(
+        let mut ray = Ray::checked_new(
             &Vector3::new(0.0f32, 0.0, 1.0),
             &Vector3::new(0.0, 0.0, -1.0),
             EPS_F32,
         )
+        .ok()
         .expect("the downward direction must define a valid ray");
 
         // The original ray reaches the plane in its forward domain. Negating
         // the public direction points the ray upward, placing that same plane
         // behind the origin; this must be rejected rather than treated like an
         // infinite-line rescaling.
-        assert!(ray.intersect_plane(&plane, EPS_F32).is_some());
+        assert!(ray
+            .checked_intersect_plane(&plane, EPS_F32)
+            .ok()
+            .flatten()
+            .is_some());
         ray.direction = -ray.direction;
-        assert!(ray.intersect_plane(&plane, EPS_F32).is_none());
+        assert!(ray
+            .checked_intersect_plane(&plane, EPS_F32)
+            .ok()
+            .flatten()
+            .is_none());
     }
 
     /// Verifies that malformed direction data fails closed instead of returning
@@ -1780,20 +2147,31 @@ mod tests {
             &Vector3::new(0.0f32, 0.0, 1.0),
             &Vector3::new(0.0, 0.0, 0.0),
         );
-        let mut line = Line::new(
+        let mut line = Line::checked_new(
             &Vector3::new(0.0f32, 0.0, 1.0),
             &Vector3::new(0.0, 0.0, -1.0),
             EPS_F32,
         )
+        .ok()
         .expect("base line should be valid");
-        let mut ray = Ray::new(&line.p, &line.d, EPS_F32).expect("base ray should be valid");
+        let mut ray = Ray::checked_new(&line.p, &line.d, EPS_F32)
+            .ok()
+            .expect("base ray should be valid");
 
         // Each invalid component must be detected before orientation or division
         // can turn it into an apparently successful result.
         line.d.x = f32::NAN;
         ray.direction.z = f32::INFINITY;
-        assert!(plane.intersect_line(&line, EPS_F32).is_none());
-        assert!(ray.intersect_plane(&plane, EPS_F32).is_none());
+        assert!(plane
+            .checked_intersect_line(&line, EPS_F32)
+            .ok()
+            .flatten()
+            .is_none());
+        assert!(ray
+            .checked_intersect_plane(&plane, EPS_F32)
+            .ok()
+            .flatten()
+            .is_none());
     }
 
     #[test]
@@ -1802,7 +2180,8 @@ mod tests {
             &Vector3::new(0.0f32, 0.0, 0.0),
             &Vector3::new(0.0, 0.0, 0.0),
             EPS_F32,
-        );
+        )
+        .ok();
         assert!(plane.is_none());
     }
 
@@ -1825,22 +2204,35 @@ mod tests {
             Vector3::new(1.0f32, 5.0, -2.0),
             Vector3::new(1.0f32, -1.0, -2.0),
         ] {
-            let distance = plane.distance(&point).expect("normal is non-zero");
+            let distance = plane
+                .checked_distance(&point)
+                .ok()
+                .expect("normal is non-zero");
             let scaled_distance = scaled_plane
-                .distance(&point)
+                .checked_distance(&point)
+                .ok()
                 .expect("scaled normal is non-zero");
             assert!((distance - 3.0).abs() < EPS_F32);
             assert!((scaled_distance - distance).abs() < EPS_F32);
         }
 
         let on_plane = Vector3::new(3.0f32, 2.0, 7.0);
-        assert!(plane.distance(&on_plane).expect("normal is non-zero") < EPS_F32);
+        assert!(
+            plane
+                .checked_distance(&on_plane)
+                .ok()
+                .expect("normal is non-zero")
+                < EPS_F32
+        );
     }
 
     #[test]
     fn test_plane_distance_rejects_zero_normal() {
         let zero_plane = Plane::<f32>::default();
-        assert!(zero_plane.distance(&Vector3::new(1.0, 2.0, 3.0)).is_none());
+        assert!(zero_plane
+            .checked_distance(&Vector3::new(1.0, 2.0, 3.0))
+            .ok()
+            .is_none());
     }
 
     #[test]
@@ -1899,8 +2291,8 @@ mod tests {
             &Vector3::new(1.0, 0.0, 0.0),
             &Vector3::new(2.0, 0.0, 0.0),
         );
-        assert!(plane.checked_normal(EPS_F32).is_none());
-        assert!(plane.checked_plane(EPS_F32).is_none());
+        assert!(plane.checked_normal(EPS_F32).ok().is_none());
+        assert!(plane.checked_plane(EPS_F32).ok().is_none());
     }
 
     /// Checks that plane-producing cross products use axis orientation rather
@@ -1917,6 +2309,7 @@ mod tests {
             &Vector3::new(0.0, tiny, 0.0),
             EPS_F32,
         )
+        .ok()
         .expect("tiny right triangle should have a valid normal");
         assert!(triangle_normal.x.abs() < 1.0e-5);
         assert!(triangle_normal.y.abs() < 1.0e-5);
@@ -1929,6 +2322,7 @@ mod tests {
         );
         let normal = parametric
             .checked_normal(EPS_F32)
+            .ok()
             .expect("tiny perpendicular axes should span a plane");
         assert!((normal.z - 1.0).abs() < 1.0e-5);
     }

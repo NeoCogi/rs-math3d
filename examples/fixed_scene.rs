@@ -42,11 +42,12 @@ fn main() -> Result<(), MathError> {
         transform * Vector3::new(zero, one, zero),
     ]);
     let quarter = F::try_from_ratio(1, 4)?;
-    let ray = Ray::new(
+    let ray = Ray::checked_new(
         &Vector3::new(one + quarter, quarter, one),
         &Vector3::new(zero, zero, -one),
         F::DELTA,
     )
+    .ok()
     .ok_or(MathError::Degenerate)?;
     if let Some((parameter, point)) = ray.checked_intersection(&triangle)? {
         println!(

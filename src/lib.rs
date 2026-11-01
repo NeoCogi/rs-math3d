@@ -119,7 +119,7 @@
 //! tests use `|cos(theta)| <= epsilon`. The implementations normalize temporary
 //! vectors with max-component scaling, so rescaling a finite, nonzero direction
 //! stored in an already represented primitive does not decide whether an
-//! intersection exists.
+//! intersection exists, within the scalar representation and quantization limits.
 //!
 //! Internal angular classifiers represent within-tolerance, outside-tolerance,
 //! and invalid states explicitly. A shared checked-query gate proceeds only for
@@ -128,8 +128,8 @@
 //!
 //! A query prepares each required direction once and reuses that representation
 //! for its angular tests and result calculation. The ordinary parallel path
-//! compares bounded squared magnitudes without an additional square root, while
-//! a scaled fallback retains subnormal tolerance behavior.
+//! compares scalar-specific stable norms: float norms use max-component scaling,
+//! and fixed norms compare widened integer squares before quantization.
 //!
 //! Intersection points retain their geometric meaning under direction
 //! rescaling. Returned line parameters retain the original equation
@@ -188,6 +188,7 @@ macro_rules! return_none_unless_outside_angular_tolerance {
 pub mod basis;
 mod cast;
 mod error;
+#[doc = include_str!("../docs/fixed-point.md")]
 pub mod fixed;
 #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 mod math;

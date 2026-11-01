@@ -38,9 +38,8 @@
 //! Intersection code also uses crate-private, max-component-scaled 3D
 //! normalization helpers. Those helpers keep angular decisions independent of
 //! a vector's magnitude and let each query reuse a prepared representation.
-//! Ordinary parallel predicates compare bounded squared magnitudes without an
-//! additional square root, while an underflow fallback retains subnormal
-//! behavior. Their internal result is an explicit classification—within the
+//! Angular predicates use stable scalar norms: floats scale components before
+//! taking a norm, while fixed scalars compare unquantized squared integers. Their internal result is an explicit classification—within the
 //! tolerance, outside it, or invalid—so invalid arithmetic cannot be confused
 //! with either geometric answer. Checked query call sites share one crate-local
 //! gate that continues only for a valid outside-tolerance classification. None
@@ -178,7 +177,8 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
     /// ```
     ///
     /// # Note
-    /// Returns NaN or Inf components if the vector has zero length.
+    /// Floating zero vectors yield NaN/Inf; fixed invalid arithmetic panics.
+    /// Prefer `checked_normalize` for explicit error handling.
     fn normalize(&self) -> Self;
 
     /// Computes the Euclidean distance between two vectors.
@@ -213,13 +213,23 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
         *self * inv_len
     }
 
+    /// Tests represented length against a finite nonnegative tolerance without
+    /// requiring the unscaled norm or small squared tolerance to fit.
+    fn norm_exceeds(&self, epsilon: T) -> Result<bool, MathError>;
+
     /// Normalizes with precomputed length squared and inverse length.
     fn try_normalize_with_inv_len(&self, len_sq: T, inv_len: T, epsilon: T) -> Option<Self> {
-        if len_sq <= epsilon * epsilon {
-            None
-        } else {
-            Some(*self * inv_len)
+        if !len_sq.is_finite()
+            || len_sq < <T as Zero>::zero()
+            || !inv_len.is_finite()
+            || inv_len <= <T as Zero>::zero()
+        {
+            return None;
         }
+        if !self.norm_exceeds(epsilon).ok()? {
+            return None;
+        }
+        Self::try_mul_vs(self, inv_len).ok()
     }
 }
 
@@ -389,6 +399,7 @@ macro_rules! implRealVector {
             }
             fn try_length(&self) -> Result<T, MathError> { T::try_norm(&[$(self.$field),*]) }
             fn is_finite(&self) -> bool { $(self.$field.is_finite() &&)* true }
+            fn norm_exceeds(&self, epsilon: T) -> Result<bool, MathError> { T::norm_exceeds(&[$(self.$field),*],epsilon) }
             fn checked_normalize(&self, epsilon: T) -> Result<Self, MathError> {
                 let values = [$(self.$field),*];
                 if !T::norm_exceeds(&values, epsilon)? { return Err(MathError::Degenerate); }
@@ -726,12 +737,10 @@ pub(crate) fn checked_normalized3<T: RealScalar>(
 
 /// Classifies pre-normalized vectors for parallelism within an angular tolerance.
 ///
-/// `angular_epsilon` bounds `|sin(theta)|`. The ordinary path compares squared
-/// cross-product magnitudes, avoiding a square root in this hot predicate. A
-/// very small positive tolerance or cross product can square to zero; those
-/// rare cases use a max-component-scaled magnitude comparison so subnormal
-/// angular differences remain observable. An exact zero tolerance checks the
-/// cross components directly for the same reason.
+/// `angular_epsilon` bounds `|sin(theta)|`. The scalar norm comparison avoids
+/// losing small represented directions/tolerances when their squares quantize
+/// to zero. Fixed formats compare widened integer squares; float formats scale
+/// components before computing a norm, preserving subnormal information.
 ///
 /// Returns [`AngularClassification::WithinTolerance`] when the sine magnitude
 /// is at most the inclusive tolerance, [`AngularClassification::OutsideTolerance`]

@@ -33,7 +33,8 @@
 //!
 //! Integer matrices are supported for storage, addition, subtraction, and
 //! multiplication. Operations that require fractional results, such as inversion
-//! and axis-angle construction, are available only for floating-point scalars.
+//! and axis-angle construction, are available through `RealScalar` for floating
+//! and suitable fixed formats.
 //!
 //! # Examples
 //!
@@ -725,14 +726,9 @@ impl<T: RealScalar> Matrix3<T> {
     /// - `Some(matrix)` for a valid axis
     /// - `None` if the axis length is too small
     pub fn of_axis_angle(axis: &Vector3<T>, angle: T, epsilon: T) -> Option<Self> {
-        let len_sq = Vector3::dot(axis, axis);
-        if len_sq <= epsilon * epsilon {
-            return None;
-        }
-        let inv_len = <T as One>::one() / len_sq.tsqrt();
-        let n = *axis * inv_len;
-        let c = T::tcos(angle);
-        let s = T::tsin(angle);
+        let n = axis.checked_normalize(epsilon).ok()?;
+        let c = angle.try_cos().ok()?;
+        let s = angle.try_sin().ok()?;
         let ux = n.x;
         let uy = n.y;
         let uz = n.z;
@@ -931,10 +927,25 @@ impl<T: Scalar> Matrix4<T> {
 
     /// Returns true if the matrix is affine (last row equals [0, 0, 0, 1]).
     pub fn is_affine(&self, epsilon: T) -> bool {
-        self.col[0].w.tabs() <= epsilon
-            && self.col[1].w.tabs() <= epsilon
-            && self.col[2].w.tabs() <= epsilon
-            && (self.col[3].w - <T as One>::one()).tabs() <= epsilon
+        let zero = <T as Zero>::zero();
+        if !(epsilon >= zero) {
+            return false;
+        }
+        let absolute = |value: T| {
+            if value < zero {
+                value.try_neg().ok()
+            } else {
+                Some(value)
+            }
+        };
+        let inside = |value: T| absolute(value).map_or(false, |v| v <= epsilon);
+        inside(self.col[0].w)
+            && inside(self.col[1].w)
+            && inside(self.col[2].w)
+            && self.col[3]
+                .w
+                .try_sub(<T as One>::one())
+                .map_or(false, inside)
     }
 
     /// Inverts using the default reciprocal/adjugate path.

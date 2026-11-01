@@ -356,14 +356,9 @@ impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
     ///
     /// Returns `None` if the direction is too small.
     pub fn normalize(&self, epsilon: T) -> Option<Self> {
-        let d_ss = V::dot(&self.d, &self.d);
-        if d_ss <= epsilon * epsilon {
-            return None;
-        }
-        let inv_len = <T as One>::one() / d_ss.tsqrt();
         Some(Self {
             p: self.p,
-            d: self.d * inv_len,
+            d: self.d.checked_normalize(epsilon).ok()?,
             t: core::marker::PhantomData,
         })
     }
@@ -670,27 +665,12 @@ impl<T: RealScalar> Tri3<T> {
 
     /// Computes barycentric coordinates of a point in the triangle plane.
     ///
-    /// This method assumes the triangle is non-degenerate. When the triangle
-    /// area is zero, the denominator vanishes and the returned coordinates are
-    /// non-finite.
+    /// # Panics
+    /// Panics for degenerate triangles or unrepresentable arithmetic. Use
+    /// `try_barycentric_coordinates` for a checked result.
     pub fn barycentric_coordinates(&self, pt: &Vector3<T>) -> Vector3<T> {
-        let v0 = self.vertices[0];
-        let v1 = self.vertices[1];
-        let v2 = self.vertices[2];
-        let e0 = v1 - v0;
-        let e1 = v2 - v0;
-        let vp = *pt - v0;
-
-        let d00 = Vector3::dot(&e0, &e0);
-        let d01 = Vector3::dot(&e0, &e1);
-        let d11 = Vector3::dot(&e1, &e1);
-        let d20 = Vector3::dot(&vp, &e0);
-        let d21 = Vector3::dot(&vp, &e1);
-        let denom = d00 * d11 - d01 * d01;
-        let v = (d11 * d20 - d01 * d21) / denom;
-        let w = (d00 * d21 - d01 * d20) / denom;
-        let u = <T as One>::one() - v - w;
-        Vector3::new(u, v, w)
+        self.try_barycentric_coordinates(pt)
+            .expect("barycentric coordinates failed")
     }
 }
 
@@ -1067,18 +1047,17 @@ impl<T: RealScalar> ParametricPlane<T> {
         plane.intersect_line(line, epsilon)
     }
 
-    /// Projects a 3D point onto the plane's 2D coordinates.
-    ///
-    /// The coordinates are solved against the 2x2 Gram matrix of the plane
-    /// axes, so non-orthogonal axes are handled correctly. The axes must still
-    /// be linearly independent; otherwise the returned coordinates are
-    /// non-finite.
     /// Projects with a checked, dimensionless Gram system for independent axes.
+    /// Degenerate axes and unrepresentable arithmetic are explicit errors.
     pub fn try_project(&self, value: &Vector3<T>) -> Result<Vector2<T>, MathError> {
         let delta = Vector3::try_sub_vv(value, &self.center)?;
         checked_span_coordinates(&self.x_axis, &self.y_axis, &delta)
     }
 
+    /// Projects a 3D point onto the plane's 2D coordinates, allowing oblique axes.
+    /// # Panics
+    /// Panics for dependent axes or unrepresentable arithmetic. Use `try_project`
+    /// to inspect the numerical error.
     pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
         self.try_project(v)
             .expect("parametric plane projection failed")
@@ -1300,10 +1279,10 @@ mod tests {
 
         let tri = Tri3::new([v0, v1, v2]);
         let test_point = Vector3::new(0.5f32, 0.0, 0.0);
-        let bary = tri.barycentric_coordinates(&test_point);
-        assert!(!bary.x.is_finite());
-        assert!(!bary.y.is_finite());
-        assert!(!bary.z.is_finite());
+        assert!(matches!(
+            tri.try_barycentric_coordinates(&test_point),
+            Err(MathError::Degenerate)
+        ));
     }
 
     #[test]

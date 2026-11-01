@@ -184,8 +184,8 @@ impl<T: RealScalar> Quat<T> {
 
     /// Attempts to normalize the quaternion to unit length.
     ///
-    /// Returns `None` when the squared length is at or below
-    /// `epsilon * epsilon`.
+    /// Returns `None` for invalid arithmetic/tolerances or length at or below
+    /// epsilon. The comparison does not quantize small squared lengths.
     pub fn try_normalize(q: &Self, epsilon: T) -> Option<Self> {
         let vector = crate::Vector4::new(q.x, q.y, q.z, q.w)
             .checked_normalize(epsilon)

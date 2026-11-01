@@ -164,10 +164,33 @@ pub trait RealScalar: Scalar {
     /// Tests the exact represented length against a nonnegative tolerance.
     /// Fixed implementations compare unquantized squared integer quantities.
     fn norm_exceeds(values: &[Self], epsilon: Self) -> Result<bool, MathError> {
-        if !epsilon.is_finite() || epsilon < <Self as Zero>::zero() {
+        let zero = <Self as Zero>::zero();
+        if !epsilon.is_finite() || epsilon < zero {
             return Err(MathError::InvalidTolerance);
         }
-        Ok(Self::try_norm(values)? > epsilon)
+        let mut scale = zero;
+        for &value in values {
+            scale = Self::max(scale, value.try_abs()?);
+        }
+        if scale == zero {
+            return Ok(false);
+        }
+        if scale > epsilon {
+            return Ok(true);
+        }
+        let allowed = match epsilon.try_div(scale) {
+            Ok(value) => value,
+            // A finite tolerance divided by a tiny component can overflow only
+            // far above every possible bounded scaled norm for a real slice.
+            Err(MathError::Overflow) => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let mut sum = zero;
+        for &value in values {
+            let scaled = value.try_div(scale)?;
+            sum = sum.try_add(scaled.try_mul(scaled)?)?;
+        }
+        Ok(sum.try_sqrt()? > allowed)
     }
     /// Checked square root; negative inputs are outside its domain.
     fn try_sqrt(self) -> Result<Self, MathError> {

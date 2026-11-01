@@ -288,10 +288,10 @@ enum TriangleIntersectionKind {
 /// triangle's barycentric boundary. The returned `t` still parameterizes the
 /// original, unnormalized `direction`, preserving [`Line`] semantics.
 ///
-/// `None` is returned for a miss, a degenerate or parallel configuration, or
-/// any non-finite input, intermediate value, or result. Treating invalid
-/// floating-point data as a miss prevents a `Some((NaN, ...))` result from
-/// escaping through IEEE comparisons, which are false for NaN.
+/// `Ok(None)` is returned for a geometric miss or an orientation within the
+/// rejected angular band. Invalid input, degenerate directions and checked
+/// arithmetic failures return `MathError`. The public Option convenience API
+/// collapses these errors to `None`; its checked sibling retains their cause.
 fn triangle_intersection_from_point_dir<T: RealScalar>(
     start: &Vector3<T>,
     direction: &Vector3<T>,

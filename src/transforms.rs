@@ -499,8 +499,8 @@ pub fn try_lookat<T: RealScalar>(
 /// - `eye` and `dest` must not be the same point
 /// - `up` must not be parallel, or nearly parallel, to the viewing direction
 ///
-/// This routine performs unchecked normalization. Violating the preconditions
-/// yields non-finite matrix components.
+/// Panics when these preconditions or checked range requirements fail.
+/// Use [`try_lookat`] to receive the numerical error.
 pub fn lookat<T: RealScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
     try_lookat(eye, dest, up).expect("lookat calculation failed")
 }
@@ -621,9 +621,9 @@ pub fn decompose_affine<T: RealScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>>
 pub fn decompose<T: RealScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
     let parts = decompose_affine(m)?;
     let epsilon = T::epsilon();
-    if parts.shear.x.tabs() > epsilon
-        || parts.shear.y.tabs() > epsilon
-        || parts.shear.z.tabs() > epsilon
+    if parts.shear.x.try_abs().ok()? > epsilon
+        || parts.shear.y.try_abs().ok()? > epsilon
+        || parts.shear.z.try_abs().ok()? > epsilon
     {
         return None;
     }

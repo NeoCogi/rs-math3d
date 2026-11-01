@@ -34,6 +34,13 @@ round nearest with ties to even and panic on non-finite or out-of-range inputs;
 round when the float has insufficient significand precision. Raw bit construction,
 ratios, rescaling, parsing, and fixed arithmetic do not use floats.
 
+See the [fixed-point guide](docs/fixed-point.md) for format constraints, rounding,
+checked geometry, conversions, and both matrix inversion modes. Reciprocal/adjugate
+inversion is the default; select `InverseMode::Rows` for partial-pivot elimination.
+The fixed reciprocal retains guard precision even if scalar `1/det` rounds to zero.
+Run `cargo run --release --example inverse_modes` to compare both on your target,
+or `cargo run --no-default-features --example fixed_scene` for a fixed-only scene.
+
 ## Usage
 
 Hosted applications use the default `std` backend. This includes crates marked
@@ -53,7 +60,7 @@ opting back into an available standard library:
 
 extern crate std;
 
-use rs_math3d::FloatScalar;
+use rs_math3d::RealScalar;
 use std::f32;
 
 pub fn quarter_turn_sine() -> f32 {
@@ -62,13 +69,20 @@ pub fn quarter_turn_sine() -> f32 {
 ```
 
 The `#![no_std]` attribute alone therefore does not require `libm`; what matters
-is whether the final program can link `std`. Std-free or freestanding `no_std`
-applications must disable default features and explicitly select the pure-Rust
-`libm` backend:
+is whether the final program can link `std`. Std-free applications that need
+floating-point analytics disable default features and explicitly select the
+pure-Rust `libm` backend:
 
 ```toml
 [dependencies]
 rs-math3d = { version = "0.14.0", default-features = false, features = ["libm"] }
+```
+
+Fixed-only applications disable default features without selecting a backend:
+
+```toml
+[dependencies]
+rs-math3d = { version = "0.14.0", default-features = false }
 ```
 
 Unix applications that intentionally want the target's C math library may
@@ -102,8 +116,8 @@ backend is active.
   proceeds only for the outside-tolerance state; within-tolerance and invalid states both map to
   `None` without being conflated internally.
 - Each query reuses its temporary normalized representations for classification and result
-  calculation. Ordinary parallel tests compare bounded squared magnitudes without another square
-  root; an uncommon scaled fallback preserves the same behavior when those squares underflow.
+  calculation. Angular classifiers compare scalar-specific stable norms; fixed norms compare widened
+  squared integers so subquantum squares do not erase a nonzero tolerance.
 - Rescaling an already represented `Line`'s stored direction does not change its line/plane or
   line/triangle intersection point, but the returned `t` remains tied to the parameterization
   `p + d * t`; multiplying `d` by a nonzero scale therefore divides every representable `t` by
@@ -137,9 +151,9 @@ backend is active.
 - `Plane::from_quad` and `Plane::try_from_quad` use a diagonal-derived representative plane.
   They do not validate that the four vertices are coplanar.
 - `transforms::lookat` assumes `eye != dest` and an `up` vector that is not parallel to the
-  view direction. Violating those preconditions yields non-finite output.
+  view direction. The convenience function panics on invalid input; `try_lookat` reports a numerical error.
 - `Tri3::barycentric_coordinates` assumes a non-degenerate triangle. Degenerate triangles
-  produce non-finite coordinates.
+  panic in the convenience method; `try_barycentric_coordinates` returns `MathError::Degenerate`.
 
 ## Example
 

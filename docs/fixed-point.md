@@ -1,0 +1,290 @@
+<!--
+Copyright 2020-Present (c) Raja Lehtihet & Wael El Oraiby
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+may be used to endorse or promote products derived from this software without
+specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+-->
+
+# Signed fixed-point math
+
+`Fixed<Repr, FRAC>` stores a signed integer divided by `2^FRAC`. The storage
+type selects the width; precision is part of the Rust type and has no runtime
+storage cost. The implementation belongs to rs-math3d and uses integer
+arithmetic for fixed-point calculations, including analytic functions.
+
+## Formats and range
+
+SINT.FRAC notation counts the sign bit separately. `Fixed<i32, 8>` is S23.8:
+one sign bit, 23 integer magnitude bits and eight fractional bits.
+
+| Type | Notation | Resolution | Range |
+| --- | --- | --- | --- |
+| `Fixed<i32, 8>` / `S23_8` | S23.8 | `1/256` | `[-8388608, 8388608 - 1/256]` |
+| `Fixed<i32, 16>` / `S15_16` | S15.16 | `1/65536` | `[-32768, 32768 - 1/65536]` |
+| `Fixed<i64, 16>` / `S47_16` | S47.16 | `1/65536` | `[-2^47, 2^47 - 1/65536]` |
+
+Storage is sealed to `i8`, `i16`, `i32`, and `i64`. Valid formats satisfy
+`FRAC < Repr::BITS`; unsupported storage and widths fail during compilation.
+Unsigned integers do not denote signed storage. The integer magnitude bit
+count is `Repr::BITS - 1 - FRAC`.
+
+Every valid format supports raw construction and arithmetic. Numeric trait
+capabilities require representable constants:
+
+| Capability | Additional requirement |
+| --- | --- |
+| `Zero`, basic operators, parsing, float conversions | Any valid format |
+| `One`, `Num` | At least one integer magnitude bit |
+| `Scalar`, vectors and basic matrix arithmetic | At least two integer magnitude bits, to represent two |
+| `RealScalar`, `RealVector`, analytic geometry | Scalar requirements and at least two fractional bits |
+
+Formats with very few fractional bits have correspondingly coarse geometry.
+The default fixed epsilon is four quanta, so callers using coarse formats may
+need an explicit tolerance appropriate to their data.
+
+## Construction and conversions
+
+`from_bits` interprets a scaled integer. `try_from_int` and `try_from_ratio`
+interpret numerical values:
+
+```rust
+use rs_math3d::{Fixed, MathError};
+type F = Fixed<i32, 8>;
+# fn main() -> Result<(), MathError> {
+let one = F::from_bits(256);
+let half = F::try_from_ratio(1, 2)?;
+let three = F::try_from_int(3)?;
+assert_eq!(one.to_f64(), 1.0);
+assert_eq!(half.to_bits(), 128);
+assert_eq!((three * half).to_f64(), 1.5);
+# Ok(())
+# }
+```
+
+`From` is implemented in both directions for `f32` and `f64`, providing `Into`
+automatically:
+
+```rust
+use rs_math3d::Fixed;
+type F = Fixed<i32, 8>;
+let a: F = 1.5f32.into();
+let b: F = (-2.25f64).into();
+let single: f32 = b.into();
+let double: f64 = a.into();
+assert_eq!(single, -2.25);
+assert_eq!(double, 1.5);
+```
+
+Float-to-fixed conversions round to nearest, ties to even. `From` panics for
+NaN, infinity, or a rounded value outside the destination range. Use
+`try_from_f32` / `try_from_f64` to receive a `MathError`. Implementing `From`
+also supplies Rust's blanket `TryFrom`; that blanket conversion has the same
+panicking behavior, so it is **not** a replacement for the inherent `try_*`
+constructors.
+
+Fixed-to-float conversions round when the float lacks enough significand bits.
+They do not promise a bit-exact round trip for wide storage. Use `try_rescale`
+for integer-only conversion between fixed formats:
+
+```rust
+use rs_math3d::{Fixed, MathError, Vector3};
+# fn main() -> Result<(), MathError> {
+let value = Fixed::<i64, 8>::from_bits((1_i64 << 60) + 1);
+let same: Fixed<i64, 8> = value.try_rescale()?;
+assert_eq!(same.to_bits(), value.to_bits());
+let vector = Vector3::new(value, Fixed::ZERO, Fixed::ONE);
+let cast = vector.try_cast::<Fixed<i64, 8>>().unwrap();
+assert_eq!(cast.x.to_bits(), value.to_bits());
+# Ok(())
+# }
+```
+
+Vector/matrix `try_cast` uses `TryCastFrom`: fixed-to-fixed conversion rescales
+integers directly, preserving bits beyond a float's significand. `num-traits`
+`NumCast` remains available for interoperability but its generic fixed
+destination path goes through `f64`; use `try_rescale` for precision-critical
+fixed conversions. Arithmetic between different fixed types requires an
+explicit conversion first.
+
+## Arithmetic and text
+
+Addition and subtraction are exact if the result fits. Multiplication,
+division, rescaling and numeric construction round nearest with ties to even.
+Negative values use the same symmetric rule. Operators panic on overflow or
+division by zero in both debug and release builds; `try_add`, `try_sub`,
+`try_mul`, `try_div`, `try_rem`, `try_neg`, and `try_abs` return errors instead.
+The positive counterpart of a signed minimum does not fit its representation.
+
+`trunc` rounds toward zero, `floor` toward negative infinity, and `try_ceil`
+and `try_round` check the integral result's range. Remainder follows truncating
+division and has the dividend's sign.
+
+Dot/cross products, matrix products and Hamilton quaternion products accumulate
+widened integer products and quantize once per output component. Scalar
+expression chains still round at each operator; algebraically equivalent
+expressions can therefore give different rounded results.
+
+`Display` emits an exact terminating decimal, without allocation. Precision
+formatting flags do not truncate that representation. Decimal `FromStr` and
+`from_str_radix` (radices 2–36) accept an optional sign and radix point, rounding
+once at the destination precision. Whitespace, exponents and digit separators
+are rejected. Fractional input length is not limited to an integer denominator
+width, so exact decimal output round-trips even at 63 fractional bits.
+
+## Geometry and matrix inverse modes
+
+Fixed values work with vectors, matrices, quaternions, transforms, bases, and
+the geometric primitives and queries. `RealScalar` / `RealVector` replace the
+old float-only trait names; no compatibility aliases are retained.
+
+```rust
+use rs_math3d::{Fixed, InverseMode, Matrix4, MathError, RealVector, Vector3};
+use rs_math3d::transforms;
+# fn main() -> Result<(), MathError> {
+type F = Fixed<i32, 8>;
+let point = Vector3::new(F::ONE, F::ONE, F::ONE);
+let scale = transforms::scale(Vector3::new(
+    F::try_from_int(2)?, F::try_from_int(4)?, F::try_from_int(8)?,
+));
+let unit = point.checked_normalize(F::DELTA)?;
+let fast = scale.try_inverse()?; // Reciprocal is the default.
+let rows = scale.try_inverse_with(InverseMode::Rows)?;
+let restored = fast * (scale * point);
+assert_eq!(restored.x, point.x);
+assert_eq!(rows.col[0].x, fast.col[0].x);
+# let _ = (unit, Matrix4::<F>::identity());
+# Ok(())
+# }
+```
+
+Every matrix size supports two inversion algorithms:
+
+| Mode | Behavior and tradeoffs |
+| --- | --- |
+| `InverseMode::Reciprocal` (default) | Computes cofactors/adjugate and prepares one determinant reciprocal for reuse. Intended as the fast path. Cofactor and determinant intermediates must fit the scalar representation. |
+| `InverseMode::Rows` | Uses partial-pivot Gauss–Jordan row elimination. Has different intermediate range, conditioning and rounding behavior; useful when adjugate intermediates overflow. |
+
+Select with `try_inverse_with` / `inverse_with`. The named checked methods
+`try_inverse_reciprocal` and `try_inverse_rows` are also available. Affine
+matrices expose `try_inverse_affine_with` / `inverse_affine_with` as well as
+the default reciprocal variants. Unchecked convenience methods panic on error.
+
+The fixed reciprocal retains 127 internal reciprocal fraction bits. Preparation
+performs one division; applying it uses widened multiplication and remainder
+correction. It matches checked fixed division without first quantizing `1/det`
+to the scalar format. A representable inverse therefore does not become a zero
+matrix merely because the scalar reciprocal determinant would round to zero.
+This does not remove cofactor/determinant range limits; row mode addresses a
+different set of intermediate-range cases. Benchmark both on the intended
+target with `cargo run --release --example inverse_modes`.
+
+Checked normalization uses max-component scaling and compares fixed norms
+against tolerances before quantizing squared values. It handles tiny nonzero
+vectors and directions whose unscaled length would overflow. Fixed
+normalization and rotations approximate unit length within quantization.
+
+## Errors and tolerances
+
+Checked scalar/matrix/transform methods return `MathError`. Checked queries
+preserve the distinction between geometric absence and a failed calculation:
+
+```rust
+use rs_math3d::{Fixed, Intersection, MathError, Ray, Tri3, Vector3};
+# fn main() -> Result<(), MathError> {
+type F = Fixed<i32, 8>;
+let zero = F::ZERO;
+let one = F::ONE;
+let triangle = Tri3::new([
+    Vector3::new(zero, zero, zero),
+    Vector3::new(one, zero, zero),
+    Vector3::new(zero, one, zero),
+]);
+let ray = Ray::new(
+    &Vector3::new(zero, zero, one),
+    &Vector3::new(zero, zero, -one),
+    F::DELTA,
+).unwrap();
+match ray.try_intersection(&triangle)? {
+    Some((parameter, point)) => assert_eq!(point.z, zero),
+    None => panic!("the fixture intersects"),
+}
+# Ok(())
+# }
+```
+
+`try_intersection` returns `Ok(None)` for a miss and `Err` for invalid or
+unrepresentable arithmetic. `try_intersect` returns `Result<bool, MathError>`;
+`try_distance` returns a checked distance. The shorter `intersection` and
+`distance` methods collapse errors to `None`; `intersect` panics on error.
+Option-returning primitive constructors and queries likewise reject invalid or
+unrepresentable calculations. Use checked methods when the cause matters.
+
+Linear tolerances use world units. Angular tolerances are dimensionless finite
+values in `0..=1`: parallel tests compare `|sin(theta)|`, and perpendicular
+tests compare `|cos(theta)|`. Fixed-point angular norms compare widened squared
+integers, so squaring a small epsilon cannot erase it. No fixed infinity or
+NaN sentinel exists; unbounded slab endpoints are represented explicitly.
+
+Scale invariance applies within representation and quantization limits.
+Rescaling/rounding input can change its represented direction. Returned line
+parameters retain `point + direction * t`; a parameter that rounds nonzero
+travel to zero is rejected. Finite fixed inputs can still exceed intermediate
+or output ranges, which checked arithmetic reports rather than wrapping.
+
+## Analytic implementation and accuracy
+
+Square root uses an integer root and is correctly rounded. Sine/cosine use
+Q96 CORDIC with guarded range reduction; arc cosine uses guarded integer square
+root and vectoring. Sine, cosine and arc cosine target an absolute error within
+one destination quantum. Regression coverage includes exhaustive 16-bit
+inputs and independent 120-digit Decimal references at full 64-bit angle
+magnitudes across multiple fractional widths.
+
+Tangent divides guarded components before final quantization; its error grows
+near poles, where a uniform absolute error bound is not useful. A result
+outside the destination range is an error. Negative square roots and arc cosine
+inputs outside `[-1, 1]` are domain errors. The `t*` analytic conveniences panic
+for invalid fixed calculations; their `try_*` counterparts report errors.
+
+Constants and independent references are reproducible with
+`python3 tools/generate_fixed_constants.py`. Python Decimal is development
+tooling only; fixed runtime calculations do not depend on floats or `libm`.
+
+## Backend-free builds
+
+Fixed analytic math is allocation-free and works with `core` alone:
+
+```toml
+[dependencies]
+rs-math3d = { version = "0.14.0", default-features = false }
+```
+
+The crate's `f32`/`f64` analytic implementations require a floating backend:
+default `std`, portable `libm`, or Unix-only `system-libm`. Feature precedence
+remains `std`, then `libm`, then `system-libm`. The previous rejection of all
+featureless builds is superseded by the fixed-only configuration. Tests and
+examples explicitly cover this configuration; no float analytic backend is
+selected merely because the test harness can link `std`.

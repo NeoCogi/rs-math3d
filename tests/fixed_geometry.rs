@@ -181,6 +181,13 @@ fn checked_projection_and_camera_domains() {
     )
     .is_ok());
     let mut invalid = Matrix4::<F>::identity();
+    invalid.col[0].w = F::min_value();
+    assert!(matches!(
+        invalid.try_inverse_affine(),
+        Err(MathError::Domain)
+    ));
+    assert!(transforms::decompose_affine(&invalid).is_none());
+    invalid.col[0].w = f(0);
     invalid.col[3].w = f(0);
     assert!(matches!(
         transforms::try_transform_vec3(&invalid, &point),
@@ -224,7 +231,13 @@ fn primitive_construction_coordinates_and_distance() {
         f(2)
     );
     let tiny = Vector3::new(F::DELTA, f(0), f(0));
-    assert!(Line::new(&zero, &tiny, F::ZERO).is_some());
+    let tiny_line = Line::new(&zero, &tiny, F::ZERO).unwrap();
+    assert_eq!(tiny_line.normalize(F::ZERO).unwrap().d.x, F::ONE);
+    assert!(Matrix3::of_axis_angle(&tiny, F::ONE, F::ZERO).is_some());
+    let normalized = tiny
+        .try_normalize_with_inv_len(F::ZERO, f(256), F::ZERO)
+        .unwrap();
+    assert_eq!(normalized.x, F::ONE);
     assert_eq!(Ray::new(&zero, &tiny, F::ZERO).unwrap().direction.x, F::ONE);
     let bounds = Box3::new(&zero, &Vector3::new(f(2), f(2), f(2)));
     assert_eq!(bounds.center().x, f(1));
@@ -294,4 +307,45 @@ fn supported_scene_format_families() {
     format_consumer::<i32, 8>();
     format_consumer::<i32, 16>();
     format_consumer::<i64, 16>();
+}
+
+#[test]
+fn fixed_line_parameters_and_subquantum_angular_squares() {
+    let origin = Vector3::new(f(0), f(0), f(0));
+    let normal = Vector3::new(f(0), f(0), f(1));
+    let plane = Plane::new(&normal, &origin);
+    let start = Vector3::new(f(0), f(0), f(2));
+    let mut line = Line::new(&start, &Vector3::new(f(0), f(0), f(-2)), F::DELTA).unwrap();
+    let first = plane.intersect_line(&line, F::DELTA).unwrap();
+    assert_eq!(first.0, f(1));
+    assert_eq!(first.1.z, f(0));
+    line.d = line.d * f(2);
+    let second = plane.intersect_line(&line, F::DELTA).unwrap();
+    assert_eq!(second.0, F::try_from_ratio(1, 2).unwrap());
+    assert_eq!(second.1.z, first.1.z);
+    let x = Vector3::new(f(1), f(0), f(0));
+    let near_x = Vector3::new(f(1), F::DELTA, f(0));
+    assert_eq!(F::DELTA * F::DELTA, F::ZERO);
+    let unit = try_tri_normal(&origin, &x, &near_x, F::ZERO).unwrap();
+    assert_eq!(unit.z, F::ONE);
+    assert!(try_tri_normal(&origin, &x, &near_x, F::DELTA).is_none());
+    let tiny_x = Vector3::new(F::DELTA, f(0), f(0));
+    let tiny_y = Vector3::new(f(0), F::DELTA, f(0));
+    assert_eq!(
+        try_tri_normal(&origin, &tiny_x, &tiny_y, F::ZERO)
+            .unwrap()
+            .z,
+        F::ONE
+    );
+    let line0 = Line::new(&origin, &x, F::DELTA).unwrap();
+    let line1 = Line::new(&normal, &Vector3::new(f(0), f(1), f(0)), F::DELTA).unwrap();
+    let closest = shortest_segment3d_between_lines3d(&line0, &line1, F::DELTA).unwrap();
+    assert_eq!(closest.e.z - closest.s.z, f(1));
+}
+
+#[test]
+fn guarded_tangent_does_not_create_a_quantized_cosine_pole() {
+    let angle = F::try_from_f64(core::f64::consts::FRAC_PI_2).unwrap();
+    assert_eq!(angle.try_cos().unwrap(), F::ZERO);
+    assert!(angle.try_tan().unwrap() > f(1000));
 }

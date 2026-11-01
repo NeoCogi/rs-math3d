@@ -54,6 +54,20 @@
 //! use rs_math3d::Fixed;
 //! let _ = Fixed::<u32, 8>::from_bits(0);
 //! ```
+//!
+//! Storage-valid formats must also represent the constants required by their
+//! geometry traits. S1.30 cannot represent `Scalar::two()`:
+//! ```compile_fail
+//! use rs_math3d::{Fixed, Scalar};
+//! fn needs_scalar<T: Scalar>() {}
+//! needs_scalar::<Fixed<i32, 30>>();
+//! ```
+//! Analytic formats must represent an exact quarter:
+//! ```compile_fail
+//! use rs_math3d::{Fixed, RealScalar};
+//! fn needs_real<T: RealScalar>() {}
+//! needs_real::<Fixed<i32, 1>>();
+//! ```
 
 mod analytic;
 mod arithmetic;
@@ -194,11 +208,10 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
         Self::raw(self.bits.widen() - rhs.bits.widen())
     }
     /// Multiplies widened integers and rounds exactly once.
+    #[inline]
     pub fn try_mul(self, rhs: Self) -> Result<Self, MathError> {
-        Self::raw(round_div(
-            self.bits.widen() * rhs.bits.widen(),
-            Self::scale(),
-        )?)
+        let product = self.bits.widen() * rhs.bits.widen();
+        Self::raw(signed(round_shift(product.unsigned_abs(), F), product < 0)?)
     }
     /// Divides widened integers, detecting a zero divisor and result overflow.
     pub fn try_div(self, rhs: Self) -> Result<Self, MathError> {

@@ -50,6 +50,7 @@ pub(super) fn round_div(n: i128, d: i128) -> Result<i128, MathError> {
 }
 
 /// Reassembles a signed magnitude, checking both asymmetric signed limits.
+#[inline]
 pub(super) fn signed(magnitude: u128, negative: bool) -> Result<i128, MathError> {
     if negative && magnitude == 1u128 << 127 {
         return Ok(i128::MIN);
@@ -59,6 +60,7 @@ pub(super) fn signed(magnitude: u128, negative: bool) -> Result<i128, MathError>
 }
 
 /// Rounds an unsigned integer divided by a power of two, including huge shifts.
+#[inline]
 pub(super) fn round_shift(value: u128, shift: u32) -> u128 {
     if shift == 0 {
         return value;

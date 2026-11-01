@@ -341,3 +341,41 @@ fn full_range_cordic_matches_decimal_reference() {
     check_wide_reference::<32>();
     check_wide_reference::<61>();
 }
+
+#[test]
+fn prepared_reciprocals_match_exhaustive_checked_division() {
+    type F = Fixed<i8, 4>;
+    for denominator in i8::MIN..=i8::MAX {
+        let divisor = F::from_bits(denominator);
+        if denominator == 0 {
+            assert!(matches!(
+                divisor.try_reciprocal(),
+                Err(MathError::DivisionByZero)
+            ));
+            continue;
+        }
+        let reciprocal = divisor.try_reciprocal().unwrap();
+        for numerator in i8::MIN..=i8::MAX {
+            let value = F::from_bits(numerator);
+            assert_eq!(value.try_mul_reciprocal(reciprocal), value.try_div(divisor));
+        }
+    }
+    type Wide = Fixed<i64, 61>;
+    for denominator in [
+        i64::MIN,
+        -(1i64 << 62) + 1,
+        -3,
+        -1,
+        1,
+        3,
+        (1i64 << 62) - 1,
+        i64::MAX,
+    ] {
+        let divisor = Wide::from_bits(denominator);
+        let reciprocal = divisor.try_reciprocal().unwrap();
+        for numerator in [i64::MIN, -3, -1, 0, 1, 3, i64::MAX] {
+            let value = Wide::from_bits(numerator);
+            assert_eq!(value.try_mul_reciprocal(reciprocal), value.try_div(divisor));
+        }
+    }
+}

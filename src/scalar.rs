@@ -125,6 +125,13 @@ pub trait Scalar:
 /// support fixed-point analytic math. Unified floating features use the
 /// precedence `std`, then `libm`, then `system-libm`.
 pub trait RealScalar: Scalar {
+    /// Reusable reciprocal representation. Fixed implementations retain guard
+    /// precision rather than quantizing `1 / denominator` to the scalar format.
+    type Reciprocal: Copy;
+    /// Prepares one reciprocal for repeated checked multiplication.
+    fn try_reciprocal(self) -> Result<Self::Reciprocal, MathError>;
+    /// Applies a prepared reciprocal, rounding only the final scalar result.
+    fn try_mul_reciprocal(self, reciprocal: Self::Reciprocal) -> Result<Self, MathError>;
     /// Returns a reasonable epsilon for comparisons.
     fn epsilon() -> Self;
     /// Returns 1/2 for the scalar type.
@@ -495,6 +502,13 @@ impl Scalar for f64 {
 
 #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 impl RealScalar for f32 {
+    type Reciprocal = Self;
+    fn try_reciprocal(self) -> Result<Self, MathError> {
+        <Self as Scalar>::try_div(1.0, self)
+    }
+    fn try_mul_reciprocal(self, reciprocal: Self) -> Result<Self, MathError> {
+        <Self as Scalar>::try_mul(self, reciprocal)
+    }
     fn epsilon() -> Self {
         EPS_F32
     }
@@ -533,6 +547,13 @@ impl RealScalar for f32 {
 
 #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 impl RealScalar for f64 {
+    type Reciprocal = Self;
+    fn try_reciprocal(self) -> Result<Self, MathError> {
+        <Self as Scalar>::try_div(1.0, self)
+    }
+    fn try_mul_reciprocal(self, reciprocal: Self) -> Result<Self, MathError> {
+        <Self as Scalar>::try_mul(self, reciprocal)
+    }
     fn epsilon() -> Self {
         EPS_F64
     }

@@ -186,6 +186,7 @@ macro_rules! return_none_unless_outside_angular_tolerance {
 }
 
 pub mod basis;
+mod cast;
 mod error;
 pub mod fixed;
 #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
@@ -201,9 +202,10 @@ pub mod transforms;
 pub mod vector;
 
 pub use basis::*;
+pub use cast::TryCastFrom;
 pub use error::MathError;
 pub use fixed::{Fixed, S15_16, S23_8, S47_16};
-pub use matrix::{Matrix2, Matrix3, Matrix4};
+pub use matrix::{InverseMode, Matrix2, Matrix3, Matrix4};
 pub use primitives::*;
 pub use quaternion::Quat;
 pub use queries::*;

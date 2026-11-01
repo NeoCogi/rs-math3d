@@ -163,6 +163,9 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
     /// Computes length with a checked, scale-aware scalar norm.
     fn try_length(&self) -> Result<T, MathError>;
 
+    /// Checks every component for IEEE exceptional values; fixed values are finite.
+    fn is_finite(&self) -> bool;
+
     /// Normalizes through max-component scaling. Invalid tolerances, zero or
     /// near-zero vectors, and unrepresentable arithmetic are explicit errors.
     fn checked_normalize(&self, epsilon: T) -> Result<Self, MathError>;
@@ -261,15 +264,15 @@ macro_rules! implVector {
 
         impl<T> $vecName<T>
         where
-            T: Copy + num_traits::ToPrimitive,
+            T: Copy,
         {
             /// Attempts to cast each component into another numeric type.
             pub fn try_cast<U>(&self) -> Option<$vecName<U>>
             where
-                U: Scalar + num_traits::NumCast,
+                U: Scalar + crate::TryCastFrom<T>,
             {
                 Some($vecName {
-                    $($field: num_traits::NumCast::from(self.$field)?),*
+                    $($field: U::try_cast_from(self.$field).ok()?),*
                 })
             }
         }
@@ -385,6 +388,7 @@ macro_rules! implRealVector {
                 Self::try_length(self).unwrap_or_else(|_| Self::dot(self,self).tsqrt())
             }
             fn try_length(&self) -> Result<T, MathError> { T::try_norm(&[$(self.$field),*]) }
+            fn is_finite(&self) -> bool { $(self.$field.is_finite() &&)* true }
             fn checked_normalize(&self, epsilon: T) -> Result<Self, MathError> {
                 let values = [$(self.$field),*];
                 if !T::norm_exceeds(&values, epsilon)? { return Err(MathError::Degenerate); }
@@ -473,6 +477,18 @@ implRealVector!(Vector2, x, y);
 implRealVector!(Vector3, x, y, z);
 implRealVector!(Vector4, x, y, z, w);
 
+impl<T: Scalar> Vector3<T> {
+    /// Computes a cross product with checked, single-rounding differences of
+    /// products, preserving cancellation below one stored quantum.
+    pub fn try_cross(l: &Self, r: &Self) -> Result<Self, MathError> {
+        Ok(Self::new(
+            T::try_sum_products(&[(l.y, r.z, false), (l.z, r.y, true)])?,
+            T::try_sum_products(&[(l.z, r.x, false), (l.x, r.z, true)])?,
+            T::try_sum_products(&[(l.x, r.y, false), (l.y, r.x, true)])?,
+        ))
+    }
+}
+
 impl<T> CrossProduct for Vector3<T>
 where
     T: Scalar,
@@ -551,8 +567,8 @@ impl<T: RealScalar> Normalized3<T> {
 
         // Divide quantities of comparable scale first. In particular, this
         // preserves ratios between equally tiny or equally large values.
-        let scale_adjusted = value / self.scale;
-        if is_finite_scalar(scale_adjusted) {
+        let scale_adjusted = value.try_div(self.scale);
+        if let Ok(scale_adjusted) = scale_adjusted {
             // Axis-aligned inputs have scaled length exactly one, a common case
             // in CAD and game geometry where the second division can be elided.
             // Otherwise the bounded divisor lies in `(1, sqrt(3)]` and cannot
@@ -560,7 +576,7 @@ impl<T: RealScalar> Normalized3<T> {
             let quotient = if self.scaled_length == <T as One>::one() {
                 scale_adjusted
             } else {
-                scale_adjusted / self.scaled_length
+                scale_adjusted.try_div(self.scaled_length).ok()?
             };
             if is_finite_scalar(quotient) {
                 return Some(quotient);
@@ -573,13 +589,22 @@ impl<T: RealScalar> Normalized3<T> {
         let length_adjusted = if self.scaled_length == <T as One>::one() {
             value
         } else {
-            value / self.scaled_length
+            value.try_div(self.scaled_length).ok()?
         };
         if !is_finite_scalar(length_adjusted) {
             return None;
         }
-        let quotient = length_adjusted / self.scale;
+        let quotient = length_adjusted.try_div(self.scale).ok()?;
         is_finite_scalar(quotient).then_some(quotient)
+    }
+
+    /// Divides using two checked orderings so representable quotients survive
+    /// an overflowing first intermediate. No invalid scalar is constructed.
+    pub(crate) fn checked_divide_by_length(&self, value: T) -> Result<T, MathError> {
+        value
+            .try_div(self.scale)
+            .and_then(|q| q.try_div(self.scaled_length))
+            .or_else(|_| value.try_div(self.scaled_length)?.try_div(self.scale))
     }
 
     /// Divides by the original vector length without collapsing nonzero to zero.
@@ -653,53 +678,7 @@ pub(crate) fn is_finite_vector3<T: RealScalar>(vector: &Vector3<T>) -> bool {
 /// overflow and a nonzero subnormal input is not lost to underflow. `None` is
 /// returned for zero vectors and vectors containing NaN or infinity.
 pub(crate) fn try_normalized3<T: RealScalar>(vector: &Vector3<T>) -> Option<Normalized3<T>> {
-    // A non-finite component could be hidden by generic min/max ordering, so
-    // reject the complete input before selecting its largest magnitude.
-    if !is_finite_vector3(vector) {
-        return None;
-    }
-
-    // Scaling by the largest component bounds every subsequent component and
-    // guarantees that at least one scaled component has magnitude exactly one.
-    let scale = T::max(vector.x.tabs(), T::max(vector.y.tabs(), vector.z.tabs()));
-    if scale <= <T as Zero>::zero() {
-        return None;
-    }
-
-    // Form the bounded vector before taking its squared length. This is the
-    // operation that removes dependence on the original exponent range.
-    let scaled = *vector / scale;
-    let scaled_length_squared = Vector3::dot(&scaled, &scaled);
-    if !is_finite_scalar(scaled_length_squared) || scaled_length_squared <= <T as Zero>::zero() {
-        return None;
-    }
-
-    // The square root lies in [1, sqrt(3)] for an IEEE three-component input.
-    // Validate it explicitly because `RealScalar` is implementable outside
-    // this crate and may use a different analytic backend.
-    let scaled_length = scaled_length_squared.tsqrt();
-    if !is_finite_scalar(scaled_length) || scaled_length <= <T as Zero>::zero() {
-        return None;
-    }
-
-    // Axis-aligned inputs already have unit length after max-component scaling,
-    // so preserve that common representation without three redundant divides.
-    // Other inputs use direct division: multiplying by a rounded reciprocal can
-    // move an exact inclusive angular boundary one representable value upward.
-    let unit = if scaled_length == <T as One>::one() {
-        scaled
-    } else {
-        scaled / scaled_length
-    };
-    if !is_finite_vector3(&unit) {
-        return None;
-    }
-
-    Some(Normalized3 {
-        unit,
-        scale,
-        scaled_length,
-    })
+    checked_normalized3(vector).ok()
 }
 
 /// Validates a dimensionless angular tolerance shared by orientation predicates.
@@ -714,6 +693,35 @@ fn is_valid_angular_epsilon<T: RealScalar>(angular_epsilon: T) -> bool {
     is_finite_scalar(angular_epsilon)
         && angular_epsilon >= <T as Zero>::zero()
         && angular_epsilon <= <T as One>::one()
+}
+
+/// Prepares the same normalized representation while preserving the cause of
+/// invalid input, degenerate direction or unrepresentable checked arithmetic.
+pub(crate) fn checked_normalized3<T: RealScalar>(
+    vector: &Vector3<T>,
+) -> Result<Normalized3<T>, MathError> {
+    if !vector.is_finite() {
+        return Err(MathError::NonFinite);
+    }
+    let scale = T::max(
+        vector.x.try_abs()?,
+        T::max(vector.y.try_abs()?, vector.z.try_abs()?),
+    );
+    if scale == <T as Zero>::zero() {
+        return Err(MathError::Degenerate);
+    }
+    let scaled = Vector3::try_div_vs(vector, scale)?;
+    let scaled_length = scaled.try_length()?;
+    let unit = if scaled_length == <T as One>::one() {
+        scaled
+    } else {
+        Vector3::try_div_vs(&scaled, scaled_length)?
+    };
+    Ok(Normalized3 {
+        unit,
+        scale,
+        scaled_length,
+    })
 }
 
 /// Classifies pre-normalized vectors for parallelism within an angular tolerance.
@@ -741,78 +749,14 @@ pub(crate) fn classify_nearly_parallel_normalized3<T: RealScalar>(
         return AngularClassification::Invalid;
     }
 
-    // For unit inputs, each cross component is bounded and the cross magnitude
-    // is `|sin(theta)|`. Reusing stored units avoids normalizing either source
-    // vector again in callers that already need their length decompositions.
-    let cross = Vector3::cross(&left.unit(), &right.unit());
-    if !is_finite_vector3(&cross) {
-        return AngularClassification::Invalid;
-    }
-
-    let zero = <T as Zero>::zero();
-    if angular_epsilon == zero {
-        // Squaring a nonzero subnormal cross component can produce zero. Test
-        // the components themselves so epsilon zero means exact floating-point
-        // parallelism rather than "too small to survive a square".
-        return if cross.x == zero && cross.y == zero && cross.z == zero {
-            AngularClassification::WithinTolerance
-        } else {
-            AngularClassification::OutsideTolerance
-        };
-    }
-
-    let epsilon_squared = angular_epsilon * angular_epsilon;
-    if epsilon_squared > zero {
-        // This is the normal, square-root-free path. Unit cross components keep
-        // the dot product finite for supported floating-point scalar types.
-        let sine_squared = Vector3::dot(&cross, &cross);
-        if !is_finite_scalar(sine_squared) {
-            return AngularClassification::Invalid;
-        }
-
-        if sine_squared > zero {
-            // Compare the squared quantities directly. This retains the exact
-            // caller-supplied threshold and removes a square root from the
-            // overwhelmingly common representable-epsilon path.
-            return if sine_squared <= epsilon_squared {
-                AngularClassification::WithinTolerance
-            } else {
-                AngularClassification::OutsideTolerance
-            };
-        }
-
-        // A nonzero cross product can itself disappear when its components are
-        // squared, even though epsilon squared survived. Fall through to the
-        // same scaled comparison used for a subnormal epsilon in that case.
-    }
-
-    // A tolerance or nonzero cross magnitude whose square rounded to zero needs
-    // a scaled fallback. If the largest cross component already exceeds
-    // epsilon, its Euclidean magnitude necessarily exceeds epsilon as well and
-    // no square root is needed.
-    let cross_scale = T::max(cross.x.tabs(), T::max(cross.y.tabs(), cross.z.tabs()));
-    if cross_scale > angular_epsilon {
-        return AngularClassification::OutsideTolerance;
-    }
-    if cross_scale == zero {
-        return AngularClassification::WithinTolerance;
-    }
-
-    // `cross_scale / epsilon` lies in `(0, 1]`. The full magnitude condition
-    //
-    //     cross_scale * scaled_length <= epsilon
-    //
-    // is equivalently `scaled_length <= epsilon / cross_scale`. The latter uses
-    // only bounded or positive ratios and never squares either subnormal value.
-    let cross_metric = match try_normalized3(&cross) {
-        Some(metric) => metric,
-        None => return AngularClassification::Invalid,
+    let cross = match Vector3::try_cross(&left.unit(), &right.unit()) {
+        Ok(value) => value,
+        Err(_) => return AngularClassification::Invalid,
     };
-    let allowed_scaled_length = angular_epsilon / cross_scale;
-    if cross_metric.scaled_length <= allowed_scaled_length {
-        AngularClassification::WithinTolerance
-    } else {
-        AngularClassification::OutsideTolerance
+    match T::norm_exceeds(&[cross.x, cross.y, cross.z], angular_epsilon) {
+        Ok(true) => AngularClassification::OutsideTolerance,
+        Ok(false) => AngularClassification::WithinTolerance,
+        Err(_) => AngularClassification::Invalid,
     }
 }
 
@@ -840,14 +784,20 @@ pub(crate) fn classify_nearly_perpendicular_normalized3<T: RealScalar>(
 
     // Stored units make the absolute dot product dimensionless and invariant
     // under independent nonzero scaling of either original vector.
-    let cosine = Vector3::dot(&left.unit(), &right.unit());
+    let cosine = match Vector3::try_dot(&left.unit(), &right.unit()) {
+        Ok(value) => value,
+        Err(_) => return AngularClassification::Invalid,
+    };
     if !is_finite_scalar(cosine) {
         return AngularClassification::Invalid;
     }
 
     // Compare the magnitude directly so the caller's inclusive tolerance is
     // neither widened nor squared into an underflow-prone representation.
-    let cosine_magnitude = cosine.tabs();
+    let cosine_magnitude = match cosine.try_abs() {
+        Ok(value) => value,
+        Err(_) => return AngularClassification::Invalid,
+    };
     if cosine_magnitude <= angular_epsilon {
         AngularClassification::WithinTolerance
     } else {

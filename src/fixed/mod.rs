@@ -59,12 +59,14 @@ mod analytic;
 mod arithmetic;
 mod constants;
 mod parse;
+mod reciprocal;
 mod storage;
 
 use crate::MathError;
 use arithmetic::{round_div, round_shift, signed, Accumulator};
 use core::{fmt, ops::*, str::FromStr};
 use num_traits::{FromPrimitive, Num, NumCast, One, ToPrimitive, Zero};
+pub use reciprocal::FixedReciprocal;
 pub use storage::{Format, RealFormat, Repr, ScalarFormat, UnitFormat};
 
 /// A signed binary rational `bits / 2^FRAC` with no hidden runtime state.

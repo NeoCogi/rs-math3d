@@ -30,6 +30,7 @@
 use crate::matrix::{Matrix3, Matrix4};
 use crate::scalar::*;
 use crate::vector::{RealVector, Vector, Vector3};
+use crate::MathError;
 use core::ops::*;
 use num_traits::{One, Zero};
 
@@ -73,37 +74,64 @@ impl<T: RealScalar> Quat<T> {
         m21: T,
         m22: T,
     ) -> Self {
-        let t = <T as One>::one() + m00 + m11 + m22;
-
+        let q = T::quarter();
+        let one = <T as One>::one();
+        let t = T::sum_products(&[
+            (one, q, false),
+            (m00, q, false),
+            (m11, q, false),
+            (m22, q, false),
+        ]);
         if t > T::epsilon() {
-            let s = T::tsqrt(t) * T::two();
-
-            let x = (m21 - m12) / s;
-            let y = (m02 - m20) / s;
-            let z = (m10 - m01) / s;
-            let w = T::quarter() * s;
-            Self::new(x, y, z, w)
+            let w = t.tsqrt();
+            Self::new(
+                (m21 - m12) * q / w,
+                (m02 - m20) * q / w,
+                (m10 - m01) * q / w,
+                w,
+            )
         } else if m00 > m11 && m00 > m22 {
-            let s = T::tsqrt(<T as One>::one() + m00 - m11 - m22) * T::two();
-            let x = T::quarter() * s;
-            let y = (m10 + m01) / s;
-            let z = (m02 + m20) / s;
-            let w = (m21 - m12) / s;
-            Self::new(x, y, z, w)
+            let x = T::sum_products(&[
+                (one, q, false),
+                (m00, q, false),
+                (m11, q, true),
+                (m22, q, true),
+            ])
+            .tsqrt();
+            Self::new(
+                x,
+                (m10 + m01) * q / x,
+                (m20 + m02) * q / x,
+                (m21 - m12) * q / x,
+            )
         } else if m11 > m22 {
-            let s = T::tsqrt(<T as One>::one() + m11 - m00 - m22) * T::two();
-            let x = (m10 + m01) / s;
-            let y = T::quarter() * s;
-            let z = (m21 + m12) / s;
-            let w = (m02 - m20) / s;
-            Self::new(x, y, z, w)
+            let y = T::sum_products(&[
+                (one, q, false),
+                (m11, q, false),
+                (m00, q, true),
+                (m22, q, true),
+            ])
+            .tsqrt();
+            Self::new(
+                (m01 + m10) * q / y,
+                y,
+                (m21 + m12) * q / y,
+                (m02 - m20) * q / y,
+            )
         } else {
-            let s = T::tsqrt(<T as One>::one() + m22 - m00 - m11) * T::two();
-            let x = (m02 + m20) / s;
-            let y = (m21 + m12) / s;
-            let z = T::quarter() * s;
-            let w = (m10 - m01) / s;
-            Self::new(x, y, z, w)
+            let z = T::sum_products(&[
+                (one, q, false),
+                (m22, q, false),
+                (m00, q, true),
+                (m11, q, true),
+            ])
+            .tsqrt();
+            Self::new(
+                (m02 + m20) * q / z,
+                (m12 + m21) * q / z,
+                z,
+                (m10 - m01) * q / z,
+            )
         }
     }
 
@@ -159,12 +187,10 @@ impl<T: RealScalar> Quat<T> {
     /// Returns `None` when the squared length is at or below
     /// `epsilon * epsilon`.
     pub fn try_normalize(q: &Self, epsilon: T) -> Option<Self> {
-        let length_squared = Self::dot(q, q);
-        if length_squared <= epsilon * epsilon {
-            None
-        } else {
-            Some(*q / length_squared.tsqrt())
-        }
+        let vector = crate::Vector4::new(q.x, q.y, q.z, q.w)
+            .checked_normalize(epsilon)
+            .ok()?;
+        Some(Self::new(vector.x, vector.y, vector.z, vector.w))
     }
 
     /// Normalizes the quaternion to unit length.
@@ -382,6 +408,12 @@ impl<T: RealScalar> Quat<T> {
         )
     }
 
+    /// Normalizes without conflating degenerate input with arithmetic failure.
+    pub fn checked_normalize(q: &Self, epsilon: T) -> Result<Self, MathError> {
+        let v = crate::Vector4::new(q.x, q.y, q.z, q.w).checked_normalize(epsilon)?;
+        Ok(Self::new(v.x, v.y, v.z, v.w))
+    }
+
     /// Creates a quaternion from an axis and angle.
     ///
     /// # Parameters
@@ -398,21 +430,12 @@ impl<T: RealScalar> Quat<T> {
     /// - `Some(quaternion)` for a valid axis
     /// - `None` if the axis length is too small
     pub fn of_axis_angle(axis: &Vector3<T>, angle: T, epsilon: T) -> Option<Self> {
-        let len_sq = Vector3::dot(axis, axis);
-        if len_sq <= epsilon * epsilon {
-            return None;
-        }
-        let half_angle = angle * T::half();
-        let sin_a = T::tsin(half_angle);
-        let cos_a = T::tcos(half_angle);
-        let inv_len = <T as One>::one() / len_sq.tsqrt();
-        let n = *axis * inv_len * sin_a;
-
-        let x = n.x;
-        let y = n.y;
-        let z = n.z;
-        let w = cos_a;
-        Some(Self::new(x, y, z, w))
+        let unit = axis.checked_normalize(epsilon).ok()?;
+        let half_angle = angle.try_mul(T::half()).ok()?;
+        let sin = half_angle.try_sin().ok()?;
+        let cos = half_angle.try_cos().ok()?;
+        let vector = Vector3::try_mul_vs(&unit, sin).ok()?;
+        Some(Self::new(vector.x, vector.y, vector.z, cos))
     }
 }
 

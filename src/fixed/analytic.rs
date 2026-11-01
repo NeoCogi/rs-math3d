@@ -188,6 +188,13 @@ impl<R: ScalarFormat<F>, const F: u32> Scalar for Fixed<R, F> {
 }
 
 impl<R: RealFormat<F>, const F: u32> RealScalar for Fixed<R, F> {
+    type Reciprocal = super::FixedReciprocal<R, F>;
+    fn try_reciprocal(self) -> Result<Self::Reciprocal, MathError> {
+        super::FixedReciprocal::new(self)
+    }
+    fn try_mul_reciprocal(self, reciprocal: Self::Reciprocal) -> Result<Self, MathError> {
+        reciprocal.apply(self)
+    }
     fn epsilon() -> Self {
         Self::raw(4).expect("real format represents four quanta")
     }

@@ -45,6 +45,7 @@
 use crate::primitives::*;
 use crate::scalar::*;
 use crate::vector::*;
+use crate::MathError;
 use num_traits::{One, Zero};
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -52,7 +53,11 @@ use num_traits::{One, Zero};
 ////////////////////////////////////////////////////////////////////////////////
 pub trait Distance<T, Other> {
     /// Computes the distance to another value, or `None` if undefined.
-    fn distance(&self, other: &Other) -> Option<T>;
+    fn distance(&self, other: &Other) -> Option<T> {
+        self.try_distance(other).ok()
+    }
+    /// Computes distance without hiding the reason a calculation is undefined.
+    fn try_distance(&self, other: &Other) -> Result<T, MathError>;
 }
 
 /// Trait for boolean intersection tests.
@@ -61,36 +66,43 @@ pub trait Intersect<T> {
     ///
     /// Unless an implementation documents otherwise, touching at the boundary
     /// counts as an intersection.
-    fn intersect(&self, other: &T) -> bool;
+    fn intersect(&self, other: &T) -> bool {
+        self.try_intersect(other).expect("intersection test failed")
+    }
+    /// Distinguishes a valid boolean answer from unrepresentable arithmetic.
+    fn try_intersect(&self, other: &T) -> Result<bool, MathError>;
 }
 
 /// Trait for producing intersection results.
 pub trait Intersection<T, Other> {
     /// Returns the intersection result, or `None` if there is no intersection.
-    fn intersection(&self, other: &Other) -> Option<T>;
+    fn intersection(&self, other: &Other) -> Option<T> {
+        self.try_intersection(other).ok().flatten()
+    }
+    /// Returns `Ok(None)` for a geometric miss, or an error for invalid or
+    /// unrepresentable input/calculation. Prefer this method for diagnosis.
+    fn try_intersection(&self, other: &Other) -> Result<Option<T>, MathError>;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Distance Queries
 ////////////////////////////////////////////////////////////////////////////////
 impl<T: RealScalar> Distance<T, Vector3<T>> for Plane<T> {
-    fn distance(&self, other: &Vector3<T>) -> Option<T> {
-        let n = self.normal();
-        let nom = Vector3::dot(other, &n) + self.constant();
-        let normal_length_squared = Vector3::dot(&n, &n);
-        if normal_length_squared <= T::epsilon() * T::epsilon() {
-            return None;
-        }
-
-        // Plane coefficients need not be normalized at the representation
-        // boundary, so use the general |n·p + d| / |n| equation.
-        Some(T::tabs(nom) / normal_length_squared.tsqrt())
+    fn try_distance(&self, other: &Vector3<T>) -> Result<T, MathError> {
+        let metric = checked_normalized3(&self.normal())?;
+        let constant = metric.checked_divide_by_length(self.constant())?;
+        constant
+            .try_add(Vector3::try_dot(&metric.unit(), other)?)?
+            .try_abs()
     }
 }
 
 impl<T: RealScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
-    fn distance(&self, other: &Vector3<T>) -> Option<T> {
-        Segment::distance(self, other, T::epsilon())
+    fn try_distance(&self, other: &Vector3<T>) -> Result<T, MathError> {
+        let (_, closest) = self
+            .closest_point_on_segment(other, T::epsilon())
+            .ok_or(MathError::Degenerate)?;
+        Vector3::try_sub_vv(&closest, other)?.try_length()
     }
 }
 
@@ -113,24 +125,24 @@ fn update_slab_interval<T: RealScalar>(
     ray_dir: T,
     tmin: &mut Option<T>,
     tmax: &mut Option<T>,
-) -> bool {
+) -> Result<bool, MathError> {
     if ray_dir == <T as Zero>::zero() {
-        return ray_start >= slab_min && ray_start <= slab_max;
+        return Ok(ray_start >= slab_min && ray_start <= slab_max);
     }
 
-    let mut t0 = (slab_min - ray_start) / ray_dir;
-    let mut t1 = (slab_max - ray_start) / ray_dir;
+    let mut t0 = slab_min.try_sub(ray_start)?.try_div(ray_dir)?;
+    let mut t1 = slab_max.try_sub(ray_start)?.try_div(ray_dir)?;
     if t0 > t1 {
         core::mem::swap(&mut t0, &mut t1);
     }
 
     *tmin = Some(tmin.map_or(t0, |old| T::max(old, t0)));
     *tmax = Some(tmax.map_or(t1, |old| T::min(old, t1)));
-    tmin.unwrap() <= tmax.unwrap()
+    Ok(tmin.unwrap() <= tmax.unwrap())
 }
 
 impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
-    fn intersect(&self, other: &Ray<T, Vector3<T>>) -> bool {
+    fn try_intersect(&self, other: &Ray<T, Vector3<T>>) -> Result<bool, MathError> {
         // Slab test for an axis-aligned box.
         //
         // The running interval `[tmin, tmax]` contains all ray parameters `t`
@@ -141,6 +153,19 @@ impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
         // handle `direction == 0` explicitly instead of depending on direct
         // division for every axis. That avoids `0/0 -> NaN` when a ray starts on
         // a slab boundary and is parallel to that axis.
+        if !other.start.is_finite()
+            || !other.direction.is_finite()
+            || !self.min.is_finite()
+            || !self.max.is_finite()
+        {
+            return Err(MathError::NonFinite);
+        }
+        if !T::norm_exceeds(
+            &[other.direction.x, other.direction.y, other.direction.z],
+            <T as Zero>::zero(),
+        )? {
+            return Err(MathError::Degenerate);
+        }
         let mut tmin = None;
         let mut tmax = None;
 
@@ -151,8 +176,8 @@ impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
             other.direction.x,
             &mut tmin,
             &mut tmax,
-        ) {
-            return false;
+        )? {
+            return Ok(false);
         }
         if !update_slab_interval(
             self.min.y,
@@ -161,8 +186,8 @@ impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
             other.direction.y,
             &mut tmin,
             &mut tmax,
-        ) {
-            return false;
+        )? {
+            return Ok(false);
         }
         if !update_slab_interval(
             self.min.z,
@@ -171,44 +196,43 @@ impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
             other.direction.z,
             &mut tmin,
             &mut tmax,
-        ) {
-            return false;
+        )? {
+            return Ok(false);
         }
 
         // Intersect the final slab interval with the forward-ray constraint
         // `t >= 0`. Touching the box boundary counts as an intersection.
-        tmax.map_or(true, |end| {
+        Ok(tmax.map_or(true, |end| {
             end >= T::max(tmin.unwrap_or_else(<T as Zero>::zero), <T as Zero>::zero())
-        })
+        }))
     }
 }
 
 impl<T: RealScalar> Intersect<Sphere3<T>> for Box3<T> {
-    fn intersect(&self, other: &Sphere3<T>) -> bool {
-        let mut dist = <T as Zero>::zero();
-
-        let c = other.center;
-        let r = other.radius;
-
-        if c.x < self.min.x {
-            dist += T::squared(c.x - self.min.x)
-        } else if c.x > self.max.x {
-            dist += T::squared(c.x - self.max.x)
+    fn try_intersect(&self, other: &Sphere3<T>) -> Result<bool, MathError> {
+        let center = other.center;
+        if !center.is_finite() || !self.min.is_finite() || !self.max.is_finite() {
+            return Err(MathError::NonFinite);
         }
-
-        if c.y < self.min.y {
-            dist += T::squared(c.y - self.min.y)
-        } else if c.y > self.max.y {
-            dist += T::squared(c.y - self.max.y)
+        let mut distances = [<T as Zero>::zero(); 3];
+        for (i, (c, lo, hi)) in [
+            (center.x, self.min.x, self.max.x),
+            (center.y, self.min.y, self.max.y),
+            (center.z, self.min.z, self.max.z),
+        ]
+        .iter()
+        .copied()
+        .enumerate()
+        {
+            distances[i] = if c < lo {
+                lo.try_sub(c)?
+            } else if c > hi {
+                c.try_sub(hi)?
+            } else {
+                <T as Zero>::zero()
+            };
         }
-
-        if c.z < self.min.z {
-            dist += T::squared(c.z - self.min.z)
-        } else if c.z > self.max.z {
-            dist += T::squared(c.z - self.max.z)
-        }
-
-        r * r >= dist
+        Ok(!T::norm_exceeds(&distances, other.radius)?)
     }
 }
 
@@ -217,29 +241,20 @@ fn is_in_0_to_1_range<T: RealScalar>(x: T) -> bool {
 }
 
 impl<T: RealScalar> Intersect<Tri3<T>> for Sphere3<T> {
-    fn intersect(&self, tri: &Tri3<T>) -> bool {
-        let uvw = tri.barycentric_coordinates(&self.center);
+    fn try_intersect(&self, tri: &Tri3<T>) -> Result<bool, MathError> {
+        let uvw = tri.try_barycentric_coordinates(&self.center)?;
         let verts = tri.vertices();
-        let v0 = verts[0];
-        let v1 = verts[1];
-        let v2 = verts[2];
         if is_in_0_to_1_range(uvw.x) && is_in_0_to_1_range(uvw.y) && is_in_0_to_1_range(uvw.z) {
-            Plane::try_from_tri(&v0, &v1, &v2, T::epsilon()).is_some_and(|p| {
-                p.distance(&self.center)
-                    .is_some_and(|dist| dist <= self.radius)
-            })
+            let plane = Plane::try_from_tri(&verts[0], &verts[1], &verts[2], T::epsilon())
+                .ok_or(MathError::Degenerate)?;
+            Ok(plane.try_distance(&self.center)? <= self.radius)
         } else {
-            let d0 = Segment::new(&v0, &v1).distance(&self.center, T::epsilon());
-            let d1 = Segment::new(&v1, &v2).distance(&self.center, T::epsilon());
-            let d2 = Segment::new(&v2, &v0).distance(&self.center, T::epsilon());
-
-            match (d0, d1, d2) {
-                (Some(d0), Some(d1), Some(d2)) => {
-                    let m = T::min(d0, T::min(d1, d2));
-                    m <= self.radius
-                }
-                _ => false,
+            let mut minimum = None;
+            for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+                let distance = Segment::new(&verts[a], &verts[b]).try_distance(&self.center)?;
+                minimum = Some(minimum.map_or(distance, |old| T::min(old, distance)));
             }
+            Ok(minimum.expect("triangle has edges") <= self.radius)
         }
     }
 }
@@ -283,7 +298,14 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     tri: &Tri3<T>,
     epsilon: T,
     kind: TriangleIntersectionKind,
-) -> Option<(T, Vector3<T>)> {
+) -> Result<Option<(T, Vector3<T>)>, MathError> {
+    if !start.is_finite() {
+        return Err(MathError::NonFinite);
+    }
+    if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
+        return Err(MathError::InvalidTolerance);
+    }
+
     // Fetch and name each vertex once so all following vectors share `v0` as
     // their origin, matching the usual Möller–Trumbore derivation.
     let verts = tri.vertices();
@@ -294,17 +316,17 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // Subtracting finite but extremely separated coordinates can itself
     // overflow. The normalization helpers below reject such a result instead
     // of allowing an infinite edge to contaminate the intersection tuple.
-    let edge1 = v1 - v0;
-    let edge2 = v2 - v0;
+    let edge1 = Vector3::try_sub_vv(&v1, &v0)?;
+    let edge2 = Vector3::try_sub_vv(&v2, &v0)?;
 
     // Normalize each independent source vector exactly once. Retaining each
     // decomposition's scale metadata both avoids repeated square roots in the
     // angular predicates and later converts physical distances back into the
     // barycentric coordinates and original line parameter without forming a
     // potentially overflowing Euclidean length.
-    let normalized_edge1 = try_normalized3(&edge1)?;
-    let normalized_edge2 = try_normalized3(&edge2)?;
-    let normalized_direction = try_normalized3(direction)?;
+    let normalized_edge1 = checked_normalized3(&edge1)?;
+    let normalized_edge2 = checked_normalized3(&edge2)?;
+    let normalized_direction = checked_normalized3(direction)?;
     let edge1_unit = normalized_edge1.unit();
     let edge2_unit = normalized_edge2.unit();
     let direction_unit = normalized_direction.unit();
@@ -315,88 +337,92 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // unit directions without normalizing either edge for a second time. The
     // shared gate rejects degenerate or invalid classifications and allows only
     // a valid separated edge pair to proceed to the triangle normal.
-    return_none_unless_outside_angular_tolerance!(classify_nearly_parallel_normalized3(
-        &normalized_edge1,
-        &normalized_edge2,
-        epsilon,
-    ));
+    match classify_nearly_parallel_normalized3(&normalized_edge1, &normalized_edge2, epsilon) {
+        AngularClassification::OutsideTolerance => (),
+        AngularClassification::WithinTolerance => return Ok(None),
+        AngularClassification::Invalid => return Err(MathError::InvalidTolerance),
+    }
 
     // The cross of the unit edges has the triangle's normal direction and a
     // magnitude equal to the sine of their angle. Normalize that derived value
     // once after the degeneracy check, retaining the result for the following
     // direction-versus-plane orientation decision.
-    let triangle_normal = Vector3::cross(&edge1_unit, &edge2_unit);
-    let normalized_triangle_normal = try_normalized3(&triangle_normal)?;
+    let triangle_normal = Vector3::try_cross(&edge1_unit, &edge2_unit)?;
+    let normalized_triangle_normal = checked_normalized3(&triangle_normal)?;
 
     // A query direction perpendicular to the triangle normal lies parallel to
     // the triangle plane. Both operands are already normalized, so the cached
     // predicate reduces this decision to bounded unit-vector arithmetic. The
     // shared gate rejects in-plane or invalid classifications and lets only a
     // valid direction outside the tolerance band reach the intersection solve.
-    return_none_unless_outside_angular_tolerance!(classify_nearly_perpendicular_normalized3(
+    match classify_nearly_perpendicular_normalized3(
         &normalized_direction,
         &normalized_triangle_normal,
         epsilon,
-    ));
+    ) {
+        AngularClassification::OutsideTolerance => (),
+        AngularClassification::WithinTolerance => return Ok(None),
+        AngularClassification::Invalid => return Err(MathError::InvalidTolerance),
+    }
 
     // Use only unit vectors in the determinant. Its magnitude now depends on
     // angles, not on direction length or triangle area, and remains bounded
     // for every finite input accepted by the normalization helpers.
-    let pvec = Vector3::cross(&direction_unit, &edge2_unit);
-    let det = Vector3::dot(&edge1_unit, &pvec);
+    let pvec = Vector3::try_cross(&direction_unit, &edge2_unit)?;
+    let det = Vector3::try_dot(&edge1_unit, &pvec)?;
     if !is_finite_scalar(det) || det == <T as Zero>::zero() {
         // The angular checks mathematically imply a non-zero determinant. This
         // exact guard handles the residual possibility of floating-point
         // rounding collapsing it to zero without reintroducing a raw epsilon.
-        return None;
+        return Ok(None);
     }
 
     // Express the line origin relative to the triangle origin. Explicitly
     // reject overflow and invalid coordinates before using them in cross/dot
     // products, since NaN would otherwise bypass every ordered comparison.
-    let tvec = *start - v0;
+    let tvec = Vector3::try_sub_vv(start, &v0)?;
     if !is_finite_vector3(&tvec) {
-        return None;
+        return Ok(None);
     }
 
     // Solving against unit edge 1 first yields a physical distance along that
     // edge. Divide by the original edge length to recover dimensionless `u`.
-    let edge1_distance = Vector3::dot(&tvec, &pvec) / det;
+    let edge1_distance = Vector3::try_dot(&tvec, &pvec)?.try_div(det)?;
     if !is_finite_scalar(edge1_distance) {
-        return None;
+        return Ok(None);
     }
-    let u = normalized_edge1.divide_by_length(edge1_distance)?;
-    if u < -epsilon || u > <T as One>::one() + epsilon {
-        return None;
+    let u = normalized_edge1.checked_divide_by_length(edge1_distance)?;
+    if u < -epsilon || u > <T as One>::one().try_add(epsilon)? {
+        return Ok(None);
     }
 
     // The second Cramer numerator is shared by the second barycentric
     // coordinate and the signed travel distance along the unit direction.
-    let qvec = Vector3::cross(&tvec, &edge1_unit);
+    let qvec = Vector3::try_cross(&tvec, &edge1_unit)?;
     if !is_finite_vector3(&qvec) {
-        return None;
+        return Ok(None);
     }
 
     // As for `u`, the normalized solve first produces a physical distance;
     // divide by edge 2's original length to obtain dimensionless `v`.
-    let edge2_distance = Vector3::dot(&direction_unit, &qvec) / det;
+    let edge2_distance = Vector3::try_dot(&direction_unit, &qvec)?.try_div(det)?;
     if !is_finite_scalar(edge2_distance) {
-        return None;
+        return Ok(None);
     }
-    let v = normalized_edge2.divide_by_length(edge2_distance)?;
-    if v < -epsilon || u + v > <T as One>::one() + T::two() * epsilon {
-        return None;
+    let v = normalized_edge2.checked_divide_by_length(edge2_distance)?;
+    if v < -epsilon || u.try_add(v)? > <T as One>::one().try_add(T::two().try_mul(epsilon)?)? {
+        return Ok(None);
     }
 
     // With a unit direction this numerator produces signed physical travel
     // distance `tau`. Its sign is therefore the correct ray-domain decision,
     // independent of the magnitude of the caller's stored direction.
-    let tau = Vector3::dot(&edge2_unit, &qvec) / det;
+    let tau = Vector3::try_dot(&edge2_unit, &qvec)?.try_div(det)?;
     if !is_finite_scalar(tau) {
-        return None;
+        return Ok(None);
     }
     if matches!(kind, TriangleIntersectionKind::Ray) && tau < <T as Zero>::zero() {
-        return None;
+        return Ok(None);
     }
 
     // Convert unit-distance travel back to the parameter of the original
@@ -404,14 +430,17 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // inversely while leaving the represented point unchanged. Unlike internal
     // barycentric coordinates, this returned parameter must not round a
     // nonzero travel distance to zero: callers need it to reconstruct the hit.
-    let t = normalized_direction.divide_by_length_preserving_nonzero(tau)?;
+    let t = normalized_direction.checked_divide_by_length(tau)?;
+    if tau != <T as Zero>::zero() && t == <T as Zero>::zero() {
+        return Err(MathError::Overflow);
+    }
 
     // Construct the point from the unit direction and physical distance. This
     // avoids multiplying a huge direction by a tiny parameter (or vice versa),
     // either of which can overflow or underflow before their scales cancel.
-    let point = *start + direction_unit * tau;
+    let point = Vector3::try_add_vv(start, &Vector3::try_mul_vs(&direction_unit, tau)?)?;
     if !is_finite_scalar(t) || !is_finite_vector3(&point) {
-        return None;
+        return Ok(None);
     }
 
     // Staged division is ambiguous only at the zero/minimum-subnormal boundary:
@@ -421,17 +450,17 @@ fn triangle_intersection_from_point_dir<T: RealScalar>(
     // component and reject a tuple whose `t` cannot reproduce its physical point.
     let zero = <T as Zero>::zero();
     if t != zero && t.tabs() * T::half() == zero {
-        let parameterized_point = *start + *direction * t;
+        let parameterized_point = Vector3::try_add_vv(start, &Vector3::try_mul_vs(direction, t)?)?;
         if parameterized_point.x != point.x
             || parameterized_point.y != point.y
             || parameterized_point.z != point.z
         {
-            return None;
+            return Ok(None);
         }
     }
 
     // All geometric, domain, and floating-point validity checks succeeded.
-    Some((t, point))
+    Ok(Some((t, point)))
 }
 
 impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>> {
@@ -441,7 +470,7 @@ impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>
     /// non-finite, dimensionlessly degenerate, and near-parallel inputs return
     /// `None`; every successful result has `t >= 0`. A hit also returns `None`
     /// if its parameter in the ray's stored direction scale is not representable.
-    fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
+    fn try_intersection(&self, tri: &Tri3<T>) -> Result<Option<(T, Vector3<T>)>, MathError> {
         // Select the ray domain while sharing all normalized orientation and
         // barycentric arithmetic with the infinite-line implementation.
         triangle_intersection_from_point_dir(
@@ -462,7 +491,7 @@ impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<T
     /// `None`; negative and positive line parameters are both accepted. A hit
     /// also returns `None` if its parameter in the line's stored direction scale
     /// is not representable.
-    fn intersection(&self, tri: &Tri3<T>) -> Option<(T, Vector3<T>)> {
+    fn try_intersection(&self, tri: &Tri3<T>) -> Result<Option<(T, Vector3<T>)>, MathError> {
         // Select the unbounded line domain while sharing all normalized
         // orientation and barycentric arithmetic with the ray implementation.
         triangle_intersection_from_point_dir(
@@ -477,19 +506,25 @@ impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<T
 
 impl<T: RealScalar> Intersection<(T, Vector3<T>), Ray<T, Vector3<T>>> for Tri3<T> {
     /// Returns the same forward hit with the [`Intersection`] operands reversed.
-    fn intersection(&self, ray: &Ray<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
+    fn try_intersection(
+        &self,
+        ray: &Ray<T, Vector3<T>>,
+    ) -> Result<Option<(T, Vector3<T>)>, MathError> {
         // Keep the symmetric trait surface a pure delegate so parameter,
         // boundary, and invalid-input semantics cannot diverge.
-        ray.intersection(self)
+        ray.try_intersection(self)
     }
 }
 
 impl<T: RealScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3<T> {
     /// Returns the same infinite-line hit with the [`Intersection`] operands reversed.
-    fn intersection(&self, line: &Line<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
+    fn try_intersection(
+        &self,
+        line: &Line<T, Vector3<T>>,
+    ) -> Result<Option<(T, Vector3<T>)>, MathError> {
         // Keep the symmetric trait surface a pure delegate so parameter,
         // boundary, and invalid-input semantics cannot diverge.
-        line.intersection(self)
+        line.try_intersection(self)
     }
 }
 
@@ -1213,7 +1248,7 @@ mod tests {
                 epsilon,
                 super::TriangleIntersectionKind::Ray,
             )
-            .is_none());
+            .is_err());
             assert!(super::triangle_intersection_from_point_dir(
                 &start,
                 &direction,
@@ -1221,7 +1256,7 @@ mod tests {
                 epsilon,
                 super::TriangleIntersectionKind::Line,
             )
-            .is_none());
+            .is_err());
         }
     }
 

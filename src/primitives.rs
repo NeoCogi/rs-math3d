@@ -79,6 +79,7 @@
 
 use crate::scalar::*;
 use crate::vector::*;
+use crate::MathError;
 use num_traits::{One, Zero};
 
 /// A 2D dimension with width and height.
@@ -230,7 +231,20 @@ impl<T: Scalar> Box3<T> {
 impl<T: RealScalar> Box3<T> {
     /// Returns the center point of the box.
     pub fn center(&self) -> Vector3<T> {
-        (self.max + self.min) * T::half()
+        Vector3::new(
+            T::sum_products(&[
+                (self.max.x, T::half(), false),
+                (self.min.x, T::half(), false),
+            ]),
+            T::sum_products(&[
+                (self.max.y, T::half(), false),
+                (self.min.y, T::half(), false),
+            ]),
+            T::sum_products(&[
+                (self.max.z, T::half(), false),
+                (self.min.z, T::half(), false),
+            ]),
+        )
     }
     /// Returns the half-extents of the box from center to max.
     pub fn extent(&self) -> Vector3<T> {
@@ -303,10 +317,10 @@ impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
     ///
     /// Returns `None` if the direction is too small.
     pub fn new(p: &V, d: &V, epsilon: T) -> Option<Self> {
-        let d_ss = V::dot(d, d);
-        if d_ss <= epsilon * epsilon {
+        if !p.is_finite() {
             return None;
         }
+        d.checked_normalize(epsilon).ok()?;
         Some(Self {
             p: *p,
             d: *d,
@@ -319,7 +333,7 @@ impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
     ///
     /// Returns `None` if the points are too close.
     pub fn from_start_end(s: &V, e: &V, epsilon: T) -> Option<Self> {
-        let dir = *e - *s;
+        let dir = V::try_sub_vv(e, s).ok()?;
         Self::new(s, &dir, epsilon)
     }
     /// Finds the closest point on the line to a given point.
@@ -330,18 +344,12 @@ impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
     ///
     /// Returns `None` if the line direction is too small.
     pub fn closest_point_on_line(&self, p: &V, epsilon: T) -> Option<(T, V)> {
-        let p_dir = *p - self.p;
-
-        let d_sp = V::dot(&self.d, &p_dir);
-        let d_ss = V::dot(&self.d, &self.d);
-
-        if d_ss <= epsilon * epsilon {
-            return None;
-        }
-
-        let t = d_sp / d_ss;
-
-        Some((t, self.p + self.d * t))
+        let direction = self.d.checked_normalize(epsilon).ok()?;
+        let delta = V::try_sub_vv(p, &self.p).ok()?;
+        let travel = V::try_dot(&direction, &delta).ok()?;
+        let t = travel.try_div(self.d.try_length().ok()?).ok()?;
+        let point = V::try_add_vv(&self.p, &V::try_mul_vs(&direction, travel).ok()?).ok()?;
+        Some((t, point))
     }
 
     /// Returns a line with normalized direction vector.
@@ -395,32 +403,43 @@ pub fn shortest_segment3d_between_lines3d<T: RealScalar>(
 
     let unit0 = direction0.unit();
     let unit1 = direction1.unit();
-    let separation = line0.p - line1.p;
+    let separation = Vector3::try_sub_vv(&line0.p, &line1.p).ok()?;
 
     // For unit directions, the Gram determinant is |u0 x u1|^2. Computing it
     // from the cross product avoids the cancellation in 1 - dot(u0, u1)^2 for
     // nearly parallel lines.
-    let cross = Vector3::cross(&unit0, &unit1);
-    let denominator = Vector3::dot(&cross, &cross);
+    let cross = Vector3::try_cross(&unit0, &unit1).ok()?;
+    let denominator = Vector3::try_dot(&cross, &cross).ok()?;
     if !is_finite_scalar(denominator) || denominator <= <T as Zero>::zero() {
         return None;
     }
 
     // Solve the two normal equations in distance-along-unit-direction space.
     // These parameters are independent of the magnitudes stored in line.d.
-    let direction_dot = Vector3::dot(&unit0, &unit1);
-    let projection0 = Vector3::dot(&unit0, &separation);
-    let projection1 = Vector3::dot(&unit1, &separation);
-    let distance0 = (direction_dot * projection1 - projection0) / denominator;
-    let distance1 = (projection1 - direction_dot * projection0) / denominator;
+    let direction_dot = Vector3::try_dot(&unit0, &unit1).ok()?;
+    let projection0 = Vector3::try_dot(&unit0, &separation).ok()?;
+    let projection1 = Vector3::try_dot(&unit1, &separation).ok()?;
+    let distance0 = direction_dot
+        .try_mul(projection1)
+        .ok()?
+        .try_sub(projection0)
+        .ok()?
+        .try_div(denominator)
+        .ok()?;
+    let distance1 = projection1
+        .try_sub(direction_dot.try_mul(projection0).ok()?)
+        .ok()?
+        .try_div(denominator)
+        .ok()?;
     if !is_finite_scalar(distance0) || !is_finite_scalar(distance1) {
         return None;
     }
 
     // Reconstruct the closest point on each line from unit directions. This
     // avoids multiplying an extreme stored direction by an inverse-scale t.
-    let start = line0.p + unit0 * distance0;
-    let end = line1.p + unit1 * distance1;
+    let start =
+        Vector3::try_add_vv(&line0.p, &Vector3::try_mul_vs(&unit0, distance0).ok()?).ok()?;
+    let end = Vector3::try_add_vv(&line1.p, &Vector3::try_mul_vs(&unit1, distance1).ok()?).ok()?;
     if !is_finite_vector3(&start) || !is_finite_vector3(&end) {
         return None;
     }
@@ -459,32 +478,27 @@ impl<T: RealScalar, V: RealVector<T>> Segment<T, V> {
     ///
     /// Returns `None` if the segment is too small.
     pub fn closest_point_on_segment(&self, p: &V, epsilon: T) -> Option<(T, V)> {
-        let dir = self.e - self.s;
-        let p_dir = *p - self.s;
-
-        let d_sp = V::dot(&dir, &p_dir);
-        let d_ss = V::dot(&dir, &dir);
-
-        if d_ss <= epsilon * epsilon {
-            return None;
-        }
-
-        if d_sp < <T as Zero>::zero() {
+        let delta = V::try_sub_vv(&self.e, &self.s).ok()?;
+        let direction = delta.checked_normalize(epsilon).ok()?;
+        let length = delta.try_length().ok()?;
+        let offset = V::try_sub_vv(p, &self.s).ok()?;
+        let travel = V::try_dot(&direction, &offset).ok()?;
+        if travel <= <T as Zero>::zero() {
             return Some((<T as Zero>::zero(), self.s));
-        } else if d_sp > d_ss {
+        }
+        if travel >= length {
             return Some((<T as One>::one(), self.e));
         }
-
-        let t = d_sp / d_ss;
-
-        Some((t, self.s + dir * t))
+        let t = travel.try_div(length).ok()?;
+        let point = V::try_add_vv(&self.s, &V::try_mul_vs(&direction, travel).ok()?).ok()?;
+        Some((t, point))
     }
     /// Computes the distance from a point to the segment.
     ///
     /// Returns `None` if the segment is too small.
     pub fn distance(&self, p: &V, epsilon: T) -> Option<T> {
-        self.closest_point_on_segment(p, epsilon)
-            .map(|(_, p_on_seg)| V::length(&(p_on_seg - *p)))
+        let (_, closest) = self.closest_point_on_segment(p, epsilon)?;
+        V::try_sub_vv(&closest, p).ok()?.try_length().ok()
     }
 }
 
@@ -516,14 +530,12 @@ impl<T: RealScalar, V: RealVector<T>> Ray<T, V> {
     ///
     /// Returns `None` if the direction is too small.
     pub fn new(start: &V, direction: &V, epsilon: T) -> Option<Self> {
-        let d_ss = V::dot(direction, direction);
-        if d_ss <= epsilon * epsilon {
+        if !start.is_finite() {
             return None;
         }
-        let inv_len = <T as One>::one() / d_ss.tsqrt();
         Some(Self {
             start: *start,
-            direction: *direction * inv_len,
+            direction: direction.checked_normalize(epsilon).ok()?,
             t: core::marker::PhantomData,
         })
     }
@@ -569,15 +581,17 @@ impl<T: RealScalar> Ray<T, Vector3<T>> {
         // currently store a unit normal, but keeping this general also handles
         // internally constructed coefficient-scaled planes consistently.
         let unit_constant = normal_metric.divide_by_length(p.constant())?;
-        let numerator = unit_constant + Vector3::dot(&unit_normal, &self.start);
-        let denominator = Vector3::dot(&unit_normal, &unit_direction);
+        let numerator = unit_constant
+            .try_add(Vector3::try_dot(&unit_normal, &self.start).ok()?)
+            .ok()?;
+        let denominator = Vector3::try_dot(&unit_normal, &unit_direction).ok()?;
         if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
             return None;
         }
 
         // `distance` is physical travel along the unit ray direction, so its
         // sign is unaffected by positive rescaling of the stored direction.
-        let distance = -numerator / denominator;
+        let distance = numerator.try_neg().ok()?.try_div(denominator).ok()?;
         if !is_finite_scalar(distance) || distance < <T as Zero>::zero() {
             return None;
         }
@@ -587,7 +601,11 @@ impl<T: RealScalar> Ray<T, Vector3<T>> {
         // possibly extreme parameter scale and would add avoidable rounding or
         // overflow risk. Positive direction rescaling leaves both operands in
         // this expression unchanged.
-        let point = self.start + unit_direction * distance;
+        let point = Vector3::try_add_vv(
+            &self.start,
+            &Vector3::try_mul_vs(&unit_direction, distance).ok()?,
+        )
+        .ok()?;
         is_finite_vector3(&point).then_some(point)
     }
 }
@@ -636,6 +654,20 @@ impl<T: RealScalar> Tri3<T> {
         &self.vertices
     }
 
+    /// Computes barycentric coordinates with checked normalized Gram solving.
+    /// Degenerate axes and unrepresentable arithmetic are explicit errors.
+    pub fn try_barycentric_coordinates(&self, point: &Vector3<T>) -> Result<Vector3<T>, MathError> {
+        let x = Vector3::try_sub_vv(&self.vertices[1], &self.vertices[0])?;
+        let y = Vector3::try_sub_vv(&self.vertices[2], &self.vertices[0])?;
+        let delta = Vector3::try_sub_vv(point, &self.vertices[0])?;
+        let uv = checked_span_coordinates(&x, &y, &delta)?;
+        Ok(Vector3::new(
+            <T as One>::one().try_sub(uv.x)?.try_sub(uv.y)?,
+            uv.x,
+            uv.y,
+        ))
+    }
+
     /// Computes barycentric coordinates of a point in the triangle plane.
     ///
     /// This method assumes the triangle is non-degenerate. When the triangle
@@ -660,6 +692,35 @@ impl<T: RealScalar> Tri3<T> {
         let u = <T as One>::one() - v - w;
         Vector3::new(u, v, w)
     }
+}
+
+/// Solves coefficients of a point offset in two independent spanning axes.
+/// Unit axes keep the Gram determinant dimensionless; cached lengths convert
+/// physical coordinates back to each axis's represented parameterization.
+fn checked_span_coordinates<T: RealScalar>(
+    x: &Vector3<T>,
+    y: &Vector3<T>,
+    delta: &Vector3<T>,
+) -> Result<Vector2<T>, MathError> {
+    let x = checked_normalized3(x)?;
+    let y = checked_normalized3(y)?;
+    let ux = x.unit();
+    let uy = y.unit();
+    let a = Vector3::try_dot(&ux, &ux)?;
+    let b = Vector3::try_dot(&ux, &uy)?;
+    let c = Vector3::try_dot(&uy, &uy)?;
+    let d = Vector3::try_dot(delta, &ux)?;
+    let e = Vector3::try_dot(delta, &uy)?;
+    let det = T::try_sum_products(&[(a, c, false), (b, b, true)])?;
+    if det <= <T as Zero>::zero() {
+        return Err(MathError::Degenerate);
+    }
+    let cx = T::try_sum_products(&[(d, c, false), (e, b, true)])?.try_div(det)?;
+    let cy = T::try_sum_products(&[(e, a, false), (d, b, true)])?.try_div(det)?;
+    Ok(Vector2::new(
+        x.checked_divide_by_length(cx)?,
+        y.checked_divide_by_length(cy)?,
+    ))
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -700,12 +761,12 @@ impl<T: RealScalar> Plane<T> {
     /// Returns `None` if `n` is too small to normalize.
     pub fn try_new(n: &Vector3<T>, p: &Vector3<T>, epsilon: T) -> Option<Self> {
         let norm = n.try_normalize(epsilon)?;
-        let d = Vector3::dot(&norm, p);
+        let d = Vector3::try_dot(&norm, p).ok()?;
         Some(Self {
             a: norm.x,
             b: norm.y,
             c: norm.z,
-            d: -d,
+            d: d.try_neg().ok()?,
         })
     }
 
@@ -770,7 +831,30 @@ impl<T: RealScalar> Plane<T> {
         // Derive a scale-stable unit normal from the diagonals before choosing
         // the centroid used to anchor the representative plane equation.
         let n = try_quad_normal(v0, v1, v2, v3, epsilon)?;
-        let c = (*v0 + *v1 + *v2 + *v3) * T::quarter();
+        let q = T::quarter();
+        let c = Vector3::new(
+            T::try_sum_products(&[
+                (v0.x, q, false),
+                (v1.x, q, false),
+                (v2.x, q, false),
+                (v3.x, q, false),
+            ])
+            .ok()?,
+            T::try_sum_products(&[
+                (v0.y, q, false),
+                (v1.y, q, false),
+                (v2.y, q, false),
+                (v3.y, q, false),
+            ])
+            .ok()?,
+            T::try_sum_products(&[
+                (v0.z, q, false),
+                (v1.z, q, false),
+                (v2.z, q, false),
+                (v3.z, q, false),
+            ])
+            .ok()?,
+        );
         Self::try_new(&n, &c, epsilon)
     }
 
@@ -826,8 +910,10 @@ impl<T: RealScalar> Plane<T> {
         let unit_normal = normal_metric.unit();
         let unit_direction = direction_metric.unit();
         let unit_constant = normal_metric.divide_by_length(self.constant())?;
-        let numerator = unit_constant + Vector3::dot(&unit_normal, &line.p);
-        let denominator = Vector3::dot(&unit_normal, &unit_direction);
+        let numerator = unit_constant
+            .try_add(Vector3::try_dot(&unit_normal, &line.p).ok()?)
+            .ok()?;
+        let denominator = Vector3::try_dot(&unit_normal, &unit_direction).ok()?;
         if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
             return None;
         }
@@ -835,7 +921,7 @@ impl<T: RealScalar> Plane<T> {
         // Solve first in physical distance along a unit direction. Dividing by
         // the stored direction length then restores the caller's original line
         // parameterization without using an overflow-prone raw length.
-        let distance = -numerator / denominator;
+        let distance = numerator.try_neg().ok()?.try_div(denominator).ok()?;
         if !is_finite_scalar(distance) {
             return None;
         }
@@ -849,7 +935,11 @@ impl<T: RealScalar> Plane<T> {
         // potentially extreme reciprocal pair `line.d * t`. Both expressions
         // represent the same point, but the unit-direction form remains bounded
         // over a much wider range of stored direction magnitudes.
-        let point = line.p + unit_direction * distance;
+        let point = Vector3::try_add_vv(
+            &line.p,
+            &Vector3::try_mul_vs(&unit_direction, distance).ok()?,
+        )
+        .ok()?;
         if !is_finite_vector3(&point) {
             return None;
         }
@@ -863,7 +953,8 @@ impl<T: RealScalar> Plane<T> {
         // vector multiply and comparison on the interactive-query hot path.
         let zero = <T as Zero>::zero();
         if t != zero && t.tabs() * T::half() == zero {
-            let parameterized_point = line.p + line.d * t;
+            let parameterized_point =
+                Vector3::try_add_vv(&line.p, &Vector3::try_mul_vs(&line.d, t).ok()?).ok()?;
             if parameterized_point.x != point.x
                 || parameterized_point.y != point.y
                 || parameterized_point.z != point.z
@@ -982,18 +1073,15 @@ impl<T: RealScalar> ParametricPlane<T> {
     /// axes, so non-orthogonal axes are handled correctly. The axes must still
     /// be linearly independent; otherwise the returned coordinates are
     /// non-finite.
-    pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
-        let p = *v - self.center;
-        let g00 = Vector3::dot(&self.x_axis, &self.x_axis);
-        let g01 = Vector3::dot(&self.x_axis, &self.y_axis);
-        let g11 = Vector3::dot(&self.y_axis, &self.y_axis);
-        let rhs0 = Vector3::dot(&p, &self.x_axis);
-        let rhs1 = Vector3::dot(&p, &self.y_axis);
-        let det = g00 * g11 - g01 * g01;
+    /// Projects with a checked, dimensionless Gram system for independent axes.
+    pub fn try_project(&self, value: &Vector3<T>) -> Result<Vector2<T>, MathError> {
+        let delta = Vector3::try_sub_vv(value, &self.center)?;
+        checked_span_coordinates(&self.x_axis, &self.y_axis, &delta)
+    }
 
-        let x_coord = (rhs0 * g11 - rhs1 * g01) / det;
-        let y_coord = (rhs1 * g00 - rhs0 * g01) / det;
-        Vector2::new(x_coord, y_coord)
+    pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
+        self.try_project(v)
+            .expect("parametric plane projection failed")
     }
 }
 
@@ -1027,8 +1115,8 @@ pub fn try_tri_normal<T: RealScalar>(
 ) -> Option<Vector3<T>> {
     // Translate vertices into edge directions before applying a dimensionless
     // shape test; the absolute triangle area is not a degeneracy criterion.
-    let v10 = *v1 - *v0;
-    let v20 = *v2 - *v0;
+    let v10 = Vector3::try_sub_vv(v1, v0).ok()?;
+    let v20 = Vector3::try_sub_vv(v2, v0).ok()?;
     try_normal_from_spanning_vectors(&v10, &v20, epsilon)
 }
 
@@ -1069,8 +1157,8 @@ pub fn try_quad_normal<T: RealScalar>(
 ) -> Option<Vector3<T>> {
     // Diagonal magnitudes depend on the caller's coordinate scale, so only
     // their validity and relative orientation participate in this decision.
-    let v20 = *v2 - *v0;
-    let v31 = *v3 - *v1;
+    let v20 = Vector3::try_sub_vv(v2, v0).ok()?;
+    let v31 = Vector3::try_sub_vv(v3, v1).ok()?;
     try_normal_from_spanning_vectors(&v20, &v31, epsilon)
 }
 
@@ -1107,7 +1195,7 @@ fn try_normal_from_spanning_vectors<T: RealScalar>(
     // the orientation required by plane constructors.
     let left_unit = left_metric.unit();
     let right_unit = right_metric.unit();
-    let cross = Vector3::cross(&left_unit, &right_unit);
+    let cross = Vector3::try_cross(&left_unit, &right_unit).ok()?;
     Some(try_normalized3(&cross)?.unit())
 }
 

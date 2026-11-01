@@ -181,6 +181,8 @@ macro_rules! return_none_unless_outside_angular_tolerance {
 }
 
 pub mod basis;
+mod error;
+pub mod fixed;
 mod math;
 pub mod matrix;
 pub mod primitives;
@@ -193,6 +195,8 @@ pub mod transforms;
 pub mod vector;
 
 pub use basis::*;
+pub use error::MathError;
+pub use fixed::{Fixed, S15_16, S23_8, S47_16};
 pub use matrix::{Matrix2, Matrix3, Matrix4};
 pub use primitives::*;
 pub use quaternion::Quat;

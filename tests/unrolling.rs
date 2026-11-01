@@ -251,3 +251,79 @@ fn short_float_dispatch_preserves_left_to_right_evaluation() {
     );
     assert_eq!(f32::norm_exceeds(&[f32::MAX, f32::MAX], 1.0), Ok(true));
 }
+
+#[test]
+fn expanded_octants_preserve_public_corner_order() {
+    use rs_math3d::{Box3, Vector3};
+    type F = Fixed<i32, 8>;
+    let scalar = |n| F::try_from_int(n).unwrap();
+    let low = Vector3::new(scalar(-2), scalar(-4), scalar(-6));
+    let high = Vector3::new(scalar(2), scalar(4), scalar(6));
+    let bounds = Box3::new(&low, &high);
+    let octants = bounds.subdivide();
+    let corners = [
+        [0, 1, 0],
+        [1, 1, 0],
+        [1, 1, 1],
+        [0, 1, 1],
+        [0, 0, 0],
+        [1, 0, 0],
+        [1, 0, 1],
+        [0, 0, 1],
+    ];
+    for (octant, corner) in octants.iter().zip(corners) {
+        assert_eq!(octant.min.x, if corner[0] == 0 { low.x } else { F::ZERO });
+        assert_eq!(octant.min.y, if corner[1] == 0 { low.y } else { F::ZERO });
+        assert_eq!(octant.min.z, if corner[2] == 0 { low.z } else { F::ZERO });
+        assert_eq!(octant.max.x, if corner[0] == 1 { high.x } else { F::ZERO });
+        assert_eq!(octant.max.y, if corner[1] == 1 { high.y } else { F::ZERO });
+        assert_eq!(octant.max.z, if corner[2] == 1 { high.z } else { F::ZERO });
+    }
+}
+
+#[test]
+fn expanded_queries_cover_each_axis_and_triangle_edge() {
+    use rs_math3d::{Box3, Intersect, Sphere3, Tri3, Vector3};
+    type F = Fixed<i32, 8>;
+    let scalar = |n| F::try_from_int(n).unwrap();
+    let origin = Vector3::new(F::ZERO, F::ZERO, F::ZERO);
+    let one = Vector3::new(F::ONE, F::ONE, F::ONE);
+    let bounds = Box3::new(&origin, &one);
+    let half = F::try_from_ratio(1, 2).unwrap();
+    for center in [
+        Vector3::new(scalar(2), half, half),
+        Vector3::new(half, scalar(2), half),
+        Vector3::new(half, half, scalar(2)),
+    ] {
+        assert!(bounds.try_intersect(&Sphere3::new(center, F::ONE)).unwrap());
+    }
+    let corner = Vector3::new(scalar(2), scalar(2), scalar(2));
+    assert!(!bounds
+        .try_intersect(&Sphere3::new(corner, F::try_from_ratio(3, 2).unwrap()))
+        .unwrap());
+    assert!(bounds
+        .try_intersect(&Sphere3::new(corner, F::try_from_ratio(7, 4).unwrap()))
+        .unwrap());
+    let triangle = Tri3::new([
+        origin,
+        Vector3::new(scalar(4), F::ZERO, F::ZERO),
+        Vector3::new(F::ZERO, scalar(4), F::ZERO),
+    ]);
+    for (center, radius) in [
+        (Vector3::new(scalar(2), scalar(-1), F::ZERO), F::ONE),
+        (
+            Vector3::new(scalar(3), scalar(3), F::ZERO),
+            F::try_from_ratio(3, 2).unwrap(),
+        ),
+        (Vector3::new(scalar(-1), scalar(2), F::ZERO), F::ONE),
+    ] {
+        assert!(Sphere3::new(center, radius)
+            .try_intersect(&triangle)
+            .unwrap());
+    }
+    assert!(
+        !Sphere3::new(Vector3::new(scalar(2), scalar(-2), F::ZERO), F::ONE)
+            .try_intersect(&triangle)
+            .unwrap()
+    );
+}

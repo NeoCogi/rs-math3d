@@ -256,10 +256,30 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
     /// Each tuple contains `(left, right, subtract_product)`.
     #[inline(always)]
     pub(crate) fn sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
+        // Row elimination repeatedly uses two products. Sharing that expanded
+        // kernel avoids duplicating wide signed-magnitude bookkeeping in every
+        // matrix cell, while retaining an exact, loop-free two-term schedule.
+        if let [left, right] = terms {
+            return Self::sum_products_pair(left, right);
+        }
         let mut accumulator = Accumulator::default();
         unroll_short_slice!(terms, &(a,b,subtract) => {
             accumulator.add(a.bits.widen() * b.bits.widen(), subtract)?;
         });
+        Self::raw(accumulator.finish(F)?)
+    }
+
+    /// Accumulates exactly two signed products without an iterator or counter.
+    /// Keep the wide bookkeeping shared across expanded matrix/geometry calls;
+    /// only the final result is rounded and checked against the scalar range.
+    #[inline(never)]
+    fn sum_products_pair(
+        left: &(Self, Self, bool),
+        right: &(Self, Self, bool),
+    ) -> Result<Self, MathError> {
+        let mut accumulator = Accumulator::default();
+        accumulator.add(left.0.bits.widen() * left.1.bits.widen(), left.2)?;
+        accumulator.add(right.0.bits.widen() * right.1.bits.widen(), right.2)?;
         Self::raw(accumulator.finish(F)?)
     }
     /// Parses signed integer/fractional digits in radices 2 through 36.

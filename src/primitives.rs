@@ -255,36 +255,28 @@ impl<T: RealScalar> Box3<T> {
     ///
     /// Returns an array of 8 boxes representing the octree subdivision.
     pub fn subdivide(&self) -> [Self; 8] {
-        let cube_table: [Vector3<i32>; 8] = [
-            Vector3::new(0, 1, 0),
-            Vector3::new(1, 1, 0),
-            Vector3::new(1, 1, 1),
-            Vector3::new(0, 1, 1),
-            Vector3::new(0, 0, 0),
-            Vector3::new(1, 0, 0),
-            Vector3::new(1, 0, 1),
-            Vector3::new(0, 0, 1),
-        ];
-
-        let ps: [Vector3<T>; 2] = [self.min, self.max];
-        let mut vs = [Vector3::zero(); 8];
-        for i in 0..8 {
-            vs[i] = Vector3::new(
-                ps[cube_table[i].x as usize].x,
-                ps[cube_table[i].y as usize].y,
-                ps[cube_table[i].z as usize].z,
-            );
+        let center = self.center();
+        // Each literal corner emits one octant directly, preserving the public
+        // octant order without scratch corner arrays or runtime iteration.
+        macro_rules! octant {
+            ($x:ident,$y:ident,$z:ident) => {{
+                let corner = Vector3::new(self.$x.x, self.$y.y, self.$z.z);
+                Self::new(
+                    &Vector3::min(&center, &corner),
+                    &Vector3::max(&center, &corner),
+                )
+            }};
         }
-
-        let c = self.center();
-        let mut out = [Box3 {
-            min: Vector3::zero(),
-            max: Vector3::zero(),
-        }; 8];
-        for i in 0..8 {
-            out[i] = Self::new(&Vector3::min(&c, &vs[i]), &Vector3::max(&c, &vs[i]));
-        }
-        out
+        [
+            octant!(min, max, min),
+            octant!(max, max, min),
+            octant!(max, max, max),
+            octant!(min, max, max),
+            octant!(min, min, min),
+            octant!(max, min, min),
+            octant!(max, min, max),
+            octant!(min, min, max),
+        ]
     }
 }
 

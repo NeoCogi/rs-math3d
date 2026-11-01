@@ -201,6 +201,38 @@ This does not remove cofactor/determinant range limits; row mode addresses a
 different set of intermediate-range cases. Benchmark both on the intended
 target with `cargo run --release --example inverse_modes`.
 
+### Explicit expansion of fixed iteration counts
+
+The 2×2, 3×3 and 4×4 matrix kernels expand their index ranges into statements,
+including row-inverse setup, pivot search, elimination and products. Vector
+component reductions and scalar slices of lengths zero through four likewise
+have expanded paths. Three-axis/edge queries and eight-octant subdivision use
+explicit operations. These paths do not rely on compiler loop-unrolling
+heuristics, including in debug builds. Arithmetic/error evaluation order and
+fixed-point rounding remain unchanged; data-dependent checks still branch.
+Two-product fixed accumulation uses a shared, explicitly expanded kernel so
+wide bookkeeping is not duplicated in every row-elimination cell.
+
+CORDIC's 97 steps are expanded into seven explicit chunk calls: six chunks of
+16 steps and one final step. The Q96 working state and chunk functions are shared
+across fixed formats. Chunk functions deliberately remain separate to bound
+optimizer work and avoid duplicating the large schedule per format. Vectoring
+still exits immediately when its residual becomes exactly zero; later chunks
+are skipped. The expansion is checked against iterative internal Q96 references
+before destination rounding, as well as the existing analytic references.
+
+Public scalar slices longer than four keep a runtime fallback. Text processing,
+searches and integer-root convergence retain their input-dependent iteration.
+Tests and constant-generation tools retain iterative reference algorithms.
+
+Run `python3 tools/check_unrolled_codegen.py` to inspect optimized host LLVM
+control flow for `f32`, `f64`, `Fixed<i32, 8>` and `Fixed<i64, 16>` matrix/dot
+consumers and the shared CORDIC functions. The check detects control-flow cycles
+rather than assuming every backward jump is a loop. It validates the current
+host compiler's output; instruction selection and performance on other targets
+can differ. Explicit expansion trades code size for reduced iteration overhead,
+so use the timing harness on the deployment target.
+
 Checked normalization uses max-component scaling and compares fixed norms
 against tolerances before quantizing squared values. It handles tiny nonzero
 vectors and directions whose unscaled length would overflow. Fixed

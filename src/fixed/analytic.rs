@@ -42,6 +42,103 @@ fn rounded_sqrt(value: u128) -> u128 {
     root + (value - root * root > root) as u128
 }
 
+/// Guarded CORDIC working state, owned by each expanded chunk and passed to
+/// the next. All fields use Q96; rotation starts with reciprocal gain and
+/// vectoring starts with guarded first-quadrant coordinates.
+struct CordicState {
+    /// Current horizontal coordinate.
+    x: i128,
+    /// Current vertical coordinate; exact zero terminates vectoring.
+    y: i128,
+    /// Residual rotation angle or accumulated vectoring angle.
+    angle: i128,
+}
+
+// Seven literal chunk starts cover exactly the generated 97 entries.
+const _: [(); 97] = [(); constants::ANGLES.len()];
+
+/// Expands at most sixteen literal-index rotation steps. Non-inlining keeps
+/// optimizer work bounded and shares code across all destination formats;
+/// chunk calls themselves are also explicitly expanded, with no control loop.
+#[inline(never)]
+fn cordic_rotate_chunk<const START: usize>(mut state: CordicState) -> CordicState {
+    unroll_indices!(offset in [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15] {
+        let i = START+offset;
+        if i < constants::ANGLES.len() {
+            let direction = if state.angle >= 0 {1} else {-1};
+            let next_x = state.x-direction*(state.y >> i);
+            state.y += direction*(state.x >> i);
+            state.x = next_x;
+            state.angle -= direction*constants::ANGLES[i];
+        }
+    });
+    state
+}
+
+/// Expands a vectoring chunk while preserving the exact residual-zero exit.
+/// `Break` is terminal and bypasses every remaining chunk; `Continue` owns the
+/// next working state. Literal out-of-table steps in the last chunk disappear
+/// at compile time. Non-inlining avoids optimizing a single huge branch graph.
+#[inline(never)]
+fn cordic_vectoring_chunk<const START: usize>(
+    mut state: CordicState,
+) -> core::ops::ControlFlow<i128, CordicState> {
+    unroll_indices!(offset in [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15] {
+        let i = START+offset;
+        if i < constants::ANGLES.len() {
+            if state.y == 0 { return core::ops::ControlFlow::Break(state.angle); }
+            let direction = if state.y > 0 {1} else {-1};
+            let next_x = state.x+direction*(state.y >> i);
+            state.y -= direction*(state.x >> i);
+            state.x = next_x;
+            state.angle += direction*constants::ANGLES[i];
+        }
+    });
+    core::ops::ControlFlow::Continue(state)
+}
+
+/// Runs all 97 rotation steps through seven explicit chunk calls. Q96 work is
+/// independent of storage width/fractional precision and shared across formats.
+fn cordic_rotate(angle: i128) -> (i128, i128) {
+    let state = CordicState {
+        x: constants::GAIN,
+        y: 0,
+        angle,
+    };
+    let state = cordic_rotate_chunk::<0>(state);
+    let state = cordic_rotate_chunk::<16>(state);
+    let state = cordic_rotate_chunk::<32>(state);
+    let state = cordic_rotate_chunk::<48>(state);
+    let state = cordic_rotate_chunk::<64>(state);
+    let state = cordic_rotate_chunk::<80>(state);
+    let state = cordic_rotate_chunk::<96>(state);
+    (state.y, state.x)
+}
+
+/// Runs the vectoring schedule with a terminal check at each chunk boundary.
+/// Exact-zero residuals return the same accumulated angle as the iterative
+/// algorithm without executing arithmetic or calls for later chunks.
+fn cordic_vectoring(x: i128, y: i128) -> i128 {
+    let mut state = CordicState { x, y, angle: 0 };
+    /// Propagates a terminal angle without hiding it in a boolean flag.
+    macro_rules! chunk {
+        ($start:literal) => {
+            match cordic_vectoring_chunk::<$start>(state) {
+                core::ops::ControlFlow::Continue(next) => state = next,
+                core::ops::ControlFlow::Break(angle) => return angle,
+            }
+        };
+    }
+    chunk!(0);
+    chunk!(16);
+    chunk!(32);
+    chunk!(48);
+    chunk!(64);
+    chunk!(80);
+    chunk!(96);
+    state.angle
+}
+
 impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     /// Computes a correctly rounded fixed square root without a float backend.
     pub fn try_sqrt(self) -> Result<Self, MathError> {
@@ -87,16 +184,8 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
             angle = -constants::PI - angle;
             cosine_sign = -1;
         }
-        let mut x = constants::GAIN;
-        let mut y = 0;
-        for (i, &step) in constants::ANGLES.iter().enumerate() {
-            let direction = if angle >= 0 { 1 } else { -1 };
-            let next_x = x - direction * (y >> i);
-            y += direction * (x >> i);
-            x = next_x;
-            angle -= direction * step;
-        }
-        (y, x * cosine_sign)
+        let (sin, cos) = cordic_rotate(angle);
+        (sin, cos * cosine_sign)
     }
 
     /// Integer-only sine, rounded to this format's quantum.
@@ -133,19 +222,7 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
         }
         let x = raw.abs() << (62 - F);
         let y = integer_sqrt((1u128 << 124) - (x * x) as u128) as i128;
-        let mut x = x << 34;
-        let mut y = y << 34;
-        let mut angle = 0;
-        for (i, &step) in constants::ANGLES.iter().enumerate() {
-            if y == 0 {
-                break;
-            }
-            let direction = if y > 0 { 1 } else { -1 };
-            let next_x = x + direction * (y >> i);
-            y -= direction * (x >> i);
-            x = next_x;
-            angle += direction * step;
-        }
+        let angle = cordic_vectoring(x << 34, y << 34);
         Self::from_q96(if raw < 0 {
             constants::PI - angle
         } else {
@@ -269,5 +346,75 @@ impl<R: RealFormat<F>, const F: u32> RealScalar for Fixed<R, F> {
             }
         });
         Ok(squared > threshold)
+    }
+}
+
+#[cfg(test)]
+mod unrolling_tests {
+    //! Compare guarded internal states, not only rounded destination values,
+    //! so even an omitted final table step is observable in these regressions.
+    use super::*;
+
+    /// Original iterative rotation schedule retained as an independent oracle.
+    fn reference_rotate(mut angle: i128) -> (i128, i128) {
+        let mut x = constants::GAIN;
+        let mut y = 0;
+        for (i, &step) in constants::ANGLES.iter().enumerate() {
+            let direction = if angle >= 0 { 1 } else { -1 };
+            let next_x = x - direction * (y >> i);
+            y += direction * (x >> i);
+            x = next_x;
+            angle -= direction * step;
+        }
+        (y, x)
+    }
+
+    /// Original vectoring schedule preserves the exact residual-zero exit.
+    fn reference_vectoring(mut x: i128, mut y: i128) -> i128 {
+        let mut angle = 0;
+        for (i, &step) in constants::ANGLES.iter().enumerate() {
+            if y == 0 {
+                break;
+            }
+            let direction = if y > 0 { 1 } else { -1 };
+            let next_x = x + direction * (y >> i);
+            y -= direction * (x >> i);
+            x = next_x;
+            angle += direction * step;
+        }
+        angle
+    }
+
+    #[test]
+    fn expanded_rotation_preserves_every_guard_bit() {
+        for raw in i16::MIN..=i16::MAX {
+            let angle = raw as i128 * constants::PI / (2 * (1i128 << 15));
+            assert_eq!(cordic_rotate(angle), reference_rotate(angle));
+        }
+        for angle in [-constants::PI / 2, -1, 0, 1, constants::PI / 2] {
+            assert_eq!(cordic_rotate(angle), reference_rotate(angle));
+        }
+    }
+
+    #[test]
+    fn expanded_vectoring_preserves_guard_bits_and_early_exits() {
+        for raw in -256i128..=256 {
+            let x = raw.abs() << 54;
+            let y = integer_sqrt((1u128 << 124) - (x * x) as u128) as i128;
+            assert_eq!(
+                cordic_vectoring(x << 34, y << 34),
+                reference_vectoring(x << 34, y << 34)
+            );
+        }
+        for (x, y) in [
+            (0, 0),
+            (1i128 << 96, 0),
+            (1i128 << 95, 1i128 << 95),
+            (0, 1i128 << 96),
+            (1i128 << 96, 1),
+            (1, 1i128 << 96),
+        ] {
+            assert_eq!(cordic_vectoring(x, y), reference_vectoring(x, y));
+        }
     }
 }

@@ -61,8 +61,8 @@ fn main() {
     let fixed = matrix
         .try_cast::<Fixed<i32, 16>>()
         .expect("fixture fits fixed scalar");
-    for mode in [InverseMode::Reciprocal, InverseMode::Rows] {
-        measure("f32", matrix, mode, iterations);
-        measure("S15.16", fixed, mode, iterations);
-    }
+    measure("f32", matrix, InverseMode::Reciprocal, iterations);
+    measure("S15.16", fixed, InverseMode::Reciprocal, iterations);
+    measure("f32", matrix, InverseMode::Rows, iterations);
+    measure("S15.16", fixed, InverseMode::Rows, iterations);
 }

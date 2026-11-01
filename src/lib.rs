@@ -42,6 +42,8 @@
 //! - **Real scalar analytic math**: Normalization, inverses, quaternions, transforms, rays,
 //!   planes, and geometric queries are available to floating-point and suitable fixed-point scalars
 //! - **Column-major matrices**: Compatible with OpenGL and similar APIs
+//! - **Explicit fixed-size expansion**: Matrix, vector, query and fixed analytic
+//!   kernels expand known iteration counts without relying on loop heuristics
 //! - **Comprehensive real math**: Full suite of vector, matrix, and quaternion operations for
 //!   `f32`, `f64`, and signed fixed-point formats
 //! - **Geometric primitives**: Rays, planes, triangles, spheres, and more

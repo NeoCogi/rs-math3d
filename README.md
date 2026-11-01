@@ -41,6 +41,11 @@ The fixed reciprocal retains guard precision even if scalar `1/det` rounds to ze
 Run `cargo run --release --example inverse_modes` to compare both on your target,
 or `cargo run --no-default-features --example fixed_scene` for a fixed-only scene.
 
+Fixed-count numeric kernels use explicit expansion for matrix dimensions, vector
+reductions, geometry queries and CORDIC steps. Run
+`python3 tools/check_unrolled_codegen.py` to check optimized host control flow;
+the fixed-point guide describes the remaining input-dependent loops and tradeoffs.
+
 ## Usage
 
 Hosted applications use the default `std` backend. This includes crates marked

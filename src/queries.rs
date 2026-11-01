@@ -214,24 +214,21 @@ impl<T: RealScalar> Intersect<Sphere3<T>> for Box3<T> {
         if !center.is_finite() || !self.min.is_finite() || !self.max.is_finite() {
             return Err(MathError::NonFinite);
         }
-        let mut distances = [<T as Zero>::zero(); 3];
-        for (i, (c, lo, hi)) in [
-            (center.x, self.min.x, self.max.x),
-            (center.y, self.min.y, self.max.y),
-            (center.z, self.min.z, self.max.z),
-        ]
-        .iter()
-        .copied()
-        .enumerate()
-        {
-            distances[i] = if c < lo {
-                lo.try_sub(c)?
+        // The three axes are explicit; checked subtraction order stays x/y/z.
+        let distance = |c: T, lo: T, hi: T| -> Result<T, MathError> {
+            if c < lo {
+                lo.try_sub(c)
             } else if c > hi {
-                c.try_sub(hi)?
+                c.try_sub(hi)
             } else {
-                <T as Zero>::zero()
-            };
-        }
+                Ok(<T as Zero>::zero())
+            }
+        };
+        let distances = [
+            distance(center.x, self.min.x, self.max.x)?,
+            distance(center.y, self.min.y, self.max.y)?,
+            distance(center.z, self.min.z, self.max.z)?,
+        ];
         Ok(!T::norm_exceeds(&distances, other.radius)?)
     }
 }
@@ -249,12 +246,10 @@ impl<T: RealScalar> Intersect<Tri3<T>> for Sphere3<T> {
                 .ok_or(MathError::Degenerate)?;
             Ok(plane.try_distance(&self.center)? <= self.radius)
         } else {
-            let mut minimum = None;
-            for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-                let distance = Segment::new(&verts[a], &verts[b]).try_distance(&self.center)?;
-                minimum = Some(minimum.map_or(distance, |old| T::min(old, distance)));
-            }
-            Ok(minimum.expect("triangle has edges") <= self.radius)
+            let d01 = Segment::new(&verts[0], &verts[1]).try_distance(&self.center)?;
+            let d12 = Segment::new(&verts[1], &verts[2]).try_distance(&self.center)?;
+            let d20 = Segment::new(&verts[2], &verts[0]).try_distance(&self.center)?;
+            Ok(T::min(T::min(d01, d12), d20) <= self.radius)
         }
     }
 }

@@ -34,6 +34,9 @@
 //! # Examples
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+//! # {
 //! use rs_math3d::transforms;
 //! use rs_math3d::vector::Vector3;
 //!
@@ -47,6 +50,8 @@
 //!     0.1,                   // Near plane
 //!     100.0                  // Far plane
 //! );
+//! # }
+//! # }
 //! ```
 
 use crate::matrix::*;
@@ -127,7 +132,7 @@ pub fn scale<T: Scalar>(scale: Vector3<T>) -> Matrix4<T> {
 ///
 /// The quaternion is normalized before conversion so the result is always a
 /// pure rotation matrix.
-pub fn rotation_from_quat<T: FloatScalar>(q: &Quat<T>) -> Matrix4<T> {
+pub fn rotation_from_quat<T: RealScalar>(q: &Quat<T>) -> Matrix4<T> {
     Quat::mat4(q)
 }
 
@@ -141,7 +146,7 @@ pub fn rotation_from_quat<T: FloatScalar>(q: &Quat<T>) -> Matrix4<T> {
 /// # Returns
 /// - `Some(matrix)` for a valid axis
 /// - `None` if the axis length is too small
-pub fn rotation_from_axis_angle<T: FloatScalar>(
+pub fn rotation_from_axis_angle<T: RealScalar>(
     axis: &Vector3<T>,
     angle: T,
     epsilon: T,
@@ -152,7 +157,7 @@ pub fn rotation_from_axis_angle<T: FloatScalar>(
 /// Transforms a 3D vector by a 4x4 matrix with perspective division.
 ///
 /// The vector is treated as a point (w=1) and the result is divided by w.
-pub fn transform_vec3<T: FloatScalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
+pub fn transform_vec3<T: RealScalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
     let v4 = Vector4::new(v.x, v.y, v.z, <T as One>::one());
     let vout = *m * v4;
     Vector3::new(vout.x / vout.w, vout.y / vout.w, vout.z / vout.w)
@@ -169,7 +174,7 @@ pub fn transform_vec3<T: FloatScalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3
 ///
 /// # Returns
 /// Screen coordinates with z in \[0,1\] (0=near, 1=far)
-pub fn project3<T: FloatScalar>(
+pub fn project3<T: RealScalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
     lb: &Vector2<T>,
@@ -201,7 +206,7 @@ pub fn project3<T: FloatScalar>(
 ///
 /// # Returns
 /// The corresponding 3D world point
-pub fn unproject3<T: FloatScalar>(
+pub fn unproject3<T: RealScalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
     lb: &Vector2<T>,
@@ -231,7 +236,7 @@ pub fn unproject3<T: FloatScalar>(
 /// - `rtf`: Right-top-far corner (x, y, z)
 ///
 /// The frustum is defined by the near and far clipping planes.
-pub fn frustum<T: FloatScalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
+pub fn frustum<T: RealScalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
     let width = rtf.x - lbn.x;
     let height = rtf.y - lbn.y;
     let depth = rtf.z - lbn.z;
@@ -268,7 +273,7 @@ pub fn frustum<T: FloatScalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T>
 /// - `near`, `far`: Z-axis bounds (depth)
 ///
 /// Objects maintain their size regardless of depth in orthographic projection.
-pub fn ortho4<T: FloatScalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) -> Matrix4<T> {
+pub fn ortho4<T: RealScalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) -> Matrix4<T> {
     let width = right - left;
     let height = top - bottom;
     let depth = far - near;
@@ -307,7 +312,7 @@ pub fn ortho4<T: FloatScalar>(left: T, right: T, bottom: T, top: T, near: T, far
 /// - `far`: Far clipping plane distance
 ///
 /// Uses the standard OpenGL perspective projection formula.
-pub fn perspective<T: FloatScalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T> {
+pub fn perspective<T: RealScalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T> {
     let f = <T as One>::one() / T::ttan(fovy * T::half());
     let denom = near - far;
     let a = (far + near) / denom;
@@ -348,7 +353,7 @@ pub fn perspective<T: FloatScalar>(fovy: T, aspect: T, near: T, far: T) -> Matri
 ///
 /// This routine performs unchecked normalization. Violating the preconditions
 /// yields non-finite matrix components.
-pub fn lookat<T: FloatScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
+pub fn lookat<T: RealScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
     let f = Vector3::normalize(&(*dest - *eye));
     let s = Vector3::normalize(&Vector3::cross(&f, up));
     let u = Vector3::normalize(&Vector3::cross(&s, &f));
@@ -389,7 +394,7 @@ pub fn lookat<T: FloatScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<
 /// ```
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct AffineParts<T: FloatScalar> {
+pub struct AffineParts<T: RealScalar> {
     /// Translation applied after the linear transform.
     pub translation: Vector3<T>,
     /// Proper rotation represented by a unit quaternion.
@@ -408,8 +413,8 @@ pub struct AffineParts<T: FloatScalar> {
 /// canonicalized to three negative scale components and a proper rotation.
 ///
 /// Returns `None` for projective matrices or when any QR pivot is at or below
-/// [`FloatScalar::epsilon`].
-pub fn decompose_affine<T: FloatScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>> {
+/// [`RealScalar::epsilon`].
+pub fn decompose_affine<T: RealScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>> {
     let epsilon = T::epsilon();
     if !m.is_affine(epsilon) {
         return None;
@@ -479,9 +484,9 @@ pub fn decompose_affine<T: FloatScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>
 ///
 /// This compatibility wrapper uses [`decompose_affine`] and returns `None`
 /// when any absolute shear coefficient is greater than
-/// [`FloatScalar::epsilon`]. Coefficients inside that inclusive tolerance band
+/// [`RealScalar::epsilon`]. Coefficients inside that inclusive tolerance band
 /// are treated as numerical zero.
-pub fn decompose<T: FloatScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
+pub fn decompose<T: RealScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
     let parts = decompose_affine(m)?;
     let epsilon = T::epsilon();
     if parts.shear.x.tabs() > epsilon
@@ -494,7 +499,7 @@ pub fn decompose<T: FloatScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>,
     Some((parts.scale, parts.rotation, parts.translation))
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
 mod tests {
     use super::*;
 

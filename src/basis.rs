@@ -34,6 +34,9 @@
 //! # Examples
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+//! # {
 //! use rs_math3d::basis::{Basis, BasisPlane};
 //! use rs_math3d::vector::Vector3;
 //!
@@ -43,6 +46,8 @@
 //! // Create a basis with custom center
 //! let center = Vector3::new(10.0, 5.0, 0.0);
 //! let basis = Basis::default_with_center(&center);
+//! # }
+//! # }
 //! ```
 
 use crate::matrix::*;

@@ -47,6 +47,9 @@
 //! # Examples
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+//! # {
 //! use rs_math3d::primitives::{Ray, Plane, Tri3};
 //! use rs_math3d::vector::Vector3;
 //! use rs_math3d::EPS_F32;
@@ -70,6 +73,8 @@
 //!     EPS_F32,
 //! ).expect("plane normal should be valid");
 //! assert_eq!(plane.constant(), checked.constant());
+//! # }
+//! # }
 //! ```
 
 use crate::scalar::*;
@@ -222,7 +227,7 @@ impl<T: Scalar> Box3<T> {
     }
 }
 
-impl<T: FloatScalar> Box3<T> {
+impl<T: RealScalar> Box3<T> {
     /// Returns the center point of the box.
     pub fn center(&self) -> Vector3<T> {
         (self.max + self.min) * T::half()
@@ -293,7 +298,7 @@ pub struct Line<T: Scalar, V: Vector<T>> {
     t: core::marker::PhantomData<T>,
 }
 
-impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
+impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
     /// Creates a new line from a point and direction.
     ///
     /// Returns `None` if the direction is too small.
@@ -366,7 +371,7 @@ impl<T: FloatScalar, V: FloatVector<T>> Line<T, V> {
 /// Direction vectors are normalized only in temporary calculations. Their
 /// stored magnitudes and parameterizations are not changed, and independently
 /// rescaling either direction does not change the returned segment.
-pub fn shortest_segment3d_between_lines3d<T: FloatScalar>(
+pub fn shortest_segment3d_between_lines3d<T: RealScalar>(
     line0: &Line<T, Vector3<T>>,
     line1: &Line<T, Vector3<T>>,
     epsilon: T,
@@ -445,7 +450,7 @@ impl<T: Scalar, V: Vector<T>> Segment<T, V> {
     }
 }
 
-impl<T: FloatScalar, V: FloatVector<T>> Segment<T, V> {
+impl<T: RealScalar, V: RealVector<T>> Segment<T, V> {
     /// Finds the closest point on the segment to a given point.
     ///
     /// Returns:
@@ -506,7 +511,7 @@ pub struct Ray<T: Scalar, V: Vector<T>> {
     t: core::marker::PhantomData<T>,
 }
 
-impl<T: FloatScalar, V: FloatVector<T>> Ray<T, V> {
+impl<T: RealScalar, V: RealVector<T>> Ray<T, V> {
     /// Creates a new ray with normalized direction.
     ///
     /// Returns `None` if the direction is too small.
@@ -524,7 +529,7 @@ impl<T: FloatScalar, V: FloatVector<T>> Ray<T, V> {
     }
 }
 
-impl<T: FloatScalar> Ray<T, Vector3<T>> {
+impl<T: RealScalar> Ray<T, Vector3<T>> {
     /// Computes ray-plane intersection.
     ///
     /// Returns the intersection point, or `None` if the ray does not hit the
@@ -592,14 +597,14 @@ impl<T: FloatScalar> Ray<T, Vector3<T>> {
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct Sphere3<T: FloatScalar> {
+pub struct Sphere3<T: RealScalar> {
     /// Sphere center.
     pub center: Vector3<T>,
     /// Sphere radius.
     pub radius: T,
 }
 
-impl<T: FloatScalar> Sphere3<T> {
+impl<T: RealScalar> Sphere3<T> {
     /// Creates a sphere from center and radius.
     ///
     /// The radius is canonicalized with `abs(radius)`, so negative inputs are
@@ -617,11 +622,11 @@ impl<T: FloatScalar> Sphere3<T> {
 ////////////////////////////////////////////////////////////////////////////////
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct Tri3<T: FloatScalar> {
+pub struct Tri3<T: RealScalar> {
     vertices: [Vector3<T>; 3],
 }
 
-impl<T: FloatScalar> Tri3<T> {
+impl<T: RealScalar> Tri3<T> {
     /// Creates a triangle from three vertices.
     pub fn new(vertices: [Vector3<T>; 3]) -> Self {
         Self { vertices }
@@ -680,7 +685,7 @@ impl<T: Scalar> Plane<T> {
     }
 }
 
-impl<T: FloatScalar> Plane<T> {
+impl<T: RealScalar> Plane<T> {
     /// Creates a plane from a normal and a point on the plane.
     ///
     /// # Panics
@@ -885,7 +890,7 @@ pub struct ParametricPlane<T: Scalar> {
     pub y_axis: Vector3<T>,
 }
 
-impl<T: FloatScalar> ParametricPlane<T> {
+impl<T: RealScalar> ParametricPlane<T> {
     /// Creates a parametric plane from center and axes.
     pub fn new(center: &Vector3<T>, x_axis: &Vector3<T>, y_axis: &Vector3<T>) -> Self {
         Self {
@@ -918,7 +923,7 @@ impl<T: FloatScalar> ParametricPlane<T> {
     /// # Panics
     ///
     /// Panics if either axis is zero or non-finite, or if their sine-angle
-    /// magnitude is at most [`FloatScalar::epsilon`]. Use
+    /// magnitude is at most [`RealScalar::epsilon`]. Use
     /// [`ParametricPlane::try_normal`] for checked input.
     pub fn normal(&self) -> Vector3<T> {
         // The infallible convenience API applies the scalar's default angular
@@ -1000,9 +1005,9 @@ impl<T: FloatScalar> ParametricPlane<T> {
 /// # Panics
 ///
 /// Panics if either edge is zero or non-finite, or if the edges are parallel
-/// within [`FloatScalar::epsilon`]. Use [`try_tri_normal`] for checked input.
+/// within [`RealScalar::epsilon`]. Use [`try_tri_normal`] for checked input.
 ////////////////////////////////////////////////////////////////////////////////
-pub fn tri_normal<T: FloatScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
+pub fn tri_normal<T: RealScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
     // Apply the scalar's default dimensionless tolerance while keeping the
     // checked implementation authoritative for orientation and normalization.
     try_tri_normal(v0, v1, v2, T::epsilon()).expect("triangle must be non-degenerate")
@@ -1014,7 +1019,7 @@ pub fn tri_normal<T: FloatScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3
 /// angle between the edges is at most the dimensionless `epsilon` tolerance.
 /// The tolerance must be finite and in `0..=1`; invalid values return `None`.
 /// Edge magnitudes do not affect the decision or returned unit normal.
-pub fn try_tri_normal<T: FloatScalar>(
+pub fn try_tri_normal<T: RealScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
@@ -1037,9 +1042,9 @@ pub fn try_tri_normal<T: FloatScalar>(
 /// # Panics
 ///
 /// Panics if either diagonal is zero or non-finite, or if the diagonals are
-/// parallel within [`FloatScalar::epsilon`]. Use [`try_quad_normal`] for
+/// parallel within [`RealScalar::epsilon`]. Use [`try_quad_normal`] for
 /// checked input.
-pub fn quad_normal<T: FloatScalar>(
+pub fn quad_normal<T: RealScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
@@ -1055,7 +1060,7 @@ pub fn quad_normal<T: FloatScalar>(
 /// Returns `None` if either diagonal is zero or non-finite, or if the diagonals
 /// are parallel within the dimensionless angular `epsilon` tolerance. The
 /// tolerance must be finite and in `0..=1`; invalid values return `None`.
-pub fn try_quad_normal<T: FloatScalar>(
+pub fn try_quad_normal<T: RealScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
@@ -1075,7 +1080,7 @@ pub fn try_quad_normal<T: FloatScalar>(
 /// non-finite vectors and treats vectors whose sine-angle magnitude is at most
 /// `epsilon` as parallel. It uses only normalized temporary values, preventing
 /// the raw cross product from overflowing or underflowing with input scale.
-fn try_normal_from_spanning_vectors<T: FloatScalar>(
+fn try_normal_from_spanning_vectors<T: RealScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     epsilon: T,
@@ -1106,7 +1111,7 @@ fn try_normal_from_spanning_vectors<T: FloatScalar>(
     Some(try_normalized3(&cross)?.unit())
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
 mod tests {
     use super::*;
     use crate::queries::Distance;

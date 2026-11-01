@@ -6,16 +6,33 @@ utility traits for intersection and distance queries.
 
 ## Features
 
-- Vector math (2D/3D/4D), dot/cross products, swizzles, and float-only normalization helpers
-- Matrix math (2x2/3x3/4x4), determinants, and float-only inverses and affine fast-paths
-- Quaternions and transforms for floating-point rotations and projections
+- Vector math (2D/3D/4D), dot/cross products, swizzles, and real-scalar normalization helpers
+- Matrix math (2x2/3x3/4x4), determinants, and real-scalar inverses and affine fast-paths
+- Quaternions and transforms for floating-point and fixed-point rotations and projections
 - Geometric primitives: rays, planes, triangles, boxes, spheres, line segments
 - Query traits for intersection and distance computations
 - Standard-library math by default, with an explicit std-free `no_std` configuration
 
-Integer vectors, boxes, rectangles, and matrix arithmetic are supported for discrete geometry
-and storage. Operations that require fractional results, such as normalization, inversion,
-quaternions, transforms, rays, planes, and geometric queries, are restricted to `f32`/`f64`.
+Integer vectors, boxes, rectangles, and matrix arithmetic support discrete geometry and storage.
+`RealScalar` and `RealVector` provide analytic operations for `f32`, `f64`, and signed
+`Fixed<Repr, FRAC>` formats. For example, `Fixed<i32, 8>` is S23.8. Fixed analytic math
+uses integer arithmetic, including square root and trigonometry.
+
+```rust
+use rs_math3d::{Fixed, RealVector, Vector3};
+type F = Fixed<i32, 8>;
+let scalar: F = 1.5f32.into();
+let value: f64 = scalar.into();
+assert_eq!(value, 1.5);
+let direction = Vector3::new(scalar, F::ZERO, F::ONE);
+let unit = direction.checked_normalize(F::DELTA).unwrap();
+```
+
+`From`/`Into` work in both directions for `f32` and `f64`. Float-to-fixed conversions
+round nearest with ties to even and panic on non-finite or out-of-range inputs;
+`try_from_f32` and `try_from_f64` return `MathError` instead. Fixed-to-float conversions
+round when the float has insufficient significand precision. Raw bit construction,
+ratios, rescaling, parsing, and fixed arithmetic do not use floats.
 
 ## Usage
 
@@ -66,8 +83,9 @@ rs-math3d = { version = "0.14.0", default-features = false, features = ["system-
 library for downstream binaries. It is not a portable freestanding backend;
 use `libm` for embedded, WebAssembly, or other targets without Rust's `std`.
 
-A build with default features disabled and no backend selected is rejected at
-compile time. If dependency feature unification enables more than one backend,
+With default features disabled and no backend selected, fixed-point analytic math
+remains available without a floating-point runtime. Floating-point analytic operations
+require `std`, `libm`, or `system-libm`. If dependency feature unification enables more than one backend,
 precedence is `std`, then `libm`, then `system-libm`. Consequently,
 `system-libm`'s Unix restriction applies only when neither higher-precedence
 backend is active.

@@ -1,6 +1,35 @@
+// Copyright 2020-Present (c) Raja Lehtihet & Wael El Oraiby
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice,
+// this list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+// this list of conditions and the following disclaimer in the documentation
+// and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors
+// may be used to endorse or promote products derived from this software without
+// specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+
 //! Exhaustive small-format reference checks and wide conversion boundaries.
 
 use super::*;
+use crate::{RealScalar, RealVector, Scalar, Vector, Vector3};
 use std::{format, panic::catch_unwind};
 
 /// Converts the independent floating reference, whose tested dyadic operands
@@ -163,4 +192,152 @@ fn accumulation_keeps_cancellation_and_subquantum_products() {
         F::sum_products(&[(F::from_bits(8), F::from_bits(8), false); 4]).unwrap(),
         F::DELTA
     );
+}
+
+#[test]
+fn exhaustive_i16_analytic_reference_bounds() {
+    type F = Fixed<i16, 8>;
+    for raw in i16::MIN..=i16::MAX {
+        let value = F::from_bits(raw);
+        let angle = value.to_f64();
+        let (sin, cos) = value.try_sin_cos().unwrap();
+        assert!(
+            (sin.to_bits() as f64 - (angle.sin() * 256.0).round_ties_even()).abs() <= 1.0,
+            "sin({})",
+            angle
+        );
+        assert!(
+            (cos.to_bits() as f64 - (angle.cos() * 256.0).round_ties_even()).abs() <= 1.0,
+            "cos({})",
+            angle
+        );
+        if raw >= 0 {
+            assert_eq!(
+                value.try_sqrt().unwrap().to_bits(),
+                (angle.sqrt() * 256.0).round_ties_even() as i16
+            );
+        } else {
+            assert_eq!(value.try_sqrt(), Err(MathError::Domain));
+        }
+        if (-256..=256).contains(&raw) {
+            assert!(
+                (value.try_acos().unwrap().to_bits() as f64
+                    - (angle.acos() * 256.0).round_ties_even())
+                .abs()
+                    <= 1.0
+            );
+        }
+        let expected = angle.tan() * 256.0;
+        if expected.abs() < 32760.0 {
+            assert!(
+                (value.try_tan().unwrap().to_bits() as f64 - expected.round_ties_even()).abs()
+                    <= 1.0
+            );
+        }
+    }
+}
+
+#[test]
+fn vector_fixed_accumulation_and_tiny_normalization() {
+    type F = Fixed<i32, 8>;
+    let tiny = Vector3::new(F::DELTA, F::ZERO, F::ZERO);
+    assert_eq!(tiny.try_length().unwrap(), F::DELTA);
+    let unit = tiny.checked_normalize(F::ZERO).unwrap();
+    assert_eq!(unit.x, F::ONE);
+    assert!(tiny.try_normalize(F::DELTA).is_none());
+    assert_eq!(
+        tiny.checked_normalize(-F::DELTA).unwrap_err(),
+        MathError::InvalidTolerance
+    );
+    let ordinary = Vector3::new(
+        F::try_from_int(3).unwrap(),
+        F::try_from_int(4).unwrap(),
+        F::ZERO,
+    );
+    assert_eq!(ordinary.try_length().unwrap().to_f64(), 5.0);
+    let normalized = ordinary.checked_normalize(F::epsilon()).unwrap();
+    assert!((normalized.x.to_f64() - 0.6).abs() <= 1.0 / 256.0);
+    assert!((normalized.y.to_f64() - 0.8).abs() <= 1.0 / 256.0);
+    let left = F::try_from_int(2).unwrap() * ordinary;
+    assert_eq!(left.x.to_f64(), 6.0);
+    let fraction = F::from_bits(8);
+    let v = Vector3::new(fraction, fraction, fraction);
+    assert_eq!(Vector3::dot(&v, &v).to_bits(), 1);
+    // A large represented direction can normalize even when its length cannot
+    // fit its scalar format; normalization never constructs the raw magnitude.
+    let large = Vector3::new(F::max_value(), F::max_value(), F::ZERO);
+    assert_eq!(large.try_length(), Err(MathError::Overflow));
+    assert!(large.checked_normalize(F::epsilon()).is_ok());
+}
+
+#[test]
+fn analytic_domains_and_high_precision_formats() {
+    type F = Fixed<i64, 61>;
+    assert_eq!(F::ONE.try_sqrt().unwrap(), F::ONE);
+    assert_eq!(F::ZERO.try_sin().unwrap(), F::ZERO);
+    assert_eq!(F::ZERO.try_cos().unwrap(), F::ONE);
+    assert_eq!(F::ONE.try_acos().unwrap(), F::ZERO);
+    assert_eq!((F::ONE + F::DELTA).try_acos(), Err(MathError::Domain));
+    assert_eq!(
+        F::DELTA.try_sqrt().unwrap().to_bits(),
+        ((2.0f64).powi(61)).sqrt().round_ties_even() as i64
+    );
+    let quarter = F::quarter();
+    assert!((quarter.try_sin().unwrap().to_f64() - 0.25f64.sin()).abs() <= 1e-16);
+    assert!(((-quarter).try_acos().unwrap().to_f64() - (-0.25f64).acos()).abs() <= 4e-16);
+    // Low fractional precision and the largest integer magnitude exercise
+    // range reduction before increasing CORDIC's internal scale.
+    type G = Fixed<i64, 2>;
+    assert!(G::max_value().try_sin_cos().is_ok());
+    assert!(G::min_value().try_sin_cos().is_ok());
+    let minimum = F::min_value();
+    assert_eq!(RealScalar::try_abs(minimum), Err(MathError::Overflow));
+    assert_eq!(
+        <F as Scalar>::try_div(F::ONE, F::ZERO),
+        Err(MathError::DivisionByZero)
+    );
+}
+
+/// Checks guarded CORDIC against independent 120-digit Decimal Taylor values,
+/// including magnitudes where a binary float reference loses the input bits.
+fn check_wide_reference<const F: u32>()
+where
+    i64: RealFormat<F>,
+{
+    for line in include_str!("reference.csv")
+        .lines()
+        .filter(|s| !s.starts_with('#') && !s.is_empty())
+    {
+        let mut cells = line.split(',');
+        if cells.next().unwrap().parse::<u32>().unwrap() != F {
+            continue;
+        }
+        let raw = cells.next().unwrap().parse::<i64>().unwrap();
+        let sine = cells.next().unwrap().parse::<i64>().unwrap();
+        let cosine = cells.next().unwrap().parse::<i64>().unwrap();
+        let (actual_sine, actual_cosine) = Fixed::<i64, F>::from_bits(raw).try_sin_cos().unwrap();
+        assert!(
+            (actual_sine.to_bits() as i128 - sine as i128).abs() <= 1,
+            "sin S{}.{} raw={}",
+            63 - F,
+            F,
+            raw
+        );
+        assert!(
+            (actual_cosine.to_bits() as i128 - cosine as i128).abs() <= 1,
+            "cos S{}.{} raw={}",
+            63 - F,
+            F,
+            raw
+        );
+    }
+}
+
+#[test]
+fn full_range_cordic_matches_decimal_reference() {
+    check_wide_reference::<2>();
+    check_wide_reference::<8>();
+    check_wide_reference::<16>();
+    check_wide_reference::<32>();
+    check_wide_reference::<61>();
 }

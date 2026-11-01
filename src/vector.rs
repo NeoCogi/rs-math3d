@@ -33,7 +33,7 @@
 //!
 //! Integer vectors are supported for storage and discrete geometry. Operations that
 //! require fractional results, such as normalization, are available only through
-//! [`FloatVector`].
+//! [`RealVector`].
 //!
 //! Intersection code also uses crate-private, max-component-scaled 3D
 //! normalization helpers. Those helpers keep angular decisions independent of
@@ -44,12 +44,15 @@
 //! tolerance, outside it, or invalid—so invalid arithmetic cannot be confused
 //! with either geometric answer. Checked query call sites share one crate-local
 //! gate that continues only for a valid outside-tolerance classification. None
-//! of this changes the public [`FloatVector`] normalization methods.
+//! of this changes the public [`RealVector`] normalization methods.
 //!
 //! # Examples
 //!
 //! ```
-//! use rs_math3d::vector::{FloatVector, Vector, Vector3};
+//! # fn main() {
+//! # #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+//! # {
+//! use rs_math3d::vector::{RealVector, Vector, Vector3};
 //!
 //! let v1 = Vector3::new(1.0, 2.0, 3.0);
 //! let v2 = Vector3::new(4.0, 5.0, 6.0);
@@ -62,9 +65,12 @@
 //!
 //! // Normalization
 //! let normalized = v1.normalize();
+//! # }
+//! # }
 //! ```
 
 use crate::scalar::*;
+use crate::MathError;
 use core::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use num_traits::Zero;
 
@@ -123,6 +129,17 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
     /// ```
     fn dot(l: &Self, r: &Self) -> T;
 
+    /// Adds components with checked arithmetic.
+    fn try_add_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
+    /// Subtracts components with checked arithmetic.
+    fn try_sub_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
+    /// Multiplies every component with checked arithmetic.
+    fn try_mul_vs(l: &Self, r: T) -> Result<Self, MathError>;
+    /// Divides every component with zero/range checks.
+    fn try_div_vs(l: &Self, r: T) -> Result<Self, MathError>;
+    /// Computes a dot product with one fixed-point quantization.
+    fn try_dot(l: &Self, r: &Self) -> Result<T, MathError>;
+
     /// Returns a vector with the minimum components from both vectors.
     fn min(l: &Self, r: &Self) -> Self;
 
@@ -130,11 +147,11 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
     fn max(l: &Self, r: &Self) -> Self;
 }
 
-/// Trait for vectors with floating-point components.
+/// Trait for vectors with fractional real components, including fixed point.
 ///
 /// Extends the base `Vector` trait with operations that require
-/// floating-point arithmetic, such as length calculation and normalization.
-pub trait FloatVector<T: FloatScalar>: Vector<T> {
+/// fractional arithmetic, such as length calculation and normalization.
+pub trait RealVector<T: RealScalar>: Vector<T> {
     /// Computes the Euclidean length (magnitude) of the vector.
     ///
     /// For vector **v**:
@@ -142,6 +159,13 @@ pub trait FloatVector<T: FloatScalar>: Vector<T> {
     /// ||v|| = √(v₁² + v₂² + ... + vₙ²)
     /// ```
     fn length(&self) -> T;
+
+    /// Computes length with a checked, scale-aware scalar norm.
+    fn try_length(&self) -> Result<T, MathError>;
+
+    /// Normalizes through max-component scaling. Invalid tolerances, zero or
+    /// near-zero vectors, and unrepresentable arithmetic are explicit errors.
+    fn checked_normalize(&self, epsilon: T) -> Result<Self, MathError>;
 
     /// Returns a unit vector in the same direction.
     ///
@@ -173,12 +197,7 @@ pub trait FloatVector<T: FloatScalar>: Vector<T> {
 
     /// Returns a normalized vector or `None` when the length is too small.
     fn try_normalize(&self, epsilon: T) -> Option<Self> {
-        let len_sq = self.length_squared();
-        if len_sq <= epsilon * epsilon {
-            None
-        } else {
-            Some(*self / len_sq.tsqrt())
-        }
+        self.checked_normalize(epsilon).ok()
     }
 
     /// Returns a normalized vector or the zero vector when too small.
@@ -257,7 +276,12 @@ macro_rules! implVector {
 
         impl<T: Scalar> Vector<T> for $vecName<T> {
             fn zero() -> Self { Self { $($field: <T as Zero>::zero()),* } }
-            fn dot  (l: &Self, r: &Self) -> T { $(l.$field * r.$field +)* <T as Zero>::zero() }
+            fn try_add_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.try_add(r.$field)?),*)) }
+            fn try_sub_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.try_sub(r.$field)?),*)) }
+            fn try_mul_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.try_mul(r)?),*)) }
+            fn try_div_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.try_div(r)?),*)) }
+            fn try_dot(l: &Self, r: &Self) -> Result<T, MathError> { T::try_sum_products(&[$((l.$field,r.$field,false)),*]) }
+            fn dot  (l: &Self, r: &Self) -> T { T::sum_products(&[$((l.$field, r.$field, false)),*]) }
             fn add_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field + r.$field),*) }
             fn sub_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field - r.$field),*) }
             fn mul_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field * r.$field),*) }
@@ -306,6 +330,11 @@ macro_rules! implVector {
         implVecScalar!($vecName, i32);
         implVecScalar!($vecName, i64);
 
+        impl<R: crate::fixed::ScalarFormat<F>, const F: u32> Mul<$vecName<crate::Fixed<R,F>>> for crate::Fixed<R,F> {
+            type Output = $vecName<Self>;
+            fn mul(self, rhs: Self::Output) -> Self::Output { rhs * self }
+        }
+
         impl<T> Div for $vecName<T> where T:Scalar {
             type Output = $vecName<T>;
 
@@ -347,11 +376,23 @@ macro_rules! implVector {
     };
 }
 
-macro_rules! implFloatVector {
-    ($vecName:ident) => {
-        impl<T: FloatScalar> FloatVector<T> for $vecName<T> {
+macro_rules! implRealVector {
+    ($vecName:ident, $($field:ident),+) => {
+        impl<T: RealScalar> RealVector<T> for $vecName<T> {
             fn length(&self) -> T {
-                Self::dot(self, self).tsqrt()
+                // Float overflow retains IEEE behavior in this convenience
+                // operation; fixed callers use try_length to inspect errors.
+                Self::try_length(self).unwrap_or_else(|_| Self::dot(self,self).tsqrt())
+            }
+            fn try_length(&self) -> Result<T, MathError> { T::try_norm(&[$(self.$field),*]) }
+            fn checked_normalize(&self, epsilon: T) -> Result<Self, MathError> {
+                let values = [$(self.$field),*];
+                if !T::norm_exceeds(&values, epsilon)? { return Err(MathError::Degenerate); }
+                let mut scale = <T as Zero>::zero();
+                for &v in &values { scale = T::max(scale, v.try_abs()?); }
+                let scaled = Self::try_div_vs(self, scale)?;
+                let length = scaled.try_length()?;
+                Self::try_div_vs(&scaled, length)
             }
             fn normalize(&self) -> Self {
                 let len = Self::length(self);
@@ -428,9 +469,9 @@ implVector!(
     x y z w
 );
 
-implFloatVector!(Vector2);
-implFloatVector!(Vector3);
-implFloatVector!(Vector4);
+implRealVector!(Vector2, x, y);
+implRealVector!(Vector3, x, y, z);
+implRealVector!(Vector4, x, y, z, w);
 
 impl<T> CrossProduct for Vector3<T>
 where
@@ -447,9 +488,9 @@ where
     /// - **v** × **v** = **0**
     fn cross(l: &Vector3<T>, r: &Vector3<T>) -> Vector3<T> {
         Vector3::new(
-            l.y * r.z - l.z * r.y,
-            l.z * r.x - l.x * r.z,
-            l.x * r.y - l.y * r.x,
+            T::sum_products(&[(l.y, r.z, false), (l.z, r.y, true)]),
+            T::sum_products(&[(l.z, r.x, false), (l.x, r.z, true)]),
+            T::sum_products(&[(l.x, r.y, false), (l.y, r.x, true)]),
         )
     }
 }
@@ -470,7 +511,7 @@ where
 /// The type is crate-private because it supplies numerical machinery for
 /// geometric queries rather than a second public vector-normalization API.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Normalized3<T: FloatScalar> {
+pub(crate) struct Normalized3<T: RealScalar> {
     /// Unit-length direction of the original vector.
     unit: Vector3<T>,
     /// Largest absolute component of the original vector.
@@ -482,7 +523,7 @@ pub(crate) struct Normalized3<T: FloatScalar> {
     scaled_length: T,
 }
 
-impl<T: FloatScalar> Normalized3<T> {
+impl<T: RealScalar> Normalized3<T> {
     /// Returns the finite unit vector represented by this decomposition.
     pub(crate) fn unit(&self) -> Vector3<T> {
         // `Normalized3` can only be constructed by `try_normalized3`, which
@@ -587,20 +628,19 @@ pub(crate) enum AngularClassification {
     Invalid,
 }
 
-/// Returns whether a floating-point scalar is neither NaN nor infinity.
+/// Returns whether the scalar is a finite represented value.
 ///
-/// `FloatScalar` deliberately exposes only the analytic operations needed by
-/// this crate, not an `is_finite` method. A finite magnitude is strictly below
-/// the trait's positive-infinity value; comparisons with NaN evaluate to
-/// `false`, so this single comparison rejects all three non-finite cases.
-pub(crate) fn is_finite_scalar<T: FloatScalar>(value: T) -> bool {
+/// Fixed storage contains no exceptional bit patterns; checked arithmetic must
+/// reject overflow before producing a value. Float implementations reject both
+/// infinities and NaNs through their explicit finiteness capability.
+pub(crate) fn is_finite_scalar<T: RealScalar>(value: T) -> bool {
     // Absolute value maps both infinities to positive infinity while leaving a
     // NaN unordered, making the strict comparison sufficient for both cases.
-    value.tabs() < T::infinity()
+    value.is_finite()
 }
 
 /// Returns whether all three components of a 3D vector are finite.
-pub(crate) fn is_finite_vector3<T: FloatScalar>(vector: &Vector3<T>) -> bool {
+pub(crate) fn is_finite_vector3<T: RealScalar>(vector: &Vector3<T>) -> bool {
     // Test every component independently; accepting even one NaN or infinity
     // would make max-component scaling and orientation comparisons unordered.
     is_finite_scalar(vector.x) && is_finite_scalar(vector.y) && is_finite_scalar(vector.z)
@@ -612,7 +652,7 @@ pub(crate) fn is_finite_vector3<T: FloatScalar>(vector: &Vector3<T>) -> bool {
 /// length. The scaled components lie in `[-1, 1]`, so their squared sum cannot
 /// overflow and a nonzero subnormal input is not lost to underflow. `None` is
 /// returned for zero vectors and vectors containing NaN or infinity.
-pub(crate) fn try_normalized3<T: FloatScalar>(vector: &Vector3<T>) -> Option<Normalized3<T>> {
+pub(crate) fn try_normalized3<T: RealScalar>(vector: &Vector3<T>) -> Option<Normalized3<T>> {
     // A non-finite component could be hidden by generic min/max ordering, so
     // reject the complete input before selecting its largest magnitude.
     if !is_finite_vector3(vector) {
@@ -635,7 +675,7 @@ pub(crate) fn try_normalized3<T: FloatScalar>(vector: &Vector3<T>) -> Option<Nor
     }
 
     // The square root lies in [1, sqrt(3)] for an IEEE three-component input.
-    // Validate it explicitly because `FloatScalar` is implementable outside
+    // Validate it explicitly because `RealScalar` is implementable outside
     // this crate and may use a different analytic backend.
     let scaled_length = scaled_length_squared.tsqrt();
     if !is_finite_scalar(scaled_length) || scaled_length <= <T as Zero>::zero() {
@@ -668,9 +708,9 @@ pub(crate) fn try_normalized3<T: FloatScalar>(vector: &Vector3<T>) -> Option<Nor
 /// Centralizing this check keeps raw-vector and pre-normalized call paths
 /// identical while rejecting NaN, infinity, and nonsensical negative or
 /// greater-than-one tolerances before any orientation arithmetic.
-fn is_valid_angular_epsilon<T: FloatScalar>(angular_epsilon: T) -> bool {
+fn is_valid_angular_epsilon<T: RealScalar>(angular_epsilon: T) -> bool {
     // Comparisons with NaN are unordered, but the explicit finiteness check
-    // also makes that behavior clear for custom `FloatScalar` implementations.
+    // also makes that behavior clear for custom `RealScalar` implementations.
     is_finite_scalar(angular_epsilon)
         && angular_epsilon >= <T as Zero>::zero()
         && angular_epsilon <= <T as One>::one()
@@ -690,7 +730,7 @@ fn is_valid_angular_epsilon<T: FloatScalar>(angular_epsilon: T) -> bool {
 /// when it is greater, and [`AngularClassification::Invalid`] when the tolerance
 /// or derived arithmetic is invalid. The operands already carry the finite,
 /// nonzero invariants established by [`try_normalized3`].
-pub(crate) fn classify_nearly_parallel_normalized3<T: FloatScalar>(
+pub(crate) fn classify_nearly_parallel_normalized3<T: RealScalar>(
     left: &Normalized3<T>,
     right: &Normalized3<T>,
     angular_epsilon: T,
@@ -787,7 +827,7 @@ pub(crate) fn classify_nearly_parallel_normalized3<T: FloatScalar>(
 /// is at most the inclusive tolerance, [`AngularClassification::OutsideTolerance`]
 /// when it is greater, and [`AngularClassification::Invalid`] when the tolerance
 /// or dot-product arithmetic is invalid.
-pub(crate) fn classify_nearly_perpendicular_normalized3<T: FloatScalar>(
+pub(crate) fn classify_nearly_perpendicular_normalized3<T: RealScalar>(
     left: &Normalized3<T>,
     right: &Normalized3<T>,
     angular_epsilon: T,
@@ -824,8 +864,8 @@ pub(crate) fn classify_nearly_perpendicular_normalized3<T: FloatScalar>(
 ///
 /// [`AngularClassification::Invalid`] is returned if either vector is zero or
 /// non-finite, or when the tolerance is non-finite or outside `[0, 1]`.
-#[cfg(test)]
-pub(crate) fn classify_nearly_parallel3<T: FloatScalar>(
+#[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
+pub(crate) fn classify_nearly_parallel3<T: RealScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     angular_epsilon: T,
@@ -853,8 +893,8 @@ pub(crate) fn classify_nearly_parallel3<T: FloatScalar>(
 ///
 /// [`AngularClassification::Invalid`] is returned if either vector is zero or
 /// non-finite, or when the tolerance is non-finite or outside `[0, 1]`.
-#[cfg(test)]
-pub(crate) fn classify_nearly_perpendicular3<T: FloatScalar>(
+#[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
+pub(crate) fn classify_nearly_perpendicular3<T: RealScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     angular_epsilon: T,
@@ -1106,16 +1146,16 @@ macro_rules! impl_swizzle3 {
 impl_swizzle3!(Vector3, x, y, z);
 impl_swizzle3!(Vector4, x, y, z);
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
 mod tests {
     use super::AngularClassification::{Invalid, OutsideTolerance, WithinTolerance};
     use super::*;
-    use crate::scalar::{FloatScalar, EPS_F32, EPS_F64};
+    use crate::scalar::{RealScalar, EPS_F32, EPS_F64};
 
     /// Asserts that two generic floating-point values differ by at most `tolerance`.
     fn assert_scalar_close<T>(actual: T, expected: T, tolerance: T)
     where
-        T: FloatScalar + core::fmt::Debug,
+        T: RealScalar + core::fmt::Debug,
     {
         // Use an absolute comparison because these focused fixtures all have
         // normalized or otherwise order-one expected values.
@@ -1137,7 +1177,7 @@ mod tests {
         nan: T,
         infinity: T,
     ) where
-        T: FloatScalar + core::fmt::Debug,
+        T: RealScalar + core::fmt::Debug,
     {
         // Build all ordinary fixture constants through the scalar traits so the
         // same assertions cover both supported floating-point widths.
@@ -1251,7 +1291,7 @@ mod tests {
         nan: T,
         infinity: T,
     ) where
-        T: FloatScalar + core::fmt::Debug,
+        T: RealScalar + core::fmt::Debug,
     {
         // Define basis and oblique directions without concrete float literals.
         let zero = <T as Zero>::zero();
@@ -1391,7 +1431,7 @@ mod tests {
     /// Verifies that squared comparisons retain subnormal angular information.
     fn assert_subnormal_angular_epsilon_contract<T>(smallest_positive: T)
     where
-        T: FloatScalar + core::fmt::Debug,
+        T: RealScalar + core::fmt::Debug,
     {
         // A unit x direction crossed with `(1, delta, 0)` has a z component of
         // `delta`, but squaring a minimum subnormal delta produces zero. These

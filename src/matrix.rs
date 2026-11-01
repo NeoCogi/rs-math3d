@@ -38,12 +38,17 @@
 //! # Examples
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+//! # {
 //! use rs_math3d::matrix::Matrix4;
 //! use rs_math3d::vector::Vector4;
 //!
 //! let m = Matrix4::<f32>::identity();
 //! let v = Vector4::new(1.0, 2.0, 3.0, 1.0);
 //! let result = m * v; // Transform vector
+//! # }
+//! # }
 //! ```
 
 use crate::scalar::*;
@@ -198,7 +203,7 @@ impl<T: Scalar> Matrix2<T> {
     /// Returns NaN or Inf if the matrix is singular (determinant = 0).
     pub fn inverse(&self) -> Self
     where
-        T: FloatScalar,
+        T: RealScalar,
     {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -223,22 +228,12 @@ impl<T: Scalar> Matrix2<T> {
     /// C[i,j] = Σₖ A[i,k] * B[k,j]
     /// ```
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
-        let a00 = l.col[0].x;
-        let a10 = l.col[0].y;
-        let a01 = l.col[1].x;
-        let a11 = l.col[1].y;
-
-        let b00 = r.col[0].x;
-        let b10 = r.col[0].y;
-        let b01 = r.col[1].x;
-        let b11 = r.col[1].y;
-
-        let c00 = a00 * b00 + a01 * b10;
-        let c01 = a00 * b01 + a01 * b11;
-        let c10 = a10 * b00 + a11 * b10;
-        let c11 = a10 * b01 + a11 * b11;
-
-        Self::new(c00, c10, c01, c11)
+        let rows = l.transpose();
+        let mut result = Self::identity();
+        for column in 0..2 {
+            result.col[column] = Self::mul_vector_matrix(&r.col[column], &rows);
+        }
+        result
     }
 
     /// Multiplies a 2x2 matrix by a 2D vector.
@@ -399,7 +394,7 @@ impl<T: Scalar> Matrix3<T> {
     /// Returns NaN or Inf if the matrix is singular (determinant = 0).
     pub fn inverse(&self) -> Self
     where
-        T: FloatScalar,
+        T: RealScalar,
     {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -439,43 +434,12 @@ impl<T: Scalar> Matrix3<T> {
     /// C[i,j] = Σₖ A[i,k] * B[k,j]
     /// ```
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
-        let a00 = l.col[0].x;
-        let a10 = l.col[0].y;
-        let a20 = l.col[0].z;
-
-        let a01 = l.col[1].x;
-        let a11 = l.col[1].y;
-        let a21 = l.col[1].z;
-
-        let a02 = l.col[2].x;
-        let a12 = l.col[2].y;
-        let a22 = l.col[2].z;
-
-        let b00 = r.col[0].x;
-        let b10 = r.col[0].y;
-        let b20 = r.col[0].z;
-
-        let b01 = r.col[1].x;
-        let b11 = r.col[1].y;
-        let b21 = r.col[1].z;
-
-        let b02 = r.col[2].x;
-        let b12 = r.col[2].y;
-        let b22 = r.col[2].z;
-
-        let c00 = a00 * b00 + a01 * b10 + a02 * b20;
-        let c01 = a00 * b01 + a01 * b11 + a02 * b21;
-        let c02 = a00 * b02 + a01 * b12 + a02 * b22;
-
-        let c10 = a10 * b00 + a11 * b10 + a12 * b20;
-        let c11 = a10 * b01 + a11 * b11 + a12 * b21;
-        let c12 = a10 * b02 + a11 * b12 + a12 * b22;
-
-        let c20 = a20 * b00 + a21 * b10 + a22 * b20;
-        let c21 = a20 * b01 + a21 * b11 + a22 * b21;
-        let c22 = a20 * b02 + a21 * b12 + a22 * b22;
-
-        Self::new(c00, c10, c20, c01, c11, c21, c02, c12, c22)
+        let rows = l.transpose();
+        let mut result = Self::identity();
+        for column in 0..3 {
+            result.col[column] = Self::mul_vector_matrix(&r.col[column], &rows);
+        }
+        result
     }
 
     /// Multiplies a 3x3 matrix by a 3D vector.
@@ -532,7 +496,7 @@ impl<T: Scalar> Matrix3<T> {
     }
 }
 
-impl<T: FloatScalar> Matrix3<T> {
+impl<T: RealScalar> Matrix3<T> {
     /// Creates a 3x3 rotation matrix from an axis and angle.
     ///
     /// Uses Rodrigues' rotation formula:
@@ -773,7 +737,7 @@ impl<T: Scalar> Matrix4<T> {
     /// Returns NaN or Inf if the matrix is singular (determinant = 0).
     pub fn inverse(&self) -> Self
     where
-        T: FloatScalar,
+        T: RealScalar,
     {
         let m00 = self.col[0].x;
         let m10 = self.col[0].y;
@@ -925,7 +889,7 @@ impl<T: Scalar> Matrix4<T> {
     /// Assumes the last row is `[0, 0, 0, 1]`.
     pub fn inverse_affine(&self) -> Self
     where
-        T: FloatScalar,
+        T: RealScalar,
     {
         let rot = Matrix3::new(
             self.col[0].x,
@@ -969,69 +933,12 @@ impl<T: Scalar> Matrix4<T> {
     /// C[i,j] = Σₖ A[i,k] * B[k,j]
     /// ```
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
-        let a00 = l.col[0].x;
-        let a10 = l.col[0].y;
-        let a20 = l.col[0].z;
-        let a30 = l.col[0].w;
-
-        let a01 = l.col[1].x;
-        let a11 = l.col[1].y;
-        let a21 = l.col[1].z;
-        let a31 = l.col[1].w;
-
-        let a02 = l.col[2].x;
-        let a12 = l.col[2].y;
-        let a22 = l.col[2].z;
-        let a32 = l.col[2].w;
-
-        let a03 = l.col[3].x;
-        let a13 = l.col[3].y;
-        let a23 = l.col[3].z;
-        let a33 = l.col[3].w;
-
-        let b00 = r.col[0].x;
-        let b10 = r.col[0].y;
-        let b20 = r.col[0].z;
-        let b30 = r.col[0].w;
-
-        let b01 = r.col[1].x;
-        let b11 = r.col[1].y;
-        let b21 = r.col[1].z;
-        let b31 = r.col[1].w;
-
-        let b02 = r.col[2].x;
-        let b12 = r.col[2].y;
-        let b22 = r.col[2].z;
-        let b32 = r.col[2].w;
-
-        let b03 = r.col[3].x;
-        let b13 = r.col[3].y;
-        let b23 = r.col[3].z;
-        let b33 = r.col[3].w;
-
-        let c00 = a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
-        let c01 = a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
-        let c02 = a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
-        let c03 = a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
-
-        let c10 = a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
-        let c11 = a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
-        let c12 = a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
-        let c13 = a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
-
-        let c20 = a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
-        let c21 = a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
-        let c22 = a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
-        let c23 = a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
-
-        let c30 = a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
-        let c31 = a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
-        let c32 = a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
-        let c33 = a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
-
-        Self::new(
-            c00, c10, c20, c30, c01, c11, c21, c31, c02, c12, c22, c32, c03, c13, c23, c33,
-        )
+        let rows = l.transpose();
+        let mut result = Self::identity();
+        for column in 0..4 {
+            result.col[column] = Self::mul_vector_matrix(&r.col[column], &rows);
+        }
+        result
     }
 
     /// Multiplies a 4x4 matrix by a 4D vector.
@@ -1183,7 +1090,7 @@ impl<T: Scalar> Matrix4Extension<T> for Matrix4<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
 mod tests {
     use super::*;
 

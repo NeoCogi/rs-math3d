@@ -31,23 +31,9 @@
 //! The rest of the crate calls the private [`Math`] facade and therefore does
 //! not need backend-specific conditional compilation. Backend precedence is
 //! deterministic: `std`, then `libm`, then the Unix C math library. A build
-//! that disables default features must select `libm` or `system-libm`
-//! explicitly; silently importing undeclared C symbols is intentionally not a
+//! that needs float analytics without `std` selects `libm` or `system-libm`
+//! explicitly; fixed-only builds omit this entire module; silently importing undeclared C symbols is intentionally not a
 //! supported fallback.
-
-// A featureless build previously selected the C backend implicitly. That
-// compiled as an rlib but could fail only when a downstream no_std executable
-// was linked. Rejecting the configuration here makes the missing backend an
-// immediate, actionable Cargo error instead.
-#[cfg(all(
-    not(feature = "std"),
-    not(feature = "libm"),
-    not(feature = "system-libm")
-))]
-compile_error!(
-    "no floating-point math backend selected; enable the default `std` feature, or disable \
-     default features and explicitly enable `libm` (std-free) or `system-libm` (Unix only)"
-);
 
 // The raw C backend is deliberately conservative: Unix targets conventionally
 // provide these C99 functions through libm, while other target families use
@@ -101,7 +87,7 @@ mod backend {
     /// Computes the arc cosine of an `f32`, returning radians.
     pub(crate) fn acos_f32(x: f32) -> f32 {
         // The standard library defines the domain and exceptional-value
-        // behavior used by the public FloatScalar contract.
+        // behavior used by the public RealScalar contract.
         x.acos()
     }
 
@@ -318,7 +304,7 @@ mod backend {
     }
 }
 
-/// Backend-neutral facade used by [`crate::scalar::FloatScalar`].
+/// Backend-neutral facade used by [`crate::scalar::RealScalar`].
 ///
 /// This zero-sized private type deliberately exposes only the operations the
 /// crate currently needs. Keeping that surface small prevents backend details
@@ -372,7 +358,7 @@ impl Math {
 
     /// Computes the cosine of an `f64` radian angle with the selected backend.
     pub(crate) fn cos_f64(x: f64) -> f64 {
-        // Keep the FloatScalar implementation unaware of backend modules.
+        // Keep the RealScalar implementation unaware of backend modules.
         backend::cos_f64(x)
     }
 

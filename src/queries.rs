@@ -73,7 +73,7 @@ pub trait Intersection<T, Other> {
 ////////////////////////////////////////////////////////////////////////////////
 /// Distance Queries
 ////////////////////////////////////////////////////////////////////////////////
-impl<T: FloatScalar> Distance<T, Vector3<T>> for Plane<T> {
+impl<T: RealScalar> Distance<T, Vector3<T>> for Plane<T> {
     fn distance(&self, other: &Vector3<T>) -> Option<T> {
         let n = self.normal();
         let nom = Vector3::dot(other, &n) + self.constant();
@@ -88,7 +88,7 @@ impl<T: FloatScalar> Distance<T, Vector3<T>> for Plane<T> {
     }
 }
 
-impl<T: FloatScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
+impl<T: RealScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
     fn distance(&self, other: &Vector3<T>) -> Option<T> {
         Segment::distance(self, other, T::epsilon())
     }
@@ -106,31 +106,30 @@ impl<T: FloatScalar> Distance<T, Vector3<T>> for Segment<T, Vector3<T>> {
 // For zero directions the ray is parallel to the slab planes. In that case there
 // is no finite entry/exit parameter, so the query reduces to whether the origin
 // already lies inside the slab.
-fn update_slab_interval<T: FloatScalar>(
+fn update_slab_interval<T: RealScalar>(
     slab_min: T,
     slab_max: T,
     ray_start: T,
     ray_dir: T,
-    tmin: &mut T,
-    tmax: &mut T,
+    tmin: &mut Option<T>,
+    tmax: &mut Option<T>,
 ) -> bool {
     if ray_dir == <T as Zero>::zero() {
         return ray_start >= slab_min && ray_start <= slab_max;
     }
 
-    let inv_dir = <T as One>::one() / ray_dir;
-    let mut t0 = (slab_min - ray_start) * inv_dir;
-    let mut t1 = (slab_max - ray_start) * inv_dir;
+    let mut t0 = (slab_min - ray_start) / ray_dir;
+    let mut t1 = (slab_max - ray_start) / ray_dir;
     if t0 > t1 {
         core::mem::swap(&mut t0, &mut t1);
     }
 
-    *tmin = T::max(*tmin, t0);
-    *tmax = T::min(*tmax, t1);
-    *tmin <= *tmax
+    *tmin = Some(tmin.map_or(t0, |old| T::max(old, t0)));
+    *tmax = Some(tmax.map_or(t1, |old| T::min(old, t1)));
+    tmin.unwrap() <= tmax.unwrap()
 }
 
-impl<T: FloatScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
+impl<T: RealScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
     fn intersect(&self, other: &Ray<T, Vector3<T>>) -> bool {
         // Slab test for an axis-aligned box.
         //
@@ -142,8 +141,8 @@ impl<T: FloatScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
         // handle `direction == 0` explicitly instead of depending on direct
         // division for every axis. That avoids `0/0 -> NaN` when a ray starts on
         // a slab boundary and is parallel to that axis.
-        let mut tmin = -T::infinity();
-        let mut tmax = T::infinity();
+        let mut tmin = None;
+        let mut tmax = None;
 
         if !update_slab_interval(
             self.min.x,
@@ -178,11 +177,13 @@ impl<T: FloatScalar> Intersect<Ray<T, Vector3<T>>> for Box3<T> {
 
         // Intersect the final slab interval with the forward-ray constraint
         // `t >= 0`. Touching the box boundary counts as an intersection.
-        tmax >= T::max(tmin, <T as Zero>::zero())
+        tmax.map_or(true, |end| {
+            end >= T::max(tmin.unwrap_or_else(<T as Zero>::zero), <T as Zero>::zero())
+        })
     }
 }
 
-impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
+impl<T: RealScalar> Intersect<Sphere3<T>> for Box3<T> {
     fn intersect(&self, other: &Sphere3<T>) -> bool {
         let mut dist = <T as Zero>::zero();
 
@@ -211,11 +212,11 @@ impl<T: FloatScalar> Intersect<Sphere3<T>> for Box3<T> {
     }
 }
 
-fn is_in_0_to_1_range<T: FloatScalar>(x: T) -> bool {
+fn is_in_0_to_1_range<T: RealScalar>(x: T) -> bool {
     x >= <T as Zero>::zero() && x <= <T as One>::one()
 }
 
-impl<T: FloatScalar> Intersect<Tri3<T>> for Sphere3<T> {
+impl<T: RealScalar> Intersect<Tri3<T>> for Sphere3<T> {
     fn intersect(&self, tri: &Tri3<T>) -> bool {
         let uvw = tri.barycentric_coordinates(&self.center);
         let verts = tri.vertices();
@@ -276,7 +277,7 @@ enum TriangleIntersectionKind {
 /// any non-finite input, intermediate value, or result. Treating invalid
 /// floating-point data as a miss prevents a `Some((NaN, ...))` result from
 /// escaping through IEEE comparisons, which are false for NaN.
-fn triangle_intersection_from_point_dir<T: FloatScalar>(
+fn triangle_intersection_from_point_dir<T: RealScalar>(
     start: &Vector3<T>,
     direction: &Vector3<T>,
     tri: &Tri3<T>,
@@ -433,7 +434,7 @@ fn triangle_intersection_from_point_dir<T: FloatScalar>(
     Some((t, point))
 }
 
-impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>> {
+impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T>> {
     /// Returns the forward ray/triangle hit in the ray's stored parameterization.
     ///
     /// The triangle boundary is inclusive within the scalar epsilon. Zero,
@@ -453,7 +454,7 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Ray<T, Vector3<T
     }
 }
 
-impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<T>> {
+impl<T: RealScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<T>> {
     /// Returns the infinite-line/triangle hit in the line's stored parameterization.
     ///
     /// The triangle boundary is inclusive within the scalar epsilon. Zero,
@@ -474,7 +475,7 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Tri3<T>> for Line<T, Vector3<
     }
 }
 
-impl<T: FloatScalar> Intersection<(T, Vector3<T>), Ray<T, Vector3<T>>> for Tri3<T> {
+impl<T: RealScalar> Intersection<(T, Vector3<T>), Ray<T, Vector3<T>>> for Tri3<T> {
     /// Returns the same forward hit with the [`Intersection`] operands reversed.
     fn intersection(&self, ray: &Ray<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
         // Keep the symmetric trait surface a pure delegate so parameter,
@@ -483,7 +484,7 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Ray<T, Vector3<T>>> for Tri3<
     }
 }
 
-impl<T: FloatScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3<T> {
+impl<T: RealScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3<T> {
     /// Returns the same infinite-line hit with the [`Intersection`] operands reversed.
     fn intersection(&self, line: &Line<T, Vector3<T>>) -> Option<(T, Vector3<T>)> {
         // Keep the symmetric trait surface a pure delegate so parameter,
@@ -526,7 +527,7 @@ impl<T: FloatScalar> Intersection<(T, Vector3<T>), Line<T, Vector3<T>>> for Tri3
 /// handedness-specific builders derive `w` from `u × v`, with the sign selected
 /// by their documented contract.
 ///
-fn try_basis_uv<T: FloatScalar>(unit: &Vector3<T>, epsilon: T) -> Option<(Vector3<T>, Vector3<T>)> {
+fn try_basis_uv<T: RealScalar>(unit: &Vector3<T>, epsilon: T) -> Option<(Vector3<T>, Vector3<T>)> {
     let u = unit.try_normalize(epsilon)?;
     let x = u.x;
     let y = u.y;
@@ -549,7 +550,7 @@ fn try_basis_uv<T: FloatScalar>(unit: &Vector3<T>, epsilon: T) -> Option<(Vector
 /// Returns `[u, v, w]`, where `u` is the normalized input and
 /// `u × v = w`. Returns `None` when `unit` is too small to normalize at the
 /// supplied epsilon.
-pub fn try_basis_from_unit_rh<T: FloatScalar>(
+pub fn try_basis_from_unit_rh<T: RealScalar>(
     unit: &Vector3<T>,
     epsilon: T,
 ) -> Option<[Vector3<T>; 3]> {
@@ -563,7 +564,7 @@ pub fn try_basis_from_unit_rh<T: FloatScalar>(
 /// # Panics
 /// Panics if `unit` is too small to normalize. Use
 /// [`try_basis_from_unit_rh`] when the input may be degenerate.
-pub fn basis_from_unit_rh<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
+pub fn basis_from_unit_rh<T: RealScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
     try_basis_from_unit_rh(unit, T::epsilon()).expect("basis direction must be non-zero")
 }
 
@@ -572,7 +573,7 @@ pub fn basis_from_unit_rh<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] 
 /// Returns `[u, v, w]`, where `u` is the normalized input and
 /// `u × v = -w`. Returns `None` when `unit` is too small to normalize at the
 /// supplied epsilon.
-pub fn try_basis_from_unit_lh<T: FloatScalar>(
+pub fn try_basis_from_unit_lh<T: RealScalar>(
     unit: &Vector3<T>,
     epsilon: T,
 ) -> Option<[Vector3<T>; 3]> {
@@ -588,16 +589,16 @@ pub fn try_basis_from_unit_lh<T: FloatScalar>(
 /// # Panics
 /// Panics if `unit` is too small to normalize. Use
 /// [`try_basis_from_unit_lh`] when the input may be degenerate.
-pub fn basis_from_unit_lh<T: FloatScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
+pub fn basis_from_unit_lh<T: RealScalar>(unit: &Vector3<T>) -> [Vector3<T>; 3] {
     try_basis_from_unit_lh(unit, T::epsilon()).expect("basis direction must be non-zero")
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
 mod tests {
     use super::{Intersect, Intersection};
     use crate::primitives::{Box3, Line, Ray, Sphere3, Tri3};
-    use crate::scalar::{FloatScalar, One, Zero};
-    use crate::vector::{CrossProduct, FloatVector, Vector, Vector3};
+    use crate::scalar::{One, RealScalar, Zero};
+    use crate::vector::{CrossProduct, RealVector, Vector, Vector3};
     use crate::EPS_F32;
 
     /// Verifies that uniformly scaling a well-shaped triangle and its ray
@@ -607,7 +608,7 @@ mod tests {
     /// would underflow or overflow in the old raw-determinant implementation.
     fn assert_triangle_world_scale_invariance<T>(scales: &[T], tolerance: T)
     where
-        T: FloatScalar + core::fmt::Debug,
+        T: RealScalar + core::fmt::Debug,
     {
         // Use the default scalar tolerance so this helper exercises the same
         // path as the public `Intersection` implementations.
@@ -657,7 +658,7 @@ mod tests {
     /// hit point while inversely rescaling its returned parameter.
     fn assert_triangle_direction_scale_invariance<T>(scales: &[T], tolerance: T)
     where
-        T: FloatScalar + core::fmt::Debug,
+        T: RealScalar + core::fmt::Debug,
     {
         // Keep the triangle and origin fixed so only direction magnitude varies.
         let epsilon = T::epsilon();
@@ -707,7 +708,7 @@ mod tests {
     /// producing a tuple containing NaN or infinity.
     fn assert_triangle_invalid_inputs_return_none<T>(nan: T, infinity: T)
     where
-        T: FloatScalar + core::fmt::Debug,
+        T: RealScalar + core::fmt::Debug,
     {
         // Build one ordinary triangle and line as the baseline for mutations.
         let epsilon = T::epsilon();

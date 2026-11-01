@@ -24,7 +24,7 @@ libm = { version = "0.2", optional = true }
 default = ["std"]
 # The standard-library backend also enables num-traits' standard-library support.
 std = ["num-traits/std"]
-# Std-free no_std builds must opt into the pure-Rust libm backend explicitly.
+# Std-free float analytics opt into libm; fixed-only builds need no backend.
 libm = ["dep:libm"]
 # The system C math backend is selected only when std/libm are disabled and is
 # accepted only on Unix targets; source-level cfgs enforce that target policy.

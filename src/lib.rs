@@ -38,12 +38,12 @@
 //! - **Explicit std-free support**: Uses `std` by default and offers
 //!   freestanding `no_std` math through the opt-in `libm` backend
 //! - **Generic storage types**: Vectors, boxes, rectangles, and basic matrix arithmetic support
-//!   `f32`, `f64`, `i32`, and `i64`
-//! - **Float-only analytic math**: Normalization, inverses, quaternions, transforms, rays,
-//!   planes, and geometric queries are restricted to floating-point scalars
+//!   `f32`, `f64`, `i32`, `i64`, and signed `Fixed` formats
+//! - **Real scalar analytic math**: Normalization, inverses, quaternions, transforms, rays,
+//!   planes, and geometric queries are available to floating-point and suitable fixed-point scalars
 //! - **Column-major matrices**: Compatible with OpenGL and similar APIs
-//! - **Comprehensive float math**: Full suite of vector, matrix, and quaternion operations for
-//!   `f32` and `f64`
+//! - **Comprehensive real math**: Full suite of vector, matrix, and quaternion operations for
+//!   `f32`, `f64`, and signed fixed-point formats
 //! - **Geometric primitives**: Rays, planes, triangles, spheres, and more
 //! - **Scale-stable orientation queries**: 3D intersection and normal-building
 //!   decisions use dimensionless angular tolerances with max-component-scaled
@@ -52,6 +52,9 @@
 //! ## Quick Start
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+//! # {
 //! use rs_math3d::{Vector, Vector3, Matrix4, Quat, EPS_F32};
 //! use rs_math3d::transforms;
 //! use core::f32::consts::{FRAC_PI_2, PI};
@@ -76,6 +79,8 @@
 //!     EPS_F32,
 //! ).unwrap();
 //! let rotation_matrix = q.mat4();
+//! # }
+//! # }
 //! ```
 //!
 //! ## Math Backends
@@ -101,8 +106,8 @@
 //! rs-math3d = { version = "0.14.0", default-features = false, features = ["libm"] }
 //! ```
 //!
-//! Disabling default features without selecting a backend is a compile-time
-//! error. If dependency feature unification enables multiple backends,
+//! Disabling default features selects a fixed-only analytic build; floating
+//! analytic implementations require one of the backends above. If dependency feature unification enables multiple backends,
 //! precedence is `std`, then `libm`, then `system-libm`; the Unix restriction
 //! applies only when `system-libm` is the effective backend.
 //!
@@ -183,6 +188,7 @@ macro_rules! return_none_unless_outside_angular_tolerance {
 pub mod basis;
 mod error;
 pub mod fixed;
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 mod math;
 pub mod matrix;
 pub mod primitives;
@@ -201,11 +207,9 @@ pub use matrix::{Matrix2, Matrix3, Matrix4};
 pub use primitives::*;
 pub use quaternion::Quat;
 pub use queries::*;
-pub use scalar::{FloatScalar, Scalar, EPS_F32, EPS_F64};
+pub use scalar::{RealScalar, Scalar, EPS_F32, EPS_F64};
 pub use transforms::*;
-pub use vector::{
-    CrossProduct, FloatVector, Swizzle2, Swizzle3, Vector, Vector2, Vector3, Vector4,
-};
+pub use vector::{CrossProduct, RealVector, Swizzle2, Swizzle3, Vector, Vector2, Vector3, Vector4};
 
 /// 4-component byte color (RGBA).
 pub type Color4b = Vector4<u8>;

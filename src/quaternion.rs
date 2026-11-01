@@ -29,7 +29,7 @@
 
 use crate::matrix::{Matrix3, Matrix4};
 use crate::scalar::*;
-use crate::vector::{FloatVector, Vector, Vector3};
+use crate::vector::{RealVector, Vector, Vector3};
 use core::ops::*;
 use num_traits::{One, Zero};
 
@@ -60,7 +60,7 @@ impl<T: Scalar> Default for Quat<T> {
     }
 }
 
-impl<T: FloatScalar> Quat<T> {
+impl<T: RealScalar> Quat<T> {
     #[allow(clippy::too_many_arguments)]
     fn from_rotation_matrix(
         m00: T,
@@ -127,7 +127,12 @@ impl<T: FloatScalar> Quat<T> {
     /// q₁ · q₂ = x₁x₂ + y₁y₂ + z₁z₂ + w₁w₂
     /// ```
     pub fn dot(l: &Self, r: &Self) -> T {
-        l.x * r.x + l.y * r.y + l.z * r.z + l.w * r.w
+        T::sum_products(&[
+            (l.x, r.x, false),
+            (l.y, r.y, false),
+            (l.z, r.z, false),
+            (l.w, r.w, false),
+        ])
     }
 
     /// Computes the length (magnitude) of the quaternion.
@@ -192,10 +197,30 @@ impl<T: FloatScalar> Quat<T> {
     }
     /// Multiplies two quaternions (Hamilton product).
     pub fn mul(l: &Self, r: &Self) -> Self {
-        let x = l.w * r.x + l.x * r.w + l.y * r.z - l.z * r.y;
-        let y = l.w * r.y + l.y * r.w + l.z * r.x - l.x * r.z;
-        let z = l.w * r.z + l.z * r.w + l.x * r.y - l.y * r.x;
-        let w = l.w * r.w - l.x * r.x - l.y * r.y - l.z * r.z;
+        let x = T::sum_products(&[
+            (l.w, r.x, false),
+            (l.x, r.w, false),
+            (l.y, r.z, false),
+            (l.z, r.y, true),
+        ]);
+        let y = T::sum_products(&[
+            (l.w, r.y, false),
+            (l.x, r.z, true),
+            (l.y, r.w, false),
+            (l.z, r.x, false),
+        ]);
+        let z = T::sum_products(&[
+            (l.w, r.z, false),
+            (l.x, r.y, false),
+            (l.y, r.x, true),
+            (l.z, r.w, false),
+        ]);
+        let w = T::sum_products(&[
+            (l.w, r.w, false),
+            (l.x, r.x, true),
+            (l.y, r.y, true),
+            (l.z, r.z, true),
+        ]);
         Self::new(x, y, z, w)
     }
 
@@ -391,41 +416,42 @@ impl<T: FloatScalar> Quat<T> {
     }
 }
 
-impl<T: FloatScalar> Add for Quat<T> {
+impl<T: RealScalar> Add for Quat<T> {
     type Output = Quat<T>;
     fn add(self, rhs: Self) -> Self {
         Self::add(&self, &rhs)
     }
 }
 
-impl<T: FloatScalar> Sub for Quat<T> {
+impl<T: RealScalar> Sub for Quat<T> {
     type Output = Quat<T>;
     fn sub(self, rhs: Self) -> Self {
         Self::sub(&self, &rhs)
     }
 }
 
-impl<T: FloatScalar> Mul for Quat<T> {
+impl<T: RealScalar> Mul for Quat<T> {
     type Output = Quat<T>;
     fn mul(self, rhs: Self) -> Self {
         Self::mul(&self, &rhs)
     }
 }
 
-impl<T: FloatScalar> Div<T> for Quat<T> {
+impl<T: RealScalar> Div<T> for Quat<T> {
     type Output = Quat<T>;
     fn div(self, t: T) -> Self {
         Self::divf(&self, t)
     }
 }
 
-impl<T: FloatScalar> Mul<T> for Quat<T> {
+impl<T: RealScalar> Mul<T> for Quat<T> {
     type Output = Quat<T>;
     fn mul(self, t: T) -> Self {
         Self::mulf(&self, t)
     }
 }
 
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 macro_rules! impl_scalar {
     ($Op:ident, $op:ident, $Opop:ident, $t:ident) => {
         impl $Op<Quat<$t>> for $t {
@@ -437,12 +463,16 @@ macro_rules! impl_scalar {
     };
 }
 
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 impl_scalar!(Div, div, fdiv, f32);
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 impl_scalar!(Mul, mul, fmul, f32);
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 impl_scalar!(Div, div, fdiv, f64);
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 impl_scalar!(Mul, mul, fmul, f64);
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "std", feature = "libm", feature = "system-libm")))]
 mod tests {
     use core::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
@@ -1046,5 +1076,22 @@ mod tests {
             assert!((mat4_unit.col[i].z - mat4_scaled.col[i].z).abs() < 0.001);
             assert!((mat4_unit.col[i].w - mat4_scaled.col[i].w).abs() < 0.001);
         }
+    }
+}
+
+impl<R: crate::fixed::RealFormat<F>, const F: u32> Mul<Quat<crate::Fixed<R, F>>>
+    for crate::Fixed<R, F>
+{
+    type Output = Quat<Self>;
+    fn mul(self, rhs: Self::Output) -> Self::Output {
+        Quat::fmul(self, &rhs)
+    }
+}
+impl<R: crate::fixed::RealFormat<F>, const F: u32> Div<Quat<crate::Fixed<R, F>>>
+    for crate::Fixed<R, F>
+{
+    type Output = Quat<Self>;
+    fn div(self, rhs: Self::Output) -> Self::Output {
+        Quat::fdiv(self, &rhs)
     }
 }

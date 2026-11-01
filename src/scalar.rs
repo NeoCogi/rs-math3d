@@ -6,6 +6,10 @@
 //!
 //! The module leverages the `num-traits` crate for basic numeric
 //! operations while adding specialized methods needed for 3D math.
+//!
+//! Component/product slices of lengths zero through four use explicitly
+//! expanded operations. Arbitrary longer public slices retain a runtime path;
+//! both paths preserve arithmetic, rounding, and error evaluation order.
 
 // Copyright 2020-Present (c) Raja Lehtihet & Wael El Oraiby
 //
@@ -78,19 +82,21 @@ pub trait Scalar:
     /// Negates with a range check.
     fn try_neg(self) -> Result<Self, MathError>;
     /// Accumulates signed products. Fixed implementations round only once.
+    #[inline(always)]
     fn try_sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
         let mut sum = <Self as Zero>::zero();
-        for &(a, b, subtract) in terms {
+        unroll_short_slice!(terms, &(a, b, subtract) => {
             let product = a.try_mul(b)?;
             sum = if subtract {
                 sum.try_sub(product)?
             } else {
                 sum.try_add(product)?
             };
-        }
+        });
         Ok(sum)
     }
     /// Computes a signed sum of products, panicking on arithmetic failure.
+    #[inline(always)]
     fn sum_products(terms: &[(Self, Self, bool)]) -> Self {
         Self::try_sum_products(terms).expect("scalar product accumulation failed")
     }
@@ -143,35 +149,37 @@ pub trait RealScalar: Scalar {
     /// Computes a checked absolute value, including signed storage minima.
     fn try_abs(self) -> Result<Self, MathError>;
     /// Computes a norm without first quantizing small component squares.
+    #[inline(always)]
     fn try_norm(values: &[Self]) -> Result<Self, MathError> {
         let mut scale = <Self as Zero>::zero();
-        for &v in values {
+        unroll_short_slice!(values, &v => {
             if !v.is_finite() {
                 return Err(MathError::NonFinite);
             }
             scale = Self::max(scale, v.try_abs()?);
-        }
+        });
         if scale == <Self as Zero>::zero() {
             return Ok(scale);
         }
         let mut sum = <Self as Zero>::zero();
-        for &v in values {
+        unroll_short_slice!(values, &v => {
             let q = v.try_div(scale)?;
             sum = sum.try_add(q.try_mul(q)?)?;
-        }
+        });
         sum.try_sqrt()?.try_mul(scale)
     }
     /// Tests the exact represented length against a nonnegative tolerance.
     /// Fixed implementations compare unquantized squared integer quantities.
+    #[inline(always)]
     fn norm_exceeds(values: &[Self], epsilon: Self) -> Result<bool, MathError> {
         let zero = <Self as Zero>::zero();
         if !epsilon.is_finite() || epsilon < zero {
             return Err(MathError::InvalidTolerance);
         }
         let mut scale = zero;
-        for &value in values {
+        unroll_short_slice!(values, &value => {
             scale = Self::max(scale, value.try_abs()?);
-        }
+        });
         if scale == zero {
             return Ok(false);
         }
@@ -186,10 +194,10 @@ pub trait RealScalar: Scalar {
             Err(error) => return Err(error),
         };
         let mut sum = zero;
-        for &value in values {
+        unroll_short_slice!(values, &value => {
             let scaled = value.try_div(scale)?;
             sum = sum.try_add(scaled.try_mul(scaled)?)?;
-        }
+        });
         Ok(sum.try_sqrt()? > allowed)
     }
     /// Checked square root; negative inputs are outside its domain.
@@ -409,11 +417,13 @@ impl Scalar for f32 {
             Err(MathError::NonFinite)
         }
     }
+    #[inline(always)]
     fn sum_products(terms: &[(Self, Self, bool)]) -> Self {
-        terms.iter().fold(
-            0.0,
-            |s, &(a, b, subtract)| if subtract { s - a * b } else { s + a * b },
-        )
+        let mut sum = 0.0;
+        unroll_short_slice!(terms, &(a,b,subtract) => {
+            sum = if subtract { sum-a*b } else { sum+a*b };
+        });
+        sum
     }
 
     fn two() -> Self {
@@ -494,11 +504,13 @@ impl Scalar for f64 {
             Err(MathError::NonFinite)
         }
     }
+    #[inline(always)]
     fn sum_products(terms: &[(Self, Self, bool)]) -> Self {
-        terms.iter().fold(
-            0.0,
-            |s, &(a, b, subtract)| if subtract { s - a * b } else { s + a * b },
-        )
+        let mut sum = 0.0;
+        unroll_short_slice!(terms, &(a,b,subtract) => {
+            sum = if subtract { sum-a*b } else { sum+a*b };
+        });
+        sum
     }
 
     fn two() -> Self {

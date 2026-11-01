@@ -157,6 +157,11 @@
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
+// Keep expansion helpers in lexical scope for all numeric modules. They remain
+// crate-private implementation machinery, independent of scalar representations.
+#[macro_use]
+mod unroll;
+
 /// Continues a checked query only for a valid classification outside its tolerance.
 ///
 /// The supplied expression is evaluated exactly once. An `OutsideTolerance`

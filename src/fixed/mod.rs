@@ -254,11 +254,12 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
     }
     /// Computes a signed sum of products exactly before a single quantization.
     /// Each tuple contains `(left, right, subtract_product)`.
+    #[inline(always)]
     pub(crate) fn sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
         let mut accumulator = Accumulator::default();
-        for &(a, b, subtract) in terms {
+        unroll_short_slice!(terms, &(a,b,subtract) => {
             accumulator.add(a.bits.widen() * b.bits.widen(), subtract)?;
-        }
+        });
         Self::raw(accumulator.finish(F)?)
     }
     /// Parses signed integer/fractional digits in radices 2 through 36.

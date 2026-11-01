@@ -404,7 +404,7 @@ macro_rules! implRealVector {
                 let values = [$(self.$field),*];
                 if !T::norm_exceeds(&values, epsilon)? { return Err(MathError::Degenerate); }
                 let mut scale = <T as Zero>::zero();
-                for &v in &values { scale = T::max(scale, v.try_abs()?); }
+                $(scale = T::max(scale, self.$field.try_abs()?);)*
                 let scaled = Self::try_div_vs(self, scale)?;
                 let length = scaled.try_length()?;
                 Self::try_div_vs(&scaled, length)

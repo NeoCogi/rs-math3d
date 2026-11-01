@@ -182,6 +182,7 @@ impl<R: ScalarFormat<F>, const F: u32> Scalar for Fixed<R, F> {
     fn try_neg(self) -> Result<Self, MathError> {
         Self::try_neg(self)
     }
+    #[inline(always)]
     fn try_sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
         Self::sum_products(terms)
     }
@@ -240,16 +241,18 @@ impl<R: RealFormat<F>, const F: u32> RealScalar for Fixed<R, F> {
     fn try_acos(self) -> Result<Self, MathError> {
         Self::try_acos(self)
     }
+    #[inline(always)]
     fn try_norm(values: &[Self]) -> Result<Self, MathError> {
         let mut squared = 0u128;
-        for &value in values {
+        unroll_short_slice!(values, &value => {
             let raw = value.bits.widen();
             squared = squared
                 .checked_add((raw * raw) as u128)
                 .ok_or(MathError::Overflow)?;
-        }
+        });
         Self::raw(rounded_sqrt(squared) as i128)
     }
+    #[inline(always)]
     fn norm_exceeds(values: &[Self], epsilon: Self) -> Result<bool, MathError> {
         let epsilon = epsilon.bits.widen();
         if epsilon < 0 {
@@ -257,14 +260,14 @@ impl<R: RealFormat<F>, const F: u32> RealScalar for Fixed<R, F> {
         }
         let threshold = (epsilon * epsilon) as u128;
         let mut squared = 0u128;
-        for &value in values {
+        unroll_short_slice!(values, &value => {
             let raw = value.bits.widen();
             // Exceeding a u128 sum already exceeds every representable epsilon.
             match squared.checked_add((raw * raw) as u128) {
                 None => return Ok(true),
                 Some(value) => squared = value,
             }
-        }
+        });
         Ok(squared > threshold)
     }
 }

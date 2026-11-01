@@ -36,6 +36,11 @@
 //! and axis-angle construction, are available through `RealScalar` for floating
 //! and suitable fixed formats.
 //!
+//! Kernels for all three matrix dimensions expand their fixed index ranges at
+//! compile time, including row-inverse initialization, pivot search, elimination,
+//! and matrix products. Checked arithmetic and pivot choices retain their
+//! original evaluation order; reciprocal inversion remains the default.
+//!
 //! # Examples
 //!
 //! ```
@@ -70,60 +75,60 @@ pub enum InverseMode {
     Rows,
 }
 
-/// Inverts row-major stack arrays with partial pivoting. The caller owns both
-/// arrays; no heap storage, global scratch memory or hidden float conversion is
-/// used. Row updates accumulate differences of products before quantization.
-fn invert_rows<T: RealScalar, const N: usize>(
-    values: &mut [[T; N]; N],
-    inverse: &mut [[T; N]; N],
-) -> Result<(), MathError> {
-    let zero = <T as Zero>::zero();
-    let one = <T as One>::one();
-    for row in values.iter() {
-        for &value in row {
-            if !value.is_finite() {
-                return Err(MathError::NonFinite);
-            }
+/// Defines one statically expanded partial-pivot row-inversion kernel.
+///
+/// Literal dimensions/indices remove all iteration control, even without
+/// optimization. Conditional pivot selection and elimination retain the same
+/// ascending evaluation order, checked errors and fixed-point quantization.
+macro_rules! impl_invert_rows {
+    ($name:ident, $n:literal, [$($index:literal),+]) => {
+        /// Inverts owned stack rows without dimension-dependent runtime loops.
+        /// Input finiteness is checked before any pivot mutation; each pivot is
+        /// selected from the remaining rows before normalization/elimination.
+        #[inline]
+        fn $name<T: RealScalar>(values: &mut [[T;$n];$n], inverse: &mut [[T;$n];$n]) -> Result<(), MathError> {
+            let zero = <T as Zero>::zero();
+            let one = <T as One>::one();
+            unroll_indices!(row in [$($index),+] {
+                unroll_indices!(entry in [$($index),+] {
+                    if !values[row][entry].is_finite() { return Err(MathError::NonFinite); }
+                });
+            });
+            unroll_indices!(column in [$($index),+] {
+                let mut pivot = column;
+                unroll_indices!(row in [$($index),+] {
+                    if row > column && values[row][column].try_abs()? > values[pivot][column].try_abs()? {
+                        pivot = row;
+                    }
+                });
+                let divisor = values[pivot][column];
+                if divisor == zero { return Err(MathError::Degenerate); }
+                values.swap(column,pivot);
+                inverse.swap(column,pivot);
+                unroll_indices!(entry in [$($index),+] {
+                    values[column][entry] = values[column][entry].try_div(divisor)?;
+                    inverse[column][entry] = inverse[column][entry].try_div(divisor)?;
+                });
+                values[column][column] = one;
+                unroll_indices!(row in [$($index),+] {
+                    if row != column {
+                        let factor = values[row][column];
+                        unroll_indices!(entry in [$($index),+] {
+                            values[row][entry] = T::try_sum_products(&[(values[row][entry],one,false),(factor,values[column][entry],true)])?;
+                            inverse[row][entry] = T::try_sum_products(&[(inverse[row][entry],one,false),(factor,inverse[column][entry],true)])?;
+                        });
+                        values[row][column] = zero;
+                    }
+                });
+            });
+            Ok(())
         }
-    }
-    for column in 0..N {
-        let mut pivot = column;
-        for row in column + 1..N {
-            if values[row][column].try_abs()? > values[pivot][column].try_abs()? {
-                pivot = row;
-            }
-        }
-        let divisor = values[pivot][column];
-        if divisor == zero {
-            return Err(MathError::Degenerate);
-        }
-        values.swap(column, pivot);
-        inverse.swap(column, pivot);
-        for entry in 0..N {
-            values[column][entry] = values[column][entry].try_div(divisor)?;
-            inverse[column][entry] = inverse[column][entry].try_div(divisor)?;
-        }
-        values[column][column] = one;
-        for row in 0..N {
-            if row == column {
-                continue;
-            }
-            let factor = values[row][column];
-            for entry in 0..N {
-                values[row][entry] = T::try_sum_products(&[
-                    (values[row][entry], one, false),
-                    (factor, values[column][entry], true),
-                ])?;
-                inverse[row][entry] = T::try_sum_products(&[
-                    (inverse[row][entry], one, false),
-                    (factor, inverse[column][entry], true),
-                ])?;
-            }
-            values[row][column] = zero;
-        }
-    }
-    Ok(())
+    };
 }
+
+impl_invert_rows!(invert_rows2, 2, [0, 1]);
+impl_invert_rows!(invert_rows3, 3, [0, 1, 2]);
+impl_invert_rows!(invert_rows4, 4, [0, 1, 2, 3]);
 
 /// A 2x2 matrix stored in column-major order.
 ///
@@ -320,13 +325,13 @@ impl<T: Scalar> Matrix2<T> {
         let rows = self.transpose();
         let mut values = [[<T as Zero>::zero(); 2]; 2];
         let mut inverse = [[<T as Zero>::zero(); 2]; 2];
-        for row in 0..2 {
+        unroll_indices!(row in [0, 1] {
             inverse[row][row] = <T as One>::one();
             let v = rows.col[row];
             values[row][0] = v.x;
             values[row][1] = v.y;
-        }
-        invert_rows(&mut values, &mut inverse)?;
+        });
+        invert_rows2(&mut values, &mut inverse)?;
         let mut result = Self::identity();
         result.col[0].x = inverse[0][0];
         result.col[0].y = inverse[1][0];
@@ -363,9 +368,9 @@ impl<T: Scalar> Matrix2<T> {
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let rows = l.transpose();
         let mut result = Self::identity();
-        for column in 0..2 {
+        unroll_indices!(column in [0, 1] {
             result.col[column] = Self::mul_vector_matrix(&r.col[column], &rows);
-        }
+        });
         result
     }
 
@@ -600,14 +605,14 @@ impl<T: Scalar> Matrix3<T> {
         let rows = self.transpose();
         let mut values = [[<T as Zero>::zero(); 3]; 3];
         let mut inverse = [[<T as Zero>::zero(); 3]; 3];
-        for row in 0..3 {
+        unroll_indices!(row in [0, 1, 2] {
             inverse[row][row] = <T as One>::one();
             let v = rows.col[row];
             values[row][0] = v.x;
             values[row][1] = v.y;
             values[row][2] = v.z;
-        }
-        invert_rows(&mut values, &mut inverse)?;
+        });
+        invert_rows3(&mut values, &mut inverse)?;
         let mut result = Self::identity();
         result.col[0].x = inverse[0][0];
         result.col[0].y = inverse[1][0];
@@ -648,9 +653,9 @@ impl<T: Scalar> Matrix3<T> {
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let rows = l.transpose();
         let mut result = Self::identity();
-        for column in 0..3 {
+        unroll_indices!(column in [0, 1, 2] {
             result.col[column] = Self::mul_vector_matrix(&r.col[column], &rows);
-        }
+        });
         result
     }
 
@@ -1156,15 +1161,15 @@ impl<T: Scalar> Matrix4<T> {
         let rows = self.transpose();
         let mut values = [[<T as Zero>::zero(); 4]; 4];
         let mut inverse = [[<T as Zero>::zero(); 4]; 4];
-        for row in 0..4 {
+        unroll_indices!(row in [0, 1, 2, 3] {
             inverse[row][row] = <T as One>::one();
             let v = rows.col[row];
             values[row][0] = v.x;
             values[row][1] = v.y;
             values[row][2] = v.z;
             values[row][3] = v.w;
-        }
-        invert_rows(&mut values, &mut inverse)?;
+        });
+        invert_rows4(&mut values, &mut inverse)?;
         let mut result = Self::identity();
         result.col[0].x = inverse[0][0];
         result.col[0].y = inverse[1][0];
@@ -1283,9 +1288,9 @@ impl<T: Scalar> Matrix4<T> {
     pub fn mul_matrix_matrix(l: &Self, r: &Self) -> Self {
         let rows = l.transpose();
         let mut result = Self::identity();
-        for column in 0..4 {
+        unroll_indices!(column in [0, 1, 2, 3] {
             result.col[column] = Self::mul_vector_matrix(&r.col[column], &rows);
-        }
+        });
         result
     }
 
@@ -1355,23 +1360,16 @@ impl<T: Scalar> Matrix4<T> {
  * Operator overloading
  *****************************************************************************/
 macro_rules! implMatrixOps {
-    ($mat:ident, $vec:ident, $($field:ident),+) => {
+    ($mat:ident, $vec:ident, $($index:literal => $field:ident),+) => {
         impl<T: Scalar> $mat<T> {
             /// Multiplies a matrix and column vector using checked dot products.
             pub fn try_mul_matrix_vector(l: &Self, r: &$vec<T>) -> Result<$vec<T>, MathError> {
                 let rows = l.transpose();
-                let mut rows = rows.col.iter();
-                let mut result = <$vec<T> as Vector<T>>::zero();
-                $(result.$field = $vec::try_dot(rows.next().expect("matrix row count"),r)?;)*
-                Ok(result)
+                Ok($vec::new($($vec::try_dot(&rows.col[$index],r)?),+))
             }
             /// Multiplies matrices with one fixed quantization per output cell.
             pub fn try_mul_matrix_matrix(l: &Self, r: &Self) -> Result<Self, MathError> {
-                let mut result = Self::identity();
-                for i in 0..result.col.len() {
-                    result.col[i] = Self::try_mul_matrix_vector(l,&r.col[i])?;
-                }
-                Ok(result)
+                Ok(Self { col: [$(Self::try_mul_matrix_vector(l,&r.col[$index])?),+] })
             }
         }
         impl<T: Scalar> Mul<$mat<T>> for $vec<T> {
@@ -1411,9 +1409,9 @@ macro_rules! implMatrixOps {
     };
 }
 
-implMatrixOps!(Matrix2, Vector2, x, y);
-implMatrixOps!(Matrix3, Vector3, x, y, z);
-implMatrixOps!(Matrix4, Vector4, x, y, z, w);
+implMatrixOps!(Matrix2, Vector2, 0 => x, 1 => y);
+implMatrixOps!(Matrix3, Vector3, 0 => x, 1 => y, 2 => z);
+implMatrixOps!(Matrix4, Vector4, 0 => x, 1 => y, 2 => z, 3 => w);
 
 impl<T: Scalar> Mul<Matrix4<T>> for Vector3<T> {
     type Output = Vector3<T>;

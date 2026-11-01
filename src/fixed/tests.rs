@@ -50,21 +50,44 @@ fn exhaustive_i8_arithmetic() {
         for b in i8::MIN..=i8::MAX {
             let x = F::from_bits(a);
             let y = F::from_bits(b);
-            assert_eq!(x.try_add(y).map(F::to_bits), expected(a as f64 + b as f64));
-            assert_eq!(x.try_sub(y).map(F::to_bits), expected(a as f64 - b as f64));
+            assert_eq!((x + y).to_bits(), a.wrapping_add(b));
+            assert_eq!((x - y).to_bits(), a.wrapping_sub(b));
+            assert_eq!((-x).to_bits(), a.wrapping_neg());
             assert_eq!(
-                x.try_mul(y).map(F::to_bits),
+                (x * y).to_bits(),
+                (a as f64 * b as f64 / 16.0).round_ties_even() as i16 as i8
+            );
+            if b != 0 {
+                assert_eq!(
+                    (x / y).to_bits(),
+                    (a as f64 * 16.0 / b as f64).round_ties_even() as i16 as i8
+                );
+                assert_eq!((x % y).to_bits(), (a as i16 % b as i16) as i8);
+            }
+            assert_eq!(
+                x.checked_add(y).map(F::to_bits),
+                expected(a as f64 + b as f64)
+            );
+            assert_eq!(
+                x.checked_sub(y).map(F::to_bits),
+                expected(a as f64 - b as f64)
+            );
+            assert_eq!(
+                x.checked_mul(y).map(F::to_bits),
                 expected(a as f64 * b as f64 / 16.0)
             );
             if b == 0 {
-                assert_eq!(x.try_div(y), Err(MathError::DivisionByZero));
-                assert_eq!(x.try_rem(y), Err(MathError::DivisionByZero));
+                assert_eq!(x.checked_div(y), Err(MathError::DivisionByZero));
+                assert_eq!(x.checked_rem(y), Err(MathError::DivisionByZero));
             } else {
                 assert_eq!(
-                    x.try_div(y).map(F::to_bits),
+                    x.checked_div(y).map(F::to_bits),
                     expected(a as f64 * 16.0 / b as f64)
                 );
-                assert_eq!(x.try_rem(y).unwrap().to_bits() as i16, a as i16 % b as i16);
+                assert_eq!(
+                    x.checked_rem(y).unwrap().to_bits() as i16,
+                    a as i16 % b as i16
+                );
             }
         }
     }
@@ -128,7 +151,7 @@ fn float_boundaries_and_signed_rounding_ties() {
         let _: F = 8.0f32.into();
     })
     .is_err());
-    assert!(catch_unwind(|| F::max_value() + F::DELTA).is_err());
+    assert_eq!(F::max_value() + F::DELTA, F::min_value());
 }
 
 #[test]
@@ -141,10 +164,10 @@ fn exact_rescaling_rounding_and_layout() {
     assert_eq!(F::from_bits(3).try_rescale::<i8, 7>().unwrap().to_bits(), 2);
     assert_eq!(value.trunc().to_f64(), -1.0);
     assert_eq!(value.floor().to_f64(), -2.0);
-    assert_eq!(value.try_ceil().unwrap().to_f64(), -1.0);
-    assert_eq!(value.try_round().unwrap().to_f64(), -2.0);
-    assert_eq!(F::min_value().try_neg(), Err(MathError::Overflow));
-    assert_eq!(F::max_value().try_ceil(), Err(MathError::Overflow));
+    assert_eq!(value.checked_ceil().unwrap().to_f64(), -1.0);
+    assert_eq!(value.checked_round().unwrap().to_f64(), -2.0);
+    assert_eq!(F::min_value().checked_neg(), Err(MathError::Overflow));
+    assert_eq!(F::max_value().checked_ceil(), Err(MathError::Overflow));
     assert_eq!(core::mem::size_of::<F>(), core::mem::size_of::<i32>());
     assert_eq!(core::mem::align_of::<F>(), core::mem::align_of::<i32>());
 }
@@ -187,9 +210,9 @@ fn accumulation_keeps_cancellation_and_subquantum_products() {
         (a, a, true),
         (a, a, true),
     ];
-    assert_eq!(F::sum_products(&terms).unwrap(), F::ZERO);
+    assert_eq!(F::checked_sum_products(&terms).unwrap(), F::ZERO);
     assert_eq!(
-        F::sum_products(&[(F::from_bits(8), F::from_bits(8), false); 4]).unwrap(),
+        F::checked_sum_products(&[(F::from_bits(8), F::from_bits(8), false); 4]).unwrap(),
         F::DELTA
     );
 }
@@ -200,7 +223,7 @@ fn exhaustive_i16_analytic_reference_bounds() {
     for raw in i16::MIN..=i16::MAX {
         let value = F::from_bits(raw);
         let angle = value.to_f64();
-        let (sin, cos) = value.try_sin_cos().unwrap();
+        let (sin, cos) = value.checked_sin_cos().unwrap();
         assert!(
             (sin.to_bits() as f64 - (angle.sin() * 256.0).round_ties_even()).abs() <= 1.0,
             "sin({})",
@@ -213,15 +236,15 @@ fn exhaustive_i16_analytic_reference_bounds() {
         );
         if raw >= 0 {
             assert_eq!(
-                value.try_sqrt().unwrap().to_bits(),
+                value.checked_sqrt().unwrap().to_bits(),
                 (angle.sqrt() * 256.0).round_ties_even() as i16
             );
         } else {
-            assert_eq!(value.try_sqrt(), Err(MathError::Domain));
+            assert_eq!(value.checked_sqrt(), Err(MathError::Domain));
         }
         if (-256..=256).contains(&raw) {
             assert!(
-                (value.try_acos().unwrap().to_bits() as f64
+                (value.checked_acos().unwrap().to_bits() as f64
                     - (angle.acos() * 256.0).round_ties_even())
                 .abs()
                     <= 1.0
@@ -230,7 +253,7 @@ fn exhaustive_i16_analytic_reference_bounds() {
         let expected = angle.tan() * 256.0;
         if expected.abs() < 32760.0 {
             assert!(
-                (value.try_tan().unwrap().to_bits() as f64 - expected.round_ties_even()).abs()
+                (value.checked_tan().unwrap().to_bits() as f64 - expected.round_ties_even()).abs()
                     <= 1.0
             );
         }
@@ -241,7 +264,7 @@ fn exhaustive_i16_analytic_reference_bounds() {
 fn vector_fixed_accumulation_and_tiny_normalization() {
     type F = Fixed<i32, 8>;
     let tiny = Vector3::new(F::DELTA, F::ZERO, F::ZERO);
-    assert_eq!(tiny.try_length().unwrap(), F::DELTA);
+    assert_eq!(tiny.checked_length().unwrap(), F::DELTA);
     let unit = tiny.checked_normalize(F::ZERO).unwrap();
     assert_eq!(unit.x, F::ONE);
     assert!(tiny.try_normalize(F::DELTA).is_none());
@@ -254,7 +277,7 @@ fn vector_fixed_accumulation_and_tiny_normalization() {
         F::try_from_int(4).unwrap(),
         F::ZERO,
     );
-    assert_eq!(ordinary.try_length().unwrap().to_f64(), 5.0);
+    assert_eq!(ordinary.checked_length().unwrap().to_f64(), 5.0);
     let normalized = ordinary.checked_normalize(F::epsilon()).unwrap();
     assert!((normalized.x.to_f64() - 0.6).abs() <= 1.0 / 256.0);
     assert!((normalized.y.to_f64() - 0.8).abs() <= 1.0 / 256.0);
@@ -266,34 +289,34 @@ fn vector_fixed_accumulation_and_tiny_normalization() {
     // A large represented direction can normalize even when its length cannot
     // fit its scalar format; normalization never constructs the raw magnitude.
     let large = Vector3::new(F::max_value(), F::max_value(), F::ZERO);
-    assert_eq!(large.try_length(), Err(MathError::Overflow));
+    assert_eq!(large.checked_length(), Err(MathError::Overflow));
     assert!(large.checked_normalize(F::epsilon()).is_ok());
 }
 
 #[test]
 fn analytic_domains_and_high_precision_formats() {
     type F = Fixed<i64, 61>;
-    assert_eq!(F::ONE.try_sqrt().unwrap(), F::ONE);
-    assert_eq!(F::ZERO.try_sin().unwrap(), F::ZERO);
-    assert_eq!(F::ZERO.try_cos().unwrap(), F::ONE);
-    assert_eq!(F::ONE.try_acos().unwrap(), F::ZERO);
-    assert_eq!((F::ONE + F::DELTA).try_acos(), Err(MathError::Domain));
+    assert_eq!(F::ONE.checked_sqrt().unwrap(), F::ONE);
+    assert_eq!(F::ZERO.checked_sin().unwrap(), F::ZERO);
+    assert_eq!(F::ZERO.checked_cos().unwrap(), F::ONE);
+    assert_eq!(F::ONE.checked_acos().unwrap(), F::ZERO);
+    assert_eq!((F::ONE + F::DELTA).checked_acos(), Err(MathError::Domain));
     assert_eq!(
-        F::DELTA.try_sqrt().unwrap().to_bits(),
+        F::DELTA.checked_sqrt().unwrap().to_bits(),
         ((2.0f64).powi(61)).sqrt().round_ties_even() as i64
     );
     let quarter = F::quarter();
-    assert!((quarter.try_sin().unwrap().to_f64() - 0.25f64.sin()).abs() <= 1e-16);
-    assert!(((-quarter).try_acos().unwrap().to_f64() - (-0.25f64).acos()).abs() <= 4e-16);
+    assert!((quarter.checked_sin().unwrap().to_f64() - 0.25f64.sin()).abs() <= 1e-16);
+    assert!(((-quarter).checked_acos().unwrap().to_f64() - (-0.25f64).acos()).abs() <= 4e-16);
     // Low fractional precision and the largest integer magnitude exercise
     // range reduction before increasing CORDIC's internal scale.
     type G = Fixed<i64, 2>;
-    assert!(G::max_value().try_sin_cos().is_ok());
-    assert!(G::min_value().try_sin_cos().is_ok());
+    assert!(G::max_value().checked_sin_cos().is_ok());
+    assert!(G::min_value().checked_sin_cos().is_ok());
     let minimum = F::min_value();
-    assert_eq!(RealScalar::try_abs(minimum), Err(MathError::Overflow));
+    assert_eq!(Scalar::checked_abs(minimum), Err(MathError::Overflow));
     assert_eq!(
-        <F as Scalar>::try_div(F::ONE, F::ZERO),
+        <F as Scalar>::checked_div(F::ONE, F::ZERO),
         Err(MathError::DivisionByZero)
     );
 }
@@ -315,7 +338,8 @@ where
         let raw = cells.next().unwrap().parse::<i64>().unwrap();
         let sine = cells.next().unwrap().parse::<i64>().unwrap();
         let cosine = cells.next().unwrap().parse::<i64>().unwrap();
-        let (actual_sine, actual_cosine) = Fixed::<i64, F>::from_bits(raw).try_sin_cos().unwrap();
+        let (actual_sine, actual_cosine) =
+            Fixed::<i64, F>::from_bits(raw).checked_sin_cos().unwrap();
         assert!(
             (actual_sine.to_bits() as i128 - sine as i128).abs() <= 1,
             "sin S{}.{} raw={}",
@@ -349,15 +373,18 @@ fn prepared_reciprocals_match_exhaustive_checked_division() {
         let divisor = F::from_bits(denominator);
         if denominator == 0 {
             assert!(matches!(
-                divisor.try_reciprocal(),
+                divisor.checked_reciprocal(),
                 Err(MathError::DivisionByZero)
             ));
             continue;
         }
-        let reciprocal = divisor.try_reciprocal().unwrap();
+        let reciprocal = divisor.checked_reciprocal().unwrap();
         for numerator in i8::MIN..=i8::MAX {
             let value = F::from_bits(numerator);
-            assert_eq!(value.try_mul_reciprocal(reciprocal), value.try_div(divisor));
+            assert_eq!(
+                value.checked_mul_reciprocal(reciprocal),
+                value.checked_div(divisor)
+            );
         }
     }
     type Wide = Fixed<i64, 61>;
@@ -372,10 +399,13 @@ fn prepared_reciprocals_match_exhaustive_checked_division() {
         i64::MAX,
     ] {
         let divisor = Wide::from_bits(denominator);
-        let reciprocal = divisor.try_reciprocal().unwrap();
+        let reciprocal = divisor.checked_reciprocal().unwrap();
         for numerator in [i64::MIN, -3, -1, 0, 1, 3, i64::MAX] {
             let value = Wide::from_bits(numerator);
-            assert_eq!(value.try_mul_reciprocal(reciprocal), value.try_div(divisor));
+            assert_eq!(
+                value.checked_mul_reciprocal(reciprocal),
+                value.checked_div(divisor)
+            );
         }
     }
 }

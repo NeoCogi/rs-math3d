@@ -28,7 +28,10 @@
 
 //! Guarded reusable fixed reciprocals for the default matrix inverse path.
 
-use super::{arithmetic::signed, Fixed, RealFormat};
+use super::{
+    arithmetic::{signed, signed_wrapping},
+    Fixed, RealFormat,
+};
 use crate::MathError;
 
 /// A prepared signed fixed divisor with 127 reciprocal fraction bits.
@@ -46,7 +49,7 @@ pub struct FixedReciprocal<R: RealFormat<F>, const F: u32> {
 
 impl<R: RealFormat<F>, const F: u32> FixedReciprocal<R, F> {
     /// Prepares a nonzero represented divisor; both signed extrema are valid.
-    pub(crate) fn new(denominator: Fixed<R, F>) -> Result<Self, MathError> {
+    pub(crate) fn checked_new(denominator: Fixed<R, F>) -> Result<Self, MathError> {
         let magnitude = denominator.to_bits().widen().unsigned_abs();
         if magnitude == 0 {
             return Err(MathError::DivisionByZero);
@@ -58,7 +61,27 @@ impl<R: RealFormat<F>, const F: u32> FixedReciprocal<R, F> {
     }
 
     /// Applies the reciprocal with an exact single-rounding final result.
-    pub(crate) fn apply(self, numerator: Fixed<R, F>) -> Result<Fixed<R, F>, MathError> {
+    pub(crate) fn checked_apply(self, numerator: Fixed<R, F>) -> Result<Fixed<R, F>, MathError> {
+        let (quotient, negative) = self.quotient(numerator);
+        Fixed::raw(signed(quotient, negative)?)
+    }
+
+    /// Prepares a divisor without checking it. A zero divisor panics.
+    pub(crate) fn new(denominator: Fixed<R, F>) -> Self {
+        Self {
+            denominator,
+            multiplier: (1u128 << 127) / denominator.to_bits().widen().unsigned_abs(),
+        }
+    }
+
+    /// Applies a prepared reciprocal and wraps the final storage bits.
+    pub(crate) fn apply(self, numerator: Fixed<R, F>) -> Fixed<R, F> {
+        let (quotient, negative) = self.quotient(numerator);
+        Fixed::wrapping_raw(signed_wrapping(quotient, negative))
+    }
+
+    /// Exact quotient magnitude shared by both public arithmetic contracts.
+    fn quotient(self, numerator: Fixed<R, F>) -> (u128, bool) {
         let n = numerator.to_bits().widen();
         let d = self.denominator.to_bits().widen();
         let a = n.unsigned_abs();
@@ -82,6 +105,6 @@ impl<R: RealFormat<F>, const F: u32> FixedReciprocal<R, F> {
         if remainder > b - remainder || remainder == b - remainder && quotient & 1 != 0 {
             quotient += 1;
         }
-        Fixed::raw(signed(quotient, (n < 0) != (d < 0))?)
+        (quotient, (n < 0) != (d < 0))
     }
 }

@@ -61,6 +61,8 @@ pub trait Repr: sealed::Sealed + Copy + Default + Debug + Eq + Ord + Hash {
     fn widen(self) -> i128;
     /// Narrows only when the stored integer is representable.
     fn narrow(value: i128) -> Option<Self>;
+    /// Keeps the low storage bits, with two's-complement wrapping.
+    fn wrapping_narrow(value: i128) -> Self;
 }
 
 /// A valid signed binary format with `FRAC < Repr::BITS`.
@@ -112,6 +114,7 @@ macro_rules! repr {
         const ZERO: Self = 0;
         const UNIT: Self = 1;
         fn widen(self) -> i128 { self as i128 }
+        fn wrapping_narrow(value: i128) -> Self { value as Self }
         fn narrow(value: i128) -> Option<Self> {
             if value < <Self as Repr>::MIN || value > <Self as Repr>::MAX {
                 None

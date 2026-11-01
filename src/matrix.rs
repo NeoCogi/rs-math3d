@@ -81,12 +81,12 @@ pub enum InverseMode {
 /// optimization. Conditional pivot selection and elimination retain the same
 /// ascending evaluation order, checked errors and fixed-point quantization.
 macro_rules! impl_invert_rows {
-    ($name:ident, $n:literal, [$($index:literal),+]) => {
+    ($name:ident, $checked:ident, $n:literal, [$($index:literal),+]) => {
         /// Inverts owned stack rows without dimension-dependent runtime loops.
         /// Input finiteness is checked before any pivot mutation; each pivot is
         /// selected from the remaining rows before normalization/elimination.
         #[inline]
-        fn $name<T: RealScalar>(values: &mut [[T;$n];$n], inverse: &mut [[T;$n];$n]) -> Result<(), MathError> {
+        fn $checked<T: RealScalar>(values: &mut [[T;$n];$n], inverse: &mut [[T;$n];$n]) -> Result<(), MathError> {
             let zero = <T as Zero>::zero();
             let one = <T as One>::one();
             unroll_indices!(row in [$($index),+] {
@@ -97,7 +97,7 @@ macro_rules! impl_invert_rows {
             unroll_indices!(column in [$($index),+] {
                 let mut pivot = column;
                 unroll_indices!(row in [$($index),+] {
-                    if row > column && values[row][column].try_abs()? > values[pivot][column].try_abs()? {
+                    if row > column && values[row][column].checked_abs()? > values[pivot][column].checked_abs()? {
                         pivot = row;
                     }
                 });
@@ -106,16 +106,16 @@ macro_rules! impl_invert_rows {
                 values.swap(column,pivot);
                 inverse.swap(column,pivot);
                 unroll_indices!(entry in [$($index),+] {
-                    values[column][entry] = values[column][entry].try_div(divisor)?;
-                    inverse[column][entry] = inverse[column][entry].try_div(divisor)?;
+                    values[column][entry] = values[column][entry].checked_div(divisor)?;
+                    inverse[column][entry] = inverse[column][entry].checked_div(divisor)?;
                 });
                 values[column][column] = one;
                 unroll_indices!(row in [$($index),+] {
                     if row != column {
                         let factor = values[row][column];
                         unroll_indices!(entry in [$($index),+] {
-                            values[row][entry] = T::try_sum_products(&[(values[row][entry],one,false),(factor,values[column][entry],true)])?;
-                            inverse[row][entry] = T::try_sum_products(&[(inverse[row][entry],one,false),(factor,inverse[column][entry],true)])?;
+                            values[row][entry] = T::checked_sum_products(&[(values[row][entry],one,false),(factor,values[column][entry],true)])?;
+                            inverse[row][entry] = T::checked_sum_products(&[(inverse[row][entry],one,false),(factor,inverse[column][entry],true)])?;
                         });
                         values[row][column] = zero;
                     }
@@ -123,12 +123,140 @@ macro_rules! impl_invert_rows {
             });
             Ok(())
         }
+        fn $name<T: RealScalar>(values: &mut [[T;$n];$n], inverse: &mut [[T;$n];$n]) {
+            let zero = <T as Zero>::zero();
+            let one = <T as One>::one();
+            unroll_indices!(column in [$($index),+] {
+                let mut pivot = column;
+                unroll_indices!(row in [$($index),+] {
+                    if row > column && values[row][column].tabs() > values[pivot][column].tabs() {
+                        pivot = row;
+                    }
+                });
+                let divisor = values[pivot][column];
+                values.swap(column,pivot);
+                inverse.swap(column,pivot);
+                unroll_indices!(entry in [$($index),+] {
+                    values[column][entry] = values[column][entry] / divisor;
+                    inverse[column][entry] = inverse[column][entry] / divisor;
+                });
+                values[column][column] = one;
+                unroll_indices!(row in [$($index),+] {
+                    if row != column {
+                        let factor = values[row][column];
+                        unroll_indices!(entry in [$($index),+] {
+                            values[row][entry] = T::sum_products(&[(values[row][entry],one,false),(factor,values[column][entry],true)]);
+                            inverse[row][entry] = T::sum_products(&[(inverse[row][entry],one,false),(factor,inverse[column][entry],true)]);
+                        });
+                        values[row][column] = zero;
+                    }
+                });
+            });
+
+        }
     };
 }
 
-impl_invert_rows!(invert_rows2, 2, [0, 1]);
-impl_invert_rows!(invert_rows3, 3, [0, 1, 2]);
-impl_invert_rows!(invert_rows4, 4, [0, 1, 2, 3]);
+impl_invert_rows!(invert_rows2, checked_invert_rows2, 2, [0, 1]);
+impl_invert_rows!(invert_rows3, checked_invert_rows3, 3, [0, 1, 2]);
+impl_invert_rows!(invert_rows4, checked_invert_rows4, 4, [0, 1, 2, 3]);
+
+/// Shared 2x2 cofactor schedule. Reuses every minor in the determinant
+/// and adjugate; the arithmetic policy is selected during macro expansion.
+macro_rules! cofactors2 {
+    ($this:expr, $sum:ident, $neg:ident $(,$q:tt)?) => {{
+        let m00 = $this.col[0].x;
+        let m01 = $this.col[1].x;
+        let m10 = $this.col[0].y;
+        let m11 = $this.col[1].y;
+        let c00=m11;
+        let c01=m10.$neg() $( $q )?;
+        let c10=m01.$neg() $( $q )?;
+        let c11=m00;
+        let determinant = T::$sum(&[(m00,c00,false),(m01,c01,false)]) $( $q )?;
+        (Self { col: [Vector2::new(c00,c01),Vector2::new(c10,c11)] }, determinant)
+    }};
+}
+
+/// Shared 3x3 cofactor schedule. Reuses every minor in the determinant
+/// and adjugate; the arithmetic policy is selected during macro expansion.
+macro_rules! cofactors3 {
+    ($this:expr, $sum:ident, $neg:ident $(,$q:tt)?) => {{
+        let m00 = $this.col[0].x;
+        let m01 = $this.col[1].x;
+        let m02 = $this.col[2].x;
+        let m10 = $this.col[0].y;
+        let m11 = $this.col[1].y;
+        let m12 = $this.col[2].y;
+        let m20 = $this.col[0].z;
+        let m21 = $this.col[1].z;
+        let m22 = $this.col[2].z;
+        let c00 = T::$sum(&[(m11,m22,false),(m12,m21,true)]) $( $q )?;
+        let c01 = T::$sum(&[(m10,m22,true),(m12,m20,false)]) $( $q )?;
+        let c02 = T::$sum(&[(m10,m21,false),(m11,m20,true)]) $( $q )?;
+        let c10 = T::$sum(&[(m01,m22,true),(m02,m21,false)]) $( $q )?;
+        let c11 = T::$sum(&[(m00,m22,false),(m02,m20,true)]) $( $q )?;
+        let c12 = T::$sum(&[(m00,m21,true),(m01,m20,false)]) $( $q )?;
+        let c20 = T::$sum(&[(m01,m12,false),(m02,m11,true)]) $( $q )?;
+        let c21 = T::$sum(&[(m00,m12,true),(m02,m10,false)]) $( $q )?;
+        let c22 = T::$sum(&[(m00,m11,false),(m01,m10,true)]) $( $q )?;
+        let determinant = T::$sum(&[(m00,c00,false),(m01,c01,false),(m02,c02,false)]) $( $q )?;
+        (Self { col: [Vector3::new(c00,c01,c02),Vector3::new(c10,c11,c12),Vector3::new(c20,c21,c22)] }, determinant)
+    }};
+}
+
+/// Shared 4x4 cofactor schedule. Reuses every minor in the determinant
+/// and adjugate; the arithmetic policy is selected during macro expansion.
+macro_rules! cofactors4 {
+    ($this:expr, $sum:ident, $neg:ident $(,$q:tt)?) => {{
+        let m00 = $this.col[0].x;
+        let m01 = $this.col[1].x;
+        let m02 = $this.col[2].x;
+        let m03 = $this.col[3].x;
+        let m10 = $this.col[0].y;
+        let m11 = $this.col[1].y;
+        let m12 = $this.col[2].y;
+        let m13 = $this.col[3].y;
+        let m20 = $this.col[0].z;
+        let m21 = $this.col[1].z;
+        let m22 = $this.col[2].z;
+        let m23 = $this.col[3].z;
+        let m30 = $this.col[0].w;
+        let m31 = $this.col[1].w;
+        let m32 = $this.col[2].w;
+        let m33 = $this.col[3].w;
+        let b0 = T::$sum(&[(m20,m31,false),(m21,m30,true)]) $( $q )?;
+        let b1 = T::$sum(&[(m20,m32,false),(m22,m30,true)]) $( $q )?;
+        let b2 = T::$sum(&[(m20,m33,false),(m23,m30,true)]) $( $q )?;
+        let b3 = T::$sum(&[(m21,m32,false),(m22,m31,true)]) $( $q )?;
+        let b4 = T::$sum(&[(m21,m33,false),(m23,m31,true)]) $( $q )?;
+        let b5 = T::$sum(&[(m22,m33,false),(m23,m32,true)]) $( $q )?;
+        let t0 = T::$sum(&[(m00,m11,false),(m01,m10,true)]) $( $q )?;
+        let t1 = T::$sum(&[(m00,m12,false),(m02,m10,true)]) $( $q )?;
+        let t2 = T::$sum(&[(m00,m13,false),(m03,m10,true)]) $( $q )?;
+        let t3 = T::$sum(&[(m01,m12,false),(m02,m11,true)]) $( $q )?;
+        let t4 = T::$sum(&[(m01,m13,false),(m03,m11,true)]) $( $q )?;
+        let t5 = T::$sum(&[(m02,m13,false),(m03,m12,true)]) $( $q )?;
+        let c00 = T::$sum(&[(m11,b5,false),(m12,b4,true),(m13,b3,false)]) $( $q )?;
+        let c01 = T::$sum(&[(m10,b5,true),(m12,b2,false),(m13,b1,true)]) $( $q )?;
+        let c02 = T::$sum(&[(m10,b4,false),(m11,b2,true),(m13,b0,false)]) $( $q )?;
+        let c03 = T::$sum(&[(m10,b3,true),(m11,b1,false),(m12,b0,true)]) $( $q )?;
+        let c10 = T::$sum(&[(m01,b5,true),(m02,b4,false),(m03,b3,true)]) $( $q )?;
+        let c11 = T::$sum(&[(m00,b5,false),(m02,b2,true),(m03,b1,false)]) $( $q )?;
+        let c12 = T::$sum(&[(m00,b4,true),(m01,b2,false),(m03,b0,true)]) $( $q )?;
+        let c13 = T::$sum(&[(m00,b3,false),(m01,b1,true),(m02,b0,false)]) $( $q )?;
+        let c20 = T::$sum(&[(m31,t5,false),(m32,t4,true),(m33,t3,false)]) $( $q )?;
+        let c21 = T::$sum(&[(m30,t5,true),(m32,t2,false),(m33,t1,true)]) $( $q )?;
+        let c22 = T::$sum(&[(m30,t4,false),(m31,t2,true),(m33,t0,false)]) $( $q )?;
+        let c23 = T::$sum(&[(m30,t3,true),(m31,t1,false),(m32,t0,true)]) $( $q )?;
+        let c30 = T::$sum(&[(m21,t5,true),(m22,t4,false),(m23,t3,true)]) $( $q )?;
+        let c31 = T::$sum(&[(m20,t5,false),(m22,t2,true),(m23,t1,false)]) $( $q )?;
+        let c32 = T::$sum(&[(m20,t4,true),(m21,t2,false),(m23,t0,true)]) $( $q )?;
+        let c33 = T::$sum(&[(m20,t3,false),(m21,t1,true),(m22,t0,false)]) $( $q )?;
+        let determinant = T::$sum(&[(m00,c00,false),(m01,c01,false),(m02,c02,false),(m03,c03,false)]) $( $q )?;
+        (Self { col: [Vector4::new(c00,c01,c02,c03),Vector4::new(c10,c11,c12,c13),Vector4::new(c20,c21,c22,c23),Vector4::new(c30,c31,c32,c33)] }, determinant)
+    }};
+}
 
 /// A 2x2 matrix stored in column-major order.
 ///
@@ -240,14 +368,17 @@ impl<T: Scalar> Matrix2<T> {
     /// ```text
     /// det(M) = m₀₀m₁₁ - m₀₁m₁₀
     /// ```
+    /// Determinant with checked cofactor arithmetic and input validation.
+    pub fn checked_determinant(&self) -> Result<T, MathError> {
+        unroll_indices!(column in [0, 1] {
+            if !self.col[column].x.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].y.is_finite() { return Err(MathError::NonFinite); }
+        });
+        Ok(cofactors2!(self, checked_sum_products, checked_neg, ?).1)
+    }
+
     pub fn determinant(&self) -> T {
-        let m00 = self.col[0].x;
-        let m10 = self.col[0].y;
-
-        let m01 = self.col[1].x;
-        let m11 = self.col[1].y;
-
-        m00 * m11 - m01 * m10
+        cofactors2!(self, sum_products, neg).1
     }
 
     /// Returns the transpose of the matrix.
@@ -266,59 +397,79 @@ impl<T: Scalar> Matrix2<T> {
     }
 
     /// Inverts using the default reciprocal/adjugate path.
-    pub fn try_inverse(&self) -> Result<Self, MathError>
+    pub fn checked_inverse(&self) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
-        self.try_inverse_with(InverseMode::default())
+        self.checked_inverse_with(InverseMode::default())
     }
     /// Selects the inversion algorithm explicitly; both modes check every
     /// arithmetic boundary and can differ in fixed-point rounding and range.
-    pub fn try_inverse_with(&self, mode: InverseMode) -> Result<Self, MathError>
+    pub fn checked_inverse_with(&self, mode: InverseMode) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
         match mode {
-            InverseMode::Reciprocal => self.try_inverse_reciprocal(),
-            InverseMode::Rows => self.try_inverse_rows(),
+            InverseMode::Reciprocal => self.checked_inverse_reciprocal(),
+            InverseMode::Rows => self.checked_inverse_rows(),
         }
     }
-    /// Selects an inversion mode, panicking on invalid/unrepresentable input.
+    /// Selects an inversion mode without validating arithmetic or input.
     pub fn inverse_with(&self, mode: InverseMode) -> Self
     where
         T: RealScalar,
     {
-        self.try_inverse_with(mode).expect("matrix inverse failed")
+        match mode {
+            InverseMode::Reciprocal => self.inverse_reciprocal(),
+            InverseMode::Rows => self.inverse_rows(),
+        }
     }
     /// Computes the adjugate and one guarded determinant reciprocal. Fixed
     /// reciprocals retain internal precision even if scalar 1/det rounds to zero.
     /// Cofactor/determinant intermediates must fit the scalar format; use Rows
     /// when its different intermediate range is preferable.
-    pub fn try_inverse_reciprocal(&self) -> Result<Self, MathError>
+    /// Adjugate inversion without validation, with one guarded reciprocal.
+    /// Requires a nonsingular matrix and representable cofactor intermediates.
+    pub fn inverse_reciprocal(&self) -> Self
     where
         T: RealScalar,
     {
-        let m00 = self.col[0].x;
-        let m10 = self.col[0].y;
-        let m01 = self.col[1].x;
-        let m11 = self.col[1].y;
-        let denominator = ((m00).try_mul(m11)?).try_sub((m01).try_mul(m10)?)?;
+        let (adjugate, denominator) = cofactors2!(self, sum_products, neg);
+        let reciprocal = denominator.reciprocal();
+        let mut result = adjugate;
+        unroll_indices!(column in [0, 1] {
+            result.col[column].x = adjugate.col[column].x.mul_reciprocal(reciprocal);
+            result.col[column].y = adjugate.col[column].y.mul_reciprocal(reciprocal);
+        });
+        result
+    }
+
+    pub fn checked_inverse_reciprocal(&self) -> Result<Self, MathError>
+    where
+        T: RealScalar,
+    {
+        unroll_indices!(column in [0, 1] {
+            if !self.col[column].x.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].y.is_finite() { return Err(MathError::NonFinite); }
+        });
+        let (adjugate, denominator) = cofactors2!(self, checked_sum_products, checked_neg, ?);
         if denominator == <T as Zero>::zero() {
             return Err(MathError::Degenerate);
         }
-        let reciprocal = denominator.try_reciprocal()?;
-        let r00 = (m11).try_mul_reciprocal(reciprocal)?;
-        let r01 = ((m01).try_neg()?).try_mul_reciprocal(reciprocal)?;
-        let r10 = ((m10).try_neg()?).try_mul_reciprocal(reciprocal)?;
-        let r11 = (m00).try_mul_reciprocal(reciprocal)?;
-        Ok(Self::new(r00, r10, r01, r11))
+        let reciprocal = denominator.checked_reciprocal()?;
+        let mut result = adjugate;
+        unroll_indices!(column in [0, 1] {
+            result.col[column].x = adjugate.col[column].x.checked_mul_reciprocal(reciprocal)?;
+            result.col[column].y = adjugate.col[column].y.checked_mul_reciprocal(reciprocal)?;
+        });
+        Ok(result)
     }
 
     /// Inverts with partial-pivot Gauss-Jordan elimination and checked
     /// arithmetic. Singular pivots, non-finite inputs and unrepresentable
     /// intermediate/output values are reported instead of producing NaNs.
     /// Fixed-point elimination rounds at each represented row operation.
-    pub fn try_inverse_rows(&self) -> Result<Self, MathError>
+    pub fn checked_inverse_rows(&self) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
@@ -331,13 +482,37 @@ impl<T: Scalar> Matrix2<T> {
             values[row][0] = v.x;
             values[row][1] = v.y;
         });
-        invert_rows2(&mut values, &mut inverse)?;
+        checked_invert_rows2(&mut values, &mut inverse)?;
         let mut result = Self::identity();
         result.col[0].x = inverse[0][0];
         result.col[0].y = inverse[1][0];
         result.col[1].x = inverse[0][1];
         result.col[1].y = inverse[1][1];
         Ok(result)
+    }
+
+    /// Row elimination without validation. Supply an invertible matrix and
+    /// representable intermediate arithmetic. The schedule is explicitly expanded.
+    pub fn inverse_rows(&self) -> Self
+    where
+        T: RealScalar,
+    {
+        let rows = self.transpose();
+        let mut values = [[<T as Zero>::zero(); 2]; 2];
+        let mut inverse = [[<T as Zero>::zero(); 2]; 2];
+        unroll_indices!(row in [0, 1] {
+            inverse[row][row] = <T as One>::one();
+            let v = rows.col[row];
+            values[row][0] = v.x;
+            values[row][1] = v.y;
+        });
+        invert_rows2(&mut values, &mut inverse);
+        let mut result = Self::identity();
+        result.col[0].x = inverse[0][0];
+        result.col[0].y = inverse[1][0];
+        result.col[1].x = inverse[0][1];
+        result.col[1].y = inverse[1][1];
+        result
     }
 
     /// Computes the inverse of the matrix.
@@ -349,14 +524,13 @@ impl<T: Scalar> Matrix2<T> {
     /// ```
     ///
     /// # Note
-    /// Panics for singular, non-finite or unrepresentable matrices. Use `try_inverse`
+    /// Requires nonsingular, finite inputs and representable intermediates. Use `checked_inverse`
     /// to inspect the numerical error.
     pub fn inverse(&self) -> Self
     where
         T: RealScalar,
     {
-        self.try_inverse()
-            .expect("matrix inverse is not representable")
+        self.inverse_with(InverseMode::default())
     }
 
     /// Multiplies two 2x2 matrices.
@@ -481,23 +655,18 @@ impl<T: Scalar> Matrix3<T> {
     }
 
     /// Computes the determinant of the matrix.
+    /// Determinant with checked cofactor arithmetic and input validation.
+    pub fn checked_determinant(&self) -> Result<T, MathError> {
+        unroll_indices!(column in [0, 1, 2] {
+            if !self.col[column].x.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].y.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].z.is_finite() { return Err(MathError::NonFinite); }
+        });
+        Ok(cofactors3!(self, checked_sum_products, checked_neg, ?).1)
+    }
+
     pub fn determinant(&self) -> T {
-        let m00 = self.col[0].x;
-        let m10 = self.col[0].y;
-        let m20 = self.col[0].z;
-
-        let m01 = self.col[1].x;
-        let m11 = self.col[1].y;
-        let m21 = self.col[1].z;
-
-        let m02 = self.col[2].x;
-        let m12 = self.col[2].y;
-        let m22 = self.col[2].z;
-
-        m00 * m11 * m22 + m01 * m12 * m20 + m02 * m10 * m21
-            - m00 * m12 * m21
-            - m01 * m10 * m22
-            - m02 * m11 * m20
+        cofactors3!(self, sum_products, neg).1
     }
 
     /// Returns the transpose of the matrix.
@@ -522,83 +691,82 @@ impl<T: Scalar> Matrix3<T> {
     }
 
     /// Inverts using the default reciprocal/adjugate path.
-    pub fn try_inverse(&self) -> Result<Self, MathError>
+    pub fn checked_inverse(&self) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
-        self.try_inverse_with(InverseMode::default())
+        self.checked_inverse_with(InverseMode::default())
     }
     /// Selects the inversion algorithm explicitly; both modes check every
     /// arithmetic boundary and can differ in fixed-point rounding and range.
-    pub fn try_inverse_with(&self, mode: InverseMode) -> Result<Self, MathError>
+    pub fn checked_inverse_with(&self, mode: InverseMode) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
         match mode {
-            InverseMode::Reciprocal => self.try_inverse_reciprocal(),
-            InverseMode::Rows => self.try_inverse_rows(),
+            InverseMode::Reciprocal => self.checked_inverse_reciprocal(),
+            InverseMode::Rows => self.checked_inverse_rows(),
         }
     }
-    /// Selects an inversion mode, panicking on invalid/unrepresentable input.
+    /// Selects an inversion mode without validating arithmetic or input.
     pub fn inverse_with(&self, mode: InverseMode) -> Self
     where
         T: RealScalar,
     {
-        self.try_inverse_with(mode).expect("matrix inverse failed")
+        match mode {
+            InverseMode::Reciprocal => self.inverse_reciprocal(),
+            InverseMode::Rows => self.inverse_rows(),
+        }
     }
     /// Computes the adjugate and one guarded determinant reciprocal. Fixed
     /// reciprocals retain internal precision even if scalar 1/det rounds to zero.
     /// Cofactor/determinant intermediates must fit the scalar format; use Rows
     /// when its different intermediate range is preferable.
-    pub fn try_inverse_reciprocal(&self) -> Result<Self, MathError>
+    /// Adjugate inversion without validation, with one guarded reciprocal.
+    /// Requires a nonsingular matrix and representable cofactor intermediates.
+    pub fn inverse_reciprocal(&self) -> Self
     where
         T: RealScalar,
     {
-        let m00 = self.col[0].x;
-        let m10 = self.col[0].y;
-        let m20 = self.col[0].z;
-        let m01 = self.col[1].x;
-        let m11 = self.col[1].y;
-        let m21 = self.col[1].z;
-        let m02 = self.col[2].x;
-        let m12 = self.col[2].y;
-        let m22 = self.col[2].z;
-        let denominator = (((((((m00).try_mul(m11)?).try_mul(m22)?)
-            .try_add(((m01).try_mul(m12)?).try_mul(m20)?)?)
-        .try_add(((m02).try_mul(m10)?).try_mul(m21)?)?)
-        .try_sub(((m00).try_mul(m12)?).try_mul(m21)?)?)
-        .try_sub(((m01).try_mul(m10)?).try_mul(m22)?)?)
-        .try_sub(((m02).try_mul(m11)?).try_mul(m20)?)?;
+        let (adjugate, denominator) = cofactors3!(self, sum_products, neg);
+        let reciprocal = denominator.reciprocal();
+        let mut result = adjugate;
+        unroll_indices!(column in [0, 1, 2] {
+            result.col[column].x = adjugate.col[column].x.mul_reciprocal(reciprocal);
+            result.col[column].y = adjugate.col[column].y.mul_reciprocal(reciprocal);
+            result.col[column].z = adjugate.col[column].z.mul_reciprocal(reciprocal);
+        });
+        result
+    }
+
+    pub fn checked_inverse_reciprocal(&self) -> Result<Self, MathError>
+    where
+        T: RealScalar,
+    {
+        unroll_indices!(column in [0, 1, 2] {
+            if !self.col[column].x.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].y.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].z.is_finite() { return Err(MathError::NonFinite); }
+        });
+        let (adjugate, denominator) = cofactors3!(self, checked_sum_products, checked_neg, ?);
         if denominator == <T as Zero>::zero() {
             return Err(MathError::Degenerate);
         }
-        let reciprocal = denominator.try_reciprocal()?;
-        let r00 =
-            (((m11).try_mul(m22)?).try_sub((m12).try_mul(m21)?)?).try_mul_reciprocal(reciprocal)?;
-        let r01 =
-            (((m02).try_mul(m21)?).try_sub((m01).try_mul(m22)?)?).try_mul_reciprocal(reciprocal)?;
-        let r02 =
-            (((m01).try_mul(m12)?).try_sub((m02).try_mul(m11)?)?).try_mul_reciprocal(reciprocal)?;
-        let r10 =
-            (((m12).try_mul(m20)?).try_sub((m10).try_mul(m22)?)?).try_mul_reciprocal(reciprocal)?;
-        let r11 =
-            (((m00).try_mul(m22)?).try_sub((m02).try_mul(m20)?)?).try_mul_reciprocal(reciprocal)?;
-        let r12 =
-            (((m02).try_mul(m10)?).try_sub((m00).try_mul(m12)?)?).try_mul_reciprocal(reciprocal)?;
-        let r20 =
-            (((m10).try_mul(m21)?).try_sub((m11).try_mul(m20)?)?).try_mul_reciprocal(reciprocal)?;
-        let r21 =
-            (((m01).try_mul(m20)?).try_sub((m00).try_mul(m21)?)?).try_mul_reciprocal(reciprocal)?;
-        let r22 =
-            (((m00).try_mul(m11)?).try_sub((m01).try_mul(m10)?)?).try_mul_reciprocal(reciprocal)?;
-        Ok(Self::new(r00, r10, r20, r01, r11, r21, r02, r12, r22))
+        let reciprocal = denominator.checked_reciprocal()?;
+        let mut result = adjugate;
+        unroll_indices!(column in [0, 1, 2] {
+            result.col[column].x = adjugate.col[column].x.checked_mul_reciprocal(reciprocal)?;
+            result.col[column].y = adjugate.col[column].y.checked_mul_reciprocal(reciprocal)?;
+            result.col[column].z = adjugate.col[column].z.checked_mul_reciprocal(reciprocal)?;
+        });
+        Ok(result)
     }
 
     /// Inverts with partial-pivot Gauss-Jordan elimination and checked
     /// arithmetic. Singular pivots, non-finite inputs and unrepresentable
     /// intermediate/output values are reported instead of producing NaNs.
     /// Fixed-point elimination rounds at each represented row operation.
-    pub fn try_inverse_rows(&self) -> Result<Self, MathError>
+    pub fn checked_inverse_rows(&self) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
@@ -612,7 +780,7 @@ impl<T: Scalar> Matrix3<T> {
             values[row][1] = v.y;
             values[row][2] = v.z;
         });
-        invert_rows3(&mut values, &mut inverse)?;
+        checked_invert_rows3(&mut values, &mut inverse)?;
         let mut result = Self::identity();
         result.col[0].x = inverse[0][0];
         result.col[0].y = inverse[1][0];
@@ -626,6 +794,36 @@ impl<T: Scalar> Matrix3<T> {
         Ok(result)
     }
 
+    /// Row elimination without validation. Supply an invertible matrix and
+    /// representable intermediate arithmetic. The schedule is explicitly expanded.
+    pub fn inverse_rows(&self) -> Self
+    where
+        T: RealScalar,
+    {
+        let rows = self.transpose();
+        let mut values = [[<T as Zero>::zero(); 3]; 3];
+        let mut inverse = [[<T as Zero>::zero(); 3]; 3];
+        unroll_indices!(row in [0, 1, 2] {
+            inverse[row][row] = <T as One>::one();
+            let v = rows.col[row];
+            values[row][0] = v.x;
+            values[row][1] = v.y;
+            values[row][2] = v.z;
+        });
+        invert_rows3(&mut values, &mut inverse);
+        let mut result = Self::identity();
+        result.col[0].x = inverse[0][0];
+        result.col[0].y = inverse[1][0];
+        result.col[0].z = inverse[2][0];
+        result.col[1].x = inverse[0][1];
+        result.col[1].y = inverse[1][1];
+        result.col[1].z = inverse[2][1];
+        result.col[2].x = inverse[0][2];
+        result.col[2].y = inverse[1][2];
+        result.col[2].z = inverse[2][2];
+        result
+    }
+
     /// Computes the inverse of the matrix.
     ///
     /// Uses the reciprocal/adjugate path by default; `inverse_with` selects rows:
@@ -634,14 +832,13 @@ impl<T: Scalar> Matrix3<T> {
     /// ```
     ///
     /// # Note
-    /// Panics for singular, non-finite or unrepresentable matrices. Use `try_inverse`
+    /// Requires nonsingular, finite inputs and representable intermediates. Use `checked_inverse`
     /// to inspect the numerical error.
     pub fn inverse(&self) -> Self
     where
         T: RealScalar,
     {
-        self.try_inverse()
-            .expect("matrix inverse is not representable")
+        self.inverse_with(InverseMode::default())
     }
 
     /// Multiplies two 3x3 matrices.
@@ -732,8 +929,8 @@ impl<T: RealScalar> Matrix3<T> {
     /// - `None` if the axis length is too small
     pub fn of_axis_angle(axis: &Vector3<T>, angle: T, epsilon: T) -> Option<Self> {
         let n = axis.checked_normalize(epsilon).ok()?;
-        let c = angle.try_cos().ok()?;
-        let s = angle.try_sin().ok()?;
+        let c = angle.checked_cos().ok()?;
+        let s = angle.checked_sin().ok()?;
         let ux = n.x;
         let uy = n.y;
         let uz = n.z;
@@ -854,49 +1051,19 @@ impl<T: Scalar> Matrix4<T> {
     ///
     /// Uses Laplace expansion along the first column.
     /// A non-zero determinant indicates the matrix is invertible.
+    /// Determinant with checked cofactor arithmetic and input validation.
+    pub fn checked_determinant(&self) -> Result<T, MathError> {
+        unroll_indices!(column in [0, 1, 2, 3] {
+            if !self.col[column].x.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].y.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].z.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].w.is_finite() { return Err(MathError::NonFinite); }
+        });
+        Ok(cofactors4!(self, checked_sum_products, checked_neg, ?).1)
+    }
+
     pub fn determinant(&self) -> T {
-        let m00 = self.col[0].x;
-        let m10 = self.col[0].y;
-        let m20 = self.col[0].z;
-        let m30 = self.col[0].w;
-
-        let m01 = self.col[1].x;
-        let m11 = self.col[1].y;
-        let m21 = self.col[1].z;
-        let m31 = self.col[1].w;
-
-        let m02 = self.col[2].x;
-        let m12 = self.col[2].y;
-        let m22 = self.col[2].z;
-        let m32 = self.col[2].w;
-
-        let m03 = self.col[3].x;
-        let m13 = self.col[3].y;
-        let m23 = self.col[3].z;
-        let m33 = self.col[3].w;
-
-        m03 * m12 * m21 * m30 - m02 * m13 * m21 * m30 - m03 * m11 * m22 * m30
-            + m01 * m13 * m22 * m30
-            + m02 * m11 * m23 * m30
-            - m01 * m12 * m23 * m30
-            - m03 * m12 * m20 * m31
-            + m02 * m13 * m20 * m31
-            + m03 * m10 * m22 * m31
-            - m00 * m13 * m22 * m31
-            - m02 * m10 * m23 * m31
-            + m00 * m12 * m23 * m31
-            + m03 * m11 * m20 * m32
-            - m01 * m13 * m20 * m32
-            - m03 * m10 * m21 * m32
-            + m00 * m13 * m21 * m32
-            + m01 * m10 * m23 * m32
-            - m00 * m11 * m23 * m32
-            - m02 * m11 * m20 * m33
-            + m01 * m12 * m20 * m33
-            + m02 * m10 * m21 * m33
-            - m00 * m12 * m21 * m33
-            - m01 * m10 * m22 * m33
-            + m00 * m11 * m22 * m33
+        cofactors4!(self, sum_products, neg).1
     }
 
     /// Returns the transpose of the matrix.
@@ -938,7 +1105,7 @@ impl<T: Scalar> Matrix4<T> {
         }
         let absolute = |value: T| {
             if value < zero {
-                value.try_neg().ok()
+                value.checked_neg().ok()
             } else {
                 Some(value)
             }
@@ -949,212 +1116,90 @@ impl<T: Scalar> Matrix4<T> {
             && inside(self.col[2].w)
             && self.col[3]
                 .w
-                .try_sub(<T as One>::one())
+                .checked_sub(<T as One>::one())
                 .map_or(false, inside)
     }
 
     /// Inverts using the default reciprocal/adjugate path.
-    pub fn try_inverse(&self) -> Result<Self, MathError>
+    pub fn checked_inverse(&self) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
-        self.try_inverse_with(InverseMode::default())
+        self.checked_inverse_with(InverseMode::default())
     }
     /// Selects the inversion algorithm explicitly; both modes check every
     /// arithmetic boundary and can differ in fixed-point rounding and range.
-    pub fn try_inverse_with(&self, mode: InverseMode) -> Result<Self, MathError>
+    pub fn checked_inverse_with(&self, mode: InverseMode) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
         match mode {
-            InverseMode::Reciprocal => self.try_inverse_reciprocal(),
-            InverseMode::Rows => self.try_inverse_rows(),
+            InverseMode::Reciprocal => self.checked_inverse_reciprocal(),
+            InverseMode::Rows => self.checked_inverse_rows(),
         }
     }
-    /// Selects an inversion mode, panicking on invalid/unrepresentable input.
+    /// Selects an inversion mode without validating arithmetic or input.
     pub fn inverse_with(&self, mode: InverseMode) -> Self
     where
         T: RealScalar,
     {
-        self.try_inverse_with(mode).expect("matrix inverse failed")
+        match mode {
+            InverseMode::Reciprocal => self.inverse_reciprocal(),
+            InverseMode::Rows => self.inverse_rows(),
+        }
     }
     /// Computes the adjugate and one guarded determinant reciprocal. Fixed
     /// reciprocals retain internal precision even if scalar 1/det rounds to zero.
     /// Cofactor/determinant intermediates must fit the scalar format; use Rows
     /// when its different intermediate range is preferable.
-    pub fn try_inverse_reciprocal(&self) -> Result<Self, MathError>
+    /// Adjugate inversion without validation, with one guarded reciprocal.
+    /// Requires a nonsingular matrix and representable cofactor intermediates.
+    pub fn inverse_reciprocal(&self) -> Self
     where
         T: RealScalar,
     {
-        let m00 = self.col[0].x;
-        let m10 = self.col[0].y;
-        let m20 = self.col[0].z;
-        let m30 = self.col[0].w;
-        let m01 = self.col[1].x;
-        let m11 = self.col[1].y;
-        let m21 = self.col[1].z;
-        let m31 = self.col[1].w;
-        let m02 = self.col[2].x;
-        let m12 = self.col[2].y;
-        let m22 = self.col[2].z;
-        let m32 = self.col[2].w;
-        let m03 = self.col[3].x;
-        let m13 = self.col[3].y;
-        let m23 = self.col[3].z;
-        let m33 = self.col[3].w;
-        let denom = ((((((((((((((((((((((((((m03).try_mul(m12)?)
-            .try_mul(m21)?)
-        .try_mul(m30)?)
-        .try_sub((((m02).try_mul(m13)?).try_mul(m21)?).try_mul(m30)?)?)
-        .try_sub((((m03).try_mul(m11)?).try_mul(m22)?).try_mul(m30)?)?)
-        .try_add((((m01).try_mul(m13)?).try_mul(m22)?).try_mul(m30)?)?)
-        .try_add((((m02).try_mul(m11)?).try_mul(m23)?).try_mul(m30)?)?)
-        .try_sub((((m01).try_mul(m12)?).try_mul(m23)?).try_mul(m30)?)?)
-        .try_sub((((m03).try_mul(m12)?).try_mul(m20)?).try_mul(m31)?)?)
-        .try_add((((m02).try_mul(m13)?).try_mul(m20)?).try_mul(m31)?)?)
-        .try_add((((m03).try_mul(m10)?).try_mul(m22)?).try_mul(m31)?)?)
-        .try_sub((((m00).try_mul(m13)?).try_mul(m22)?).try_mul(m31)?)?)
-        .try_sub((((m02).try_mul(m10)?).try_mul(m23)?).try_mul(m31)?)?)
-        .try_add((((m00).try_mul(m12)?).try_mul(m23)?).try_mul(m31)?)?)
-        .try_add((((m03).try_mul(m11)?).try_mul(m20)?).try_mul(m32)?)?)
-        .try_sub((((m01).try_mul(m13)?).try_mul(m20)?).try_mul(m32)?)?)
-        .try_sub((((m03).try_mul(m10)?).try_mul(m21)?).try_mul(m32)?)?)
-        .try_add((((m00).try_mul(m13)?).try_mul(m21)?).try_mul(m32)?)?)
-        .try_add((((m01).try_mul(m10)?).try_mul(m23)?).try_mul(m32)?)?)
-        .try_sub((((m00).try_mul(m11)?).try_mul(m23)?).try_mul(m32)?)?)
-        .try_sub((((m02).try_mul(m11)?).try_mul(m20)?).try_mul(m33)?)?)
-        .try_add((((m01).try_mul(m12)?).try_mul(m20)?).try_mul(m33)?)?)
-        .try_add((((m02).try_mul(m10)?).try_mul(m21)?).try_mul(m33)?)?)
-        .try_sub((((m00).try_mul(m12)?).try_mul(m21)?).try_mul(m33)?)?)
-        .try_sub((((m01).try_mul(m10)?).try_mul(m22)?).try_mul(m33)?)?)
-        .try_add((((m00).try_mul(m11)?).try_mul(m22)?).try_mul(m33)?)?;
-        let denominator = denom;
+        let (adjugate, denominator) = cofactors4!(self, sum_products, neg);
+        let reciprocal = denominator.reciprocal();
+        let mut result = adjugate;
+        unroll_indices!(column in [0, 1, 2, 3] {
+            result.col[column].x = adjugate.col[column].x.mul_reciprocal(reciprocal);
+            result.col[column].y = adjugate.col[column].y.mul_reciprocal(reciprocal);
+            result.col[column].z = adjugate.col[column].z.mul_reciprocal(reciprocal);
+            result.col[column].w = adjugate.col[column].w.mul_reciprocal(reciprocal);
+        });
+        result
+    }
+
+    pub fn checked_inverse_reciprocal(&self) -> Result<Self, MathError>
+    where
+        T: RealScalar,
+    {
+        unroll_indices!(column in [0, 1, 2, 3] {
+            if !self.col[column].x.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].y.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].z.is_finite() { return Err(MathError::NonFinite); }
+            if !self.col[column].w.is_finite() { return Err(MathError::NonFinite); }
+        });
+        let (adjugate, denominator) = cofactors4!(self, checked_sum_products, checked_neg, ?);
         if denominator == <T as Zero>::zero() {
             return Err(MathError::Degenerate);
         }
-        let reciprocal = denominator.try_reciprocal()?;
-        let r00 = ((((((((m12).try_mul(m23)?).try_mul(m31)?)
-            .try_sub(((m13).try_mul(m22)?).try_mul(m31)?)?)
-        .try_add(((m13).try_mul(m21)?).try_mul(m32)?)?)
-        .try_sub(((m11).try_mul(m23)?).try_mul(m32)?)?)
-        .try_sub(((m12).try_mul(m21)?).try_mul(m33)?)?)
-        .try_add(((m11).try_mul(m22)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r01 = ((((((((m03).try_mul(m22)?).try_mul(m31)?)
-            .try_sub(((m02).try_mul(m23)?).try_mul(m31)?)?)
-        .try_sub(((m03).try_mul(m21)?).try_mul(m32)?)?)
-        .try_add(((m01).try_mul(m23)?).try_mul(m32)?)?)
-        .try_add(((m02).try_mul(m21)?).try_mul(m33)?)?)
-        .try_sub(((m01).try_mul(m22)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r02 = ((((((((m02).try_mul(m13)?).try_mul(m31)?)
-            .try_sub(((m03).try_mul(m12)?).try_mul(m31)?)?)
-        .try_add(((m03).try_mul(m11)?).try_mul(m32)?)?)
-        .try_sub(((m01).try_mul(m13)?).try_mul(m32)?)?)
-        .try_sub(((m02).try_mul(m11)?).try_mul(m33)?)?)
-        .try_add(((m01).try_mul(m12)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r03 = ((((((((m03).try_mul(m12)?).try_mul(m21)?)
-            .try_sub(((m02).try_mul(m13)?).try_mul(m21)?)?)
-        .try_sub(((m03).try_mul(m11)?).try_mul(m22)?)?)
-        .try_add(((m01).try_mul(m13)?).try_mul(m22)?)?)
-        .try_add(((m02).try_mul(m11)?).try_mul(m23)?)?)
-        .try_sub(((m01).try_mul(m12)?).try_mul(m23)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r10 = ((((((((m13).try_mul(m22)?).try_mul(m30)?)
-            .try_sub(((m12).try_mul(m23)?).try_mul(m30)?)?)
-        .try_sub(((m13).try_mul(m20)?).try_mul(m32)?)?)
-        .try_add(((m10).try_mul(m23)?).try_mul(m32)?)?)
-        .try_add(((m12).try_mul(m20)?).try_mul(m33)?)?)
-        .try_sub(((m10).try_mul(m22)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r11 = ((((((((m02).try_mul(m23)?).try_mul(m30)?)
-            .try_sub(((m03).try_mul(m22)?).try_mul(m30)?)?)
-        .try_add(((m03).try_mul(m20)?).try_mul(m32)?)?)
-        .try_sub(((m00).try_mul(m23)?).try_mul(m32)?)?)
-        .try_sub(((m02).try_mul(m20)?).try_mul(m33)?)?)
-        .try_add(((m00).try_mul(m22)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r12 = ((((((((m03).try_mul(m12)?).try_mul(m30)?)
-            .try_sub(((m02).try_mul(m13)?).try_mul(m30)?)?)
-        .try_sub(((m03).try_mul(m10)?).try_mul(m32)?)?)
-        .try_add(((m00).try_mul(m13)?).try_mul(m32)?)?)
-        .try_add(((m02).try_mul(m10)?).try_mul(m33)?)?)
-        .try_sub(((m00).try_mul(m12)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r13 = ((((((((m02).try_mul(m13)?).try_mul(m20)?)
-            .try_sub(((m03).try_mul(m12)?).try_mul(m20)?)?)
-        .try_add(((m03).try_mul(m10)?).try_mul(m22)?)?)
-        .try_sub(((m00).try_mul(m13)?).try_mul(m22)?)?)
-        .try_sub(((m02).try_mul(m10)?).try_mul(m23)?)?)
-        .try_add(((m00).try_mul(m12)?).try_mul(m23)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r20 = ((((((((m11).try_mul(m23)?).try_mul(m30)?)
-            .try_sub(((m13).try_mul(m21)?).try_mul(m30)?)?)
-        .try_add(((m13).try_mul(m20)?).try_mul(m31)?)?)
-        .try_sub(((m10).try_mul(m23)?).try_mul(m31)?)?)
-        .try_sub(((m11).try_mul(m20)?).try_mul(m33)?)?)
-        .try_add(((m10).try_mul(m21)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r21 = ((((((((m03).try_mul(m21)?).try_mul(m30)?)
-            .try_sub(((m01).try_mul(m23)?).try_mul(m30)?)?)
-        .try_sub(((m03).try_mul(m20)?).try_mul(m31)?)?)
-        .try_add(((m00).try_mul(m23)?).try_mul(m31)?)?)
-        .try_add(((m01).try_mul(m20)?).try_mul(m33)?)?)
-        .try_sub(((m00).try_mul(m21)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r22 = ((((((((m01).try_mul(m13)?).try_mul(m30)?)
-            .try_sub(((m03).try_mul(m11)?).try_mul(m30)?)?)
-        .try_add(((m03).try_mul(m10)?).try_mul(m31)?)?)
-        .try_sub(((m00).try_mul(m13)?).try_mul(m31)?)?)
-        .try_sub(((m01).try_mul(m10)?).try_mul(m33)?)?)
-        .try_add(((m00).try_mul(m11)?).try_mul(m33)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r23 = ((((((((m03).try_mul(m11)?).try_mul(m20)?)
-            .try_sub(((m01).try_mul(m13)?).try_mul(m20)?)?)
-        .try_sub(((m03).try_mul(m10)?).try_mul(m21)?)?)
-        .try_add(((m00).try_mul(m13)?).try_mul(m21)?)?)
-        .try_add(((m01).try_mul(m10)?).try_mul(m23)?)?)
-        .try_sub(((m00).try_mul(m11)?).try_mul(m23)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r30 = ((((((((m12).try_mul(m21)?).try_mul(m30)?)
-            .try_sub(((m11).try_mul(m22)?).try_mul(m30)?)?)
-        .try_sub(((m12).try_mul(m20)?).try_mul(m31)?)?)
-        .try_add(((m10).try_mul(m22)?).try_mul(m31)?)?)
-        .try_add(((m11).try_mul(m20)?).try_mul(m32)?)?)
-        .try_sub(((m10).try_mul(m21)?).try_mul(m32)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r31 = ((((((((m01).try_mul(m22)?).try_mul(m30)?)
-            .try_sub(((m02).try_mul(m21)?).try_mul(m30)?)?)
-        .try_add(((m02).try_mul(m20)?).try_mul(m31)?)?)
-        .try_sub(((m00).try_mul(m22)?).try_mul(m31)?)?)
-        .try_sub(((m01).try_mul(m20)?).try_mul(m32)?)?)
-        .try_add(((m00).try_mul(m21)?).try_mul(m32)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r32 = ((((((((m02).try_mul(m11)?).try_mul(m30)?)
-            .try_sub(((m01).try_mul(m12)?).try_mul(m30)?)?)
-        .try_sub(((m02).try_mul(m10)?).try_mul(m31)?)?)
-        .try_add(((m00).try_mul(m12)?).try_mul(m31)?)?)
-        .try_add(((m01).try_mul(m10)?).try_mul(m32)?)?)
-        .try_sub(((m00).try_mul(m11)?).try_mul(m32)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        let r33 = ((((((((m01).try_mul(m12)?).try_mul(m20)?)
-            .try_sub(((m02).try_mul(m11)?).try_mul(m20)?)?)
-        .try_add(((m02).try_mul(m10)?).try_mul(m21)?)?)
-        .try_sub(((m00).try_mul(m12)?).try_mul(m21)?)?)
-        .try_sub(((m01).try_mul(m10)?).try_mul(m22)?)?)
-        .try_add(((m00).try_mul(m11)?).try_mul(m22)?)?)
-        .try_mul_reciprocal(reciprocal)?;
-        Ok(Self::new(
-            r00, r10, r20, r30, r01, r11, r21, r31, r02, r12, r22, r32, r03, r13, r23, r33,
-        ))
+        let reciprocal = denominator.checked_reciprocal()?;
+        let mut result = adjugate;
+        unroll_indices!(column in [0, 1, 2, 3] {
+            result.col[column].x = adjugate.col[column].x.checked_mul_reciprocal(reciprocal)?;
+            result.col[column].y = adjugate.col[column].y.checked_mul_reciprocal(reciprocal)?;
+            result.col[column].z = adjugate.col[column].z.checked_mul_reciprocal(reciprocal)?;
+            result.col[column].w = adjugate.col[column].w.checked_mul_reciprocal(reciprocal)?;
+        });
+        Ok(result)
     }
 
     /// Inverts with partial-pivot Gauss-Jordan elimination and checked
     /// arithmetic. Singular pivots, non-finite inputs and unrepresentable
     /// intermediate/output values are reported instead of producing NaNs.
     /// Fixed-point elimination rounds at each represented row operation.
-    pub fn try_inverse_rows(&self) -> Result<Self, MathError>
+    pub fn checked_inverse_rows(&self) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
@@ -1169,7 +1214,7 @@ impl<T: Scalar> Matrix4<T> {
             values[row][2] = v.z;
             values[row][3] = v.w;
         });
-        invert_rows4(&mut values, &mut inverse)?;
+        checked_invert_rows4(&mut values, &mut inverse)?;
         let mut result = Self::identity();
         result.col[0].x = inverse[0][0];
         result.col[0].y = inverse[1][0];
@@ -1190,6 +1235,44 @@ impl<T: Scalar> Matrix4<T> {
         Ok(result)
     }
 
+    /// Row elimination without validation. Supply an invertible matrix and
+    /// representable intermediate arithmetic. The schedule is explicitly expanded.
+    pub fn inverse_rows(&self) -> Self
+    where
+        T: RealScalar,
+    {
+        let rows = self.transpose();
+        let mut values = [[<T as Zero>::zero(); 4]; 4];
+        let mut inverse = [[<T as Zero>::zero(); 4]; 4];
+        unroll_indices!(row in [0, 1, 2, 3] {
+            inverse[row][row] = <T as One>::one();
+            let v = rows.col[row];
+            values[row][0] = v.x;
+            values[row][1] = v.y;
+            values[row][2] = v.z;
+            values[row][3] = v.w;
+        });
+        invert_rows4(&mut values, &mut inverse);
+        let mut result = Self::identity();
+        result.col[0].x = inverse[0][0];
+        result.col[0].y = inverse[1][0];
+        result.col[0].z = inverse[2][0];
+        result.col[0].w = inverse[3][0];
+        result.col[1].x = inverse[0][1];
+        result.col[1].y = inverse[1][1];
+        result.col[1].z = inverse[2][1];
+        result.col[1].w = inverse[3][1];
+        result.col[2].x = inverse[0][2];
+        result.col[2].y = inverse[1][2];
+        result.col[2].z = inverse[2][2];
+        result.col[2].w = inverse[3][2];
+        result.col[3].x = inverse[0][3];
+        result.col[3].y = inverse[1][3];
+        result.col[3].z = inverse[2][3];
+        result.col[3].w = inverse[3][3];
+        result
+    }
+
     /// Computes the inverse of the matrix.
     ///
     /// Uses the reciprocal/adjugate path by default; `inverse_with` selects rows:
@@ -1198,27 +1281,26 @@ impl<T: Scalar> Matrix4<T> {
     /// ```
     ///
     /// # Note
-    /// Panics for singular, non-finite or unrepresentable matrices. Use `try_inverse`
+    /// Requires nonsingular, finite inputs and representable intermediates. Use `checked_inverse`
     /// to inspect the numerical error.
     pub fn inverse(&self) -> Self
     where
         T: RealScalar,
     {
-        self.try_inverse()
-            .expect("matrix inverse is not representable")
+        self.inverse_with(InverseMode::default())
     }
 
     /// Checks the affine last row and inverts its linear part before computing
     /// the inverse translation. All products and negations are checked.
-    pub fn try_inverse_affine(&self) -> Result<Self, MathError>
+    pub fn checked_inverse_affine(&self) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
-        self.try_inverse_affine_with(InverseMode::default())
+        self.checked_inverse_affine_with(InverseMode::default())
     }
 
     /// Inverts an affine matrix with an explicit linear inversion algorithm.
-    pub fn try_inverse_affine_with(&self, mode: InverseMode) -> Result<Self, MathError>
+    pub fn checked_inverse_affine_with(&self, mode: InverseMode) -> Result<Self, MathError>
     where
         T: RealScalar,
     {
@@ -1236,9 +1318,9 @@ impl<T: Scalar> Matrix4<T> {
             self.col[2].y,
             self.col[2].z,
         )
-        .try_inverse_with(mode)?;
+        .checked_inverse_with(mode)?;
         let translation = Vector3::new(self.col[3].x, self.col[3].y, self.col[3].z);
-        let inverse_translation = Matrix3::try_mul_matrix_vector(&rot, &translation)?;
+        let inverse_translation = Matrix3::checked_mul_matrix_vector(&rot, &translation)?;
         Ok(Self::new(
             rot.col[0].x,
             rot.col[0].y,
@@ -1252,20 +1334,50 @@ impl<T: Scalar> Matrix4<T> {
             rot.col[2].y,
             rot.col[2].z,
             <T as Zero>::zero(),
-            inverse_translation.x.try_neg()?,
-            inverse_translation.y.try_neg()?,
-            inverse_translation.z.try_neg()?,
+            inverse_translation.x.checked_neg()?,
+            inverse_translation.y.checked_neg()?,
+            inverse_translation.z.checked_neg()?,
             <T as One>::one(),
         ))
     }
 
-    /// Selects the affine inverse algorithm, panicking on numerical failure.
+    /// Selects the affine inverse algorithm without validation.
     pub fn inverse_affine_with(&self, mode: InverseMode) -> Self
     where
         T: RealScalar,
     {
-        self.try_inverse_affine_with(mode)
-            .expect("affine inverse failed")
+        let rot = Matrix3::new(
+            self.col[0].x,
+            self.col[0].y,
+            self.col[0].z,
+            self.col[1].x,
+            self.col[1].y,
+            self.col[1].z,
+            self.col[2].x,
+            self.col[2].y,
+            self.col[2].z,
+        )
+        .inverse_with(mode);
+        let translation = Vector3::new(self.col[3].x, self.col[3].y, self.col[3].z);
+        let inverse_translation = Matrix3::mul_matrix_vector(&rot, &translation);
+        Self::new(
+            rot.col[0].x,
+            rot.col[0].y,
+            rot.col[0].z,
+            <T as Zero>::zero(),
+            rot.col[1].x,
+            rot.col[1].y,
+            rot.col[1].z,
+            <T as Zero>::zero(),
+            rot.col[2].x,
+            rot.col[2].y,
+            rot.col[2].z,
+            <T as Zero>::zero(),
+            -inverse_translation.x,
+            -inverse_translation.y,
+            -inverse_translation.z,
+            <T as One>::one(),
+        )
     }
 
     /// Computes the inverse of an affine matrix (rotation/scale + translation).
@@ -1275,8 +1387,7 @@ impl<T: Scalar> Matrix4<T> {
     where
         T: RealScalar,
     {
-        self.try_inverse_affine()
-            .expect("affine inverse is not representable")
+        self.inverse_affine_with(InverseMode::default())
     }
 
     /// Multiplies two 4x4 matrices.
@@ -1362,14 +1473,26 @@ impl<T: Scalar> Matrix4<T> {
 macro_rules! implMatrixOps {
     ($mat:ident, $vec:ident, $($index:literal => $field:ident),+) => {
         impl<T: Scalar> $mat<T> {
+            /// Adds every component with scalar range validation.
+            pub fn checked_add_matrix_matrix(l: &Self, r: &Self) -> Result<Self, MathError> {
+                Ok(Self { col: [$($vec::checked_add_vv(&l.col[$index], &r.col[$index])?),+] })
+            }
+            /// Subtracts every component with scalar range validation.
+            pub fn checked_sub_matrix_matrix(l: &Self, r: &Self) -> Result<Self, MathError> {
+                Ok(Self { col: [$($vec::checked_sub_vv(&l.col[$index], &r.col[$index])?),+] })
+            }
+            /// Multiplies a row vector and matrix using checked dot products.
+            pub fn checked_mul_vector_matrix(l: &$vec<T>, r: &Self) -> Result<$vec<T>, MathError> {
+                Ok($vec::new($($vec::checked_dot(l,&r.col[$index])?),+))
+            }
             /// Multiplies a matrix and column vector using checked dot products.
-            pub fn try_mul_matrix_vector(l: &Self, r: &$vec<T>) -> Result<$vec<T>, MathError> {
+            pub fn checked_mul_matrix_vector(l: &Self, r: &$vec<T>) -> Result<$vec<T>, MathError> {
                 let rows = l.transpose();
-                Ok($vec::new($($vec::try_dot(&rows.col[$index],r)?),+))
+                Ok($vec::new($($vec::checked_dot(&rows.col[$index],r)?),+))
             }
             /// Multiplies matrices with one fixed quantization per output cell.
-            pub fn try_mul_matrix_matrix(l: &Self, r: &Self) -> Result<Self, MathError> {
-                Ok(Self { col: [$(Self::try_mul_matrix_vector(l,&r.col[$index])?),+] })
+            pub fn checked_mul_matrix_matrix(l: &Self, r: &Self) -> Result<Self, MathError> {
+                Ok(Self { col: [$(Self::checked_mul_matrix_vector(l,&r.col[$index])?),+] })
             }
         }
         impl<T: Scalar> Mul<$mat<T>> for $vec<T> {

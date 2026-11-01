@@ -431,10 +431,10 @@ impl<T: RealScalar> Quat<T> {
     /// - `None` if the axis length is too small
     pub fn of_axis_angle(axis: &Vector3<T>, angle: T, epsilon: T) -> Option<Self> {
         let unit = axis.checked_normalize(epsilon).ok()?;
-        let half_angle = angle.try_mul(T::half()).ok()?;
-        let sin = half_angle.try_sin().ok()?;
-        let cos = half_angle.try_cos().ok()?;
-        let vector = Vector3::try_mul_vs(&unit, sin).ok()?;
+        let half_angle = angle.checked_mul(T::half()).ok()?;
+        let sin = half_angle.checked_sin().ok()?;
+        let cos = half_angle.checked_cos().ok()?;
+        let vector = Vector3::checked_mul_vs(&unit, sin).ok()?;
         Some(Self::new(vector.x, vector.y, vector.z, cos))
     }
 }

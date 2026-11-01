@@ -134,12 +134,12 @@ explicit conversion first.
 Addition and subtraction are exact if the result fits. Multiplication,
 division, rescaling and numeric construction round nearest with ties to even.
 Negative values use the same symmetric rule. Operators panic on overflow or
-division by zero in both debug and release builds; `try_add`, `try_sub`,
-`try_mul`, `try_div`, `try_rem`, `try_neg`, and `try_abs` return errors instead.
+division by zero in both debug and release builds; `checked_add`, `checked_sub`,
+`checked_mul`, `checked_div`, `checked_rem`, `checked_neg`, and `checked_abs` return errors instead.
 The positive counterpart of a signed minimum does not fit its representation.
 
-`trunc` rounds toward zero, `floor` toward negative infinity, and `try_ceil`
-and `try_round` check the integral result's range. Remainder follows truncating
+`trunc` rounds toward zero, `floor` toward negative infinity, and `checked_ceil`
+and `checked_round` check the integral result's range. Remainder follows truncating
 division and has the dividend's sign.
 
 Dot/cross products, matrix products and Hamilton quaternion products accumulate
@@ -170,8 +170,8 @@ let scale = transforms::scale(Vector3::new(
     F::try_from_int(2)?, F::try_from_int(4)?, F::try_from_int(8)?,
 ));
 let unit = point.checked_normalize(F::DELTA)?;
-let fast = scale.try_inverse()?; // Reciprocal is the default.
-let rows = scale.try_inverse_with(InverseMode::Rows)?;
+let fast = scale.checked_inverse()?; // Reciprocal is the default.
+let rows = scale.checked_inverse_with(InverseMode::Rows)?;
 let restored = fast * (scale * point);
 assert_eq!(restored.x, point.x);
 assert_eq!(rows.col[0].x, fast.col[0].x);
@@ -187,9 +187,9 @@ Every matrix size supports two inversion algorithms:
 | `InverseMode::Reciprocal` (default) | Computes cofactors/adjugate and prepares one determinant reciprocal for reuse. Intended as the fast path. Cofactor and determinant intermediates must fit the scalar representation. |
 | `InverseMode::Rows` | Uses partial-pivot Gauss–Jordan row elimination. Has different intermediate range, conditioning and rounding behavior; useful when adjugate intermediates overflow. |
 
-Select with `try_inverse_with` / `inverse_with`. The named checked methods
-`try_inverse_reciprocal` and `try_inverse_rows` are also available. Affine
-matrices expose `try_inverse_affine_with` / `inverse_affine_with` as well as
+Select with `checked_inverse_with` / `inverse_with`. The named checked methods
+`checked_inverse_reciprocal` and `checked_inverse_rows` are also available. Affine
+matrices expose `checked_inverse_affine_with` / `inverse_affine_with` as well as
 the default reciprocal variants. Unchecked convenience methods panic on error.
 
 The fixed reciprocal retains 127 internal reciprocal fraction bits. Preparation
@@ -259,7 +259,7 @@ let ray = Ray::new(
     &Vector3::new(zero, zero, -one),
     F::DELTA,
 ).unwrap();
-match ray.try_intersection(&triangle)? {
+match ray.checked_intersection(&triangle)? {
     Some((parameter, point)) => assert_eq!(point.z, zero),
     None => panic!("the fixture intersects"),
 }
@@ -267,9 +267,9 @@ match ray.try_intersection(&triangle)? {
 # }
 ```
 
-`try_intersection` returns `Ok(None)` for a miss and `Err` for invalid or
-unrepresentable arithmetic. `try_intersect` returns `Result<bool, MathError>`;
-`try_distance` returns a checked distance. The shorter `intersection` and
+`checked_intersection` returns `Ok(None)` for a miss and `Err` for invalid or
+unrepresentable arithmetic. `checked_intersect` returns `Result<bool, MathError>`;
+`checked_distance` returns a checked distance. The shorter `intersection` and
 `distance` methods collapse errors to `None`; `intersect` panics on error.
 Option-returning primitive constructors and queries likewise reject invalid or
 unrepresentable calculations. Use checked methods when the cause matters.

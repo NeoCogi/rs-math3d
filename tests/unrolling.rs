@@ -52,7 +52,7 @@ fn reference_rows<T: RealScalar, const N: usize>(
     for column in 0..N {
         let mut pivot = column;
         for row in column + 1..N {
-            if values[row][column].try_abs()? > values[pivot][column].try_abs()? {
+            if values[row][column].checked_abs()? > values[pivot][column].checked_abs()? {
                 pivot = row;
             }
         }
@@ -63,8 +63,8 @@ fn reference_rows<T: RealScalar, const N: usize>(
         values.swap(column, pivot);
         inverse.swap(column, pivot);
         for entry in 0..N {
-            values[column][entry] = values[column][entry].try_div(divisor)?;
-            inverse[column][entry] = inverse[column][entry].try_div(divisor)?;
+            values[column][entry] = values[column][entry].checked_div(divisor)?;
+            inverse[column][entry] = inverse[column][entry].checked_div(divisor)?;
         }
         values[column][column] = one;
         for row in 0..N {
@@ -73,11 +73,11 @@ fn reference_rows<T: RealScalar, const N: usize>(
             }
             let factor = values[row][column];
             for entry in 0..N {
-                values[row][entry] = T::try_sum_products(&[
+                values[row][entry] = T::checked_sum_products(&[
                     (values[row][entry], one, false),
                     (factor, values[column][entry], true),
                 ])?;
-                inverse[row][entry] = T::try_sum_products(&[
+                inverse[row][entry] = T::checked_sum_products(&[
                     (inverse[row][entry], one, false),
                     (factor, inverse[column][entry], true),
                 ])?;
@@ -96,7 +96,7 @@ macro_rules! reference_cases {
         fn $check<T: RealScalar + Debug>(rows: [[T;$n];$n]) {
             let mut matrix = $matrix::<T>::identity();
             for column in 0..$n { $(matrix.col[column].$field = rows[$i][column];)+ }
-            match (reference_rows(rows),matrix.try_inverse_rows()) {
+            match (reference_rows(rows),matrix.checked_inverse_rows()) {
                 (Ok(expected),Ok(actual)) => {
                     for column in 0..$n { $(assert_eq!(actual.col[column].$field,expected[$i][column]);)+ }
                 }
@@ -188,7 +188,7 @@ fn short_scalar_dispatch_preserves_rounding_errors_and_fallback() {
             _ => 2,
         });
         assert_eq!(
-            <F as Scalar>::try_sum_products(&terms[..n]).unwrap(),
+            <F as Scalar>::checked_sum_products(&terms[..n]).unwrap(),
             expected
         );
     }
@@ -200,19 +200,22 @@ fn short_scalar_dispatch_preserves_rounding_errors_and_fallback() {
         (min, min, true),
     ];
     assert_eq!(
-        <F as Scalar>::try_sum_products(&cancellation).unwrap(),
+        <F as Scalar>::checked_sum_products(&cancellation).unwrap(),
         F::ZERO
     );
     for n in 0..=8 {
         let values = [F::DELTA; 8];
-        assert_eq!(F::norm_exceeds(&values[..n], F::ZERO).unwrap(), n > 0);
+        assert_eq!(
+            F::checked_norm_exceeds(&values[..n], F::ZERO).unwrap(),
+            n > 0
+        );
     }
     assert_eq!(
-        F::norm_exceeds(&[F::ONE], -F::DELTA),
+        F::checked_norm_exceeds(&[F::ONE], -F::DELTA),
         Err(MathError::InvalidTolerance)
     );
     assert_eq!(
-        <i32 as Scalar>::try_sum_products(&[(i32::MAX, 2, false), (i32::MAX, 2, true)]),
+        <i32 as Scalar>::checked_sum_products(&[(i32::MAX, 2, false), (i32::MAX, 2, true)]),
         Err(MathError::Overflow)
     );
 }
@@ -238,7 +241,7 @@ fn short_float_dispatch_preserves_left_to_right_evaluation() {
             expected.to_bits()
         );
         assert_eq!(
-            <f64 as Scalar>::try_sum_products(&terms[..n])
+            <f64 as Scalar>::checked_sum_products(&terms[..n])
                 .unwrap()
                 .to_bits(),
             expected.to_bits()
@@ -246,10 +249,13 @@ fn short_float_dispatch_preserves_left_to_right_evaluation() {
     }
     assert_eq!(<f64 as Scalar>::sum_products(&terms[..4]), 1.0);
     assert_eq!(
-        f32::norm_exceeds(&[f32::NAN], 0.0),
+        f32::checked_norm_exceeds(&[f32::NAN], 0.0),
         Err(MathError::NonFinite)
     );
-    assert_eq!(f32::norm_exceeds(&[f32::MAX, f32::MAX], 1.0), Ok(true));
+    assert_eq!(
+        f32::checked_norm_exceeds(&[f32::MAX, f32::MAX], 1.0),
+        Ok(true)
+    );
 }
 
 #[test]
@@ -295,14 +301,16 @@ fn expanded_queries_cover_each_axis_and_triangle_edge() {
         Vector3::new(half, scalar(2), half),
         Vector3::new(half, half, scalar(2)),
     ] {
-        assert!(bounds.try_intersect(&Sphere3::new(center, F::ONE)).unwrap());
+        assert!(bounds
+            .checked_intersect(&Sphere3::new(center, F::ONE))
+            .unwrap());
     }
     let corner = Vector3::new(scalar(2), scalar(2), scalar(2));
     assert!(!bounds
-        .try_intersect(&Sphere3::new(corner, F::try_from_ratio(3, 2).unwrap()))
+        .checked_intersect(&Sphere3::new(corner, F::try_from_ratio(3, 2).unwrap()))
         .unwrap());
     assert!(bounds
-        .try_intersect(&Sphere3::new(corner, F::try_from_ratio(7, 4).unwrap()))
+        .checked_intersect(&Sphere3::new(corner, F::try_from_ratio(7, 4).unwrap()))
         .unwrap());
     let triangle = Tri3::new([
         origin,
@@ -318,12 +326,12 @@ fn expanded_queries_cover_each_axis_and_triangle_edge() {
         (Vector3::new(scalar(-1), scalar(2), F::ZERO), F::ONE),
     ] {
         assert!(Sphere3::new(center, radius)
-            .try_intersect(&triangle)
+            .checked_intersect(&triangle)
             .unwrap());
     }
     assert!(
         !Sphere3::new(Vector3::new(scalar(2), scalar(-2), F::ZERO), F::ONE)
-            .try_intersect(&triangle)
+            .checked_intersect(&triangle)
             .unwrap()
     );
 }

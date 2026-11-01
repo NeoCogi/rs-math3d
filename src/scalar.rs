@@ -72,33 +72,43 @@ pub trait Scalar:
     Num + NumAssignOps + Neg<Output = Self> + PartialOrd + Clone + Copy + Sized
 {
     /// Adds with a range check. Implementations must not wrap before checking.
-    fn try_add(self, rhs: Self) -> Result<Self, MathError>;
+    fn checked_add(self, rhs: Self) -> Result<Self, MathError>;
     /// Subtracts with a range check.
-    fn try_sub(self, rhs: Self) -> Result<Self, MathError>;
+    fn checked_sub(self, rhs: Self) -> Result<Self, MathError>;
     /// Multiplies with a range check and implementation-defined quantization.
-    fn try_mul(self, rhs: Self) -> Result<Self, MathError>;
+    fn checked_mul(self, rhs: Self) -> Result<Self, MathError>;
     /// Divides with zero and range checks.
-    fn try_div(self, rhs: Self) -> Result<Self, MathError>;
+    fn checked_div(self, rhs: Self) -> Result<Self, MathError>;
     /// Negates with a range check.
-    fn try_neg(self) -> Result<Self, MathError>;
+    fn checked_neg(self) -> Result<Self, MathError>;
+    /// Computes a remainder with zero and range checks.
+    fn checked_rem(self, rhs: Self) -> Result<Self, MathError>;
+    /// Returns whether this scalar is finite. Integer and fixed values always are.
+    fn is_finite(self) -> bool;
+    /// Computes an absolute value with a range check.
+    fn checked_abs(self) -> Result<Self, MathError>;
     /// Accumulates signed products. Fixed implementations round only once.
     #[inline(always)]
-    fn try_sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
+    fn checked_sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
         let mut sum = <Self as Zero>::zero();
         unroll_short_slice!(terms, &(a, b, subtract) => {
-            let product = a.try_mul(b)?;
+            let product = a.checked_mul(b)?;
             sum = if subtract {
-                sum.try_sub(product)?
+                sum.checked_sub(product)?
             } else {
-                sum.try_add(product)?
+                sum.checked_add(product)?
             };
         });
         Ok(sum)
     }
-    /// Computes a signed sum of products, panicking on arithmetic failure.
+    /// Computes a signed sum of products using ordinary scalar arithmetic.
     #[inline(always)]
     fn sum_products(terms: &[(Self, Self, bool)]) -> Self {
-        Self::try_sum_products(terms).expect("scalar product accumulation failed")
+        let mut sum = <Self as Zero>::zero();
+        unroll_short_slice!(terms, &(a,b,subtract) => {
+            sum = if subtract { sum - a*b } else { sum + a*b };
+        });
+        sum
     }
     // Additional methods not provided by num-traits
     /// Returns the constant 2 for the scalar type.
@@ -134,51 +144,58 @@ pub trait RealScalar: Scalar {
     /// Reusable reciprocal representation. Fixed implementations retain guard
     /// precision rather than quantizing `1 / denominator` to the scalar format.
     type Reciprocal: Copy;
+    /// Prepares a reciprocal without domain or range validation.
+    fn reciprocal(self) -> Self::Reciprocal;
+    /// Multiplies by a prepared reciprocal without range validation.
+    fn mul_reciprocal(self, reciprocal: Self::Reciprocal) -> Self;
+    /// Computes the ordinary Euclidean norm, without validating its inputs.
+    #[inline(always)]
+    fn norm(values: &[Self]) -> Self {
+        let mut sum = <Self as Zero>::zero();
+        unroll_short_slice!(values, &v => { sum += v*v; });
+        sum.tsqrt()
+    }
     /// Prepares one reciprocal for repeated checked multiplication.
-    fn try_reciprocal(self) -> Result<Self::Reciprocal, MathError>;
+    fn checked_reciprocal(self) -> Result<Self::Reciprocal, MathError>;
     /// Applies a prepared reciprocal, rounding only the final scalar result.
-    fn try_mul_reciprocal(self, reciprocal: Self::Reciprocal) -> Result<Self, MathError>;
+    fn checked_mul_reciprocal(self, reciprocal: Self::Reciprocal) -> Result<Self, MathError>;
     /// Returns a reasonable epsilon for comparisons.
     fn epsilon() -> Self;
     /// Returns 1/2 for the scalar type.
     fn half() -> Self;
     /// Returns 1/4 for the scalar type.
     fn quarter() -> Self;
-    /// Returns whether this value is finite. Fixed-point values always are.
-    fn is_finite(self) -> bool;
-    /// Computes a checked absolute value, including signed storage minima.
-    fn try_abs(self) -> Result<Self, MathError>;
     /// Computes a norm without first quantizing small component squares.
     #[inline(always)]
-    fn try_norm(values: &[Self]) -> Result<Self, MathError> {
+    fn checked_norm(values: &[Self]) -> Result<Self, MathError> {
         let mut scale = <Self as Zero>::zero();
         unroll_short_slice!(values, &v => {
             if !v.is_finite() {
                 return Err(MathError::NonFinite);
             }
-            scale = Self::max(scale, v.try_abs()?);
+            scale = Self::max(scale, v.checked_abs()?);
         });
         if scale == <Self as Zero>::zero() {
             return Ok(scale);
         }
         let mut sum = <Self as Zero>::zero();
         unroll_short_slice!(values, &v => {
-            let q = v.try_div(scale)?;
-            sum = sum.try_add(q.try_mul(q)?)?;
+            let q = v.checked_div(scale)?;
+            sum = sum.checked_add(q.checked_mul(q)?)?;
         });
-        sum.try_sqrt()?.try_mul(scale)
+        sum.checked_sqrt()?.checked_mul(scale)
     }
     /// Tests the exact represented length against a nonnegative tolerance.
     /// Fixed implementations compare unquantized squared integer quantities.
     #[inline(always)]
-    fn norm_exceeds(values: &[Self], epsilon: Self) -> Result<bool, MathError> {
+    fn checked_norm_exceeds(values: &[Self], epsilon: Self) -> Result<bool, MathError> {
         let zero = <Self as Zero>::zero();
         if !epsilon.is_finite() || epsilon < zero {
             return Err(MathError::InvalidTolerance);
         }
         let mut scale = zero;
         unroll_short_slice!(values, &value => {
-            scale = Self::max(scale, value.try_abs()?);
+            scale = Self::max(scale, value.checked_abs()?);
         });
         if scale == zero {
             return Ok(false);
@@ -186,7 +203,7 @@ pub trait RealScalar: Scalar {
         if scale > epsilon {
             return Ok(true);
         }
-        let allowed = match epsilon.try_div(scale) {
+        let allowed = match epsilon.checked_div(scale) {
             Ok(value) => value,
             // A finite tolerance divided by a tiny component can overflow only
             // far above every possible bounded scaled norm for a real slice.
@@ -195,13 +212,13 @@ pub trait RealScalar: Scalar {
         };
         let mut sum = zero;
         unroll_short_slice!(values, &value => {
-            let scaled = value.try_div(scale)?;
-            sum = sum.try_add(scaled.try_mul(scaled)?)?;
+            let scaled = value.checked_div(scale)?;
+            sum = sum.checked_add(scaled.checked_mul(scaled)?)?;
         });
-        Ok(sum.try_sqrt()? > allowed)
+        Ok(sum.checked_sqrt()? > allowed)
     }
     /// Checked square root; negative inputs are outside its domain.
-    fn try_sqrt(self) -> Result<Self, MathError> {
+    fn checked_sqrt(self) -> Result<Self, MathError> {
         if !self.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -216,7 +233,7 @@ pub trait RealScalar: Scalar {
         }
     }
     /// Checked sine for a finite radian angle.
-    fn try_sin(self) -> Result<Self, MathError> {
+    fn checked_sin(self) -> Result<Self, MathError> {
         if !self.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -228,7 +245,7 @@ pub trait RealScalar: Scalar {
         }
     }
     /// Checked cosine for a finite radian angle.
-    fn try_cos(self) -> Result<Self, MathError> {
+    fn checked_cos(self) -> Result<Self, MathError> {
         if !self.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -240,7 +257,7 @@ pub trait RealScalar: Scalar {
         }
     }
     /// Checked tangent; overflow near a pole is reported explicitly.
-    fn try_tan(self) -> Result<Self, MathError> {
+    fn checked_tan(self) -> Result<Self, MathError> {
         if !self.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -252,7 +269,7 @@ pub trait RealScalar: Scalar {
         }
     }
     /// Checked arc cosine on the closed domain [-1, 1].
-    fn try_acos(self) -> Result<Self, MathError> {
+    fn checked_acos(self) -> Result<Self, MathError> {
         if !self.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -275,23 +292,36 @@ pub trait RealScalar: Scalar {
 
 // Implementation for i32
 impl Scalar for i32 {
-    fn try_add(self, rhs: Self) -> Result<Self, MathError> {
+    fn is_finite(self) -> bool {
+        true
+    }
+    fn checked_abs(self) -> Result<Self, MathError> {
+        self.checked_abs().ok_or(MathError::Overflow)
+    }
+    fn checked_rem(self, rhs: Self) -> Result<Self, MathError> {
+        if rhs == 0 {
+            return Err(MathError::DivisionByZero);
+        }
+        self.checked_rem(rhs).ok_or(MathError::Overflow)
+    }
+
+    fn checked_add(self, rhs: Self) -> Result<Self, MathError> {
         self.checked_add(rhs).ok_or(MathError::Overflow)
     }
-    fn try_sub(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_sub(self, rhs: Self) -> Result<Self, MathError> {
         self.checked_sub(rhs).ok_or(MathError::Overflow)
     }
-    fn try_mul(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_mul(self, rhs: Self) -> Result<Self, MathError> {
         self.checked_mul(rhs).ok_or(MathError::Overflow)
     }
-    fn try_div(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_div(self, rhs: Self) -> Result<Self, MathError> {
         if rhs == 0 {
             Err(MathError::DivisionByZero)
         } else {
             self.checked_div(rhs).ok_or(MathError::Overflow)
         }
     }
-    fn try_neg(self) -> Result<Self, MathError> {
+    fn checked_neg(self) -> Result<Self, MathError> {
         self.checked_neg().ok_or(MathError::Overflow)
     }
 
@@ -319,23 +349,36 @@ impl Scalar for i32 {
 
 // Implementation for i64
 impl Scalar for i64 {
-    fn try_add(self, rhs: Self) -> Result<Self, MathError> {
+    fn is_finite(self) -> bool {
+        true
+    }
+    fn checked_abs(self) -> Result<Self, MathError> {
+        self.checked_abs().ok_or(MathError::Overflow)
+    }
+    fn checked_rem(self, rhs: Self) -> Result<Self, MathError> {
+        if rhs == 0 {
+            return Err(MathError::DivisionByZero);
+        }
+        self.checked_rem(rhs).ok_or(MathError::Overflow)
+    }
+
+    fn checked_add(self, rhs: Self) -> Result<Self, MathError> {
         self.checked_add(rhs).ok_or(MathError::Overflow)
     }
-    fn try_sub(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_sub(self, rhs: Self) -> Result<Self, MathError> {
         self.checked_sub(rhs).ok_or(MathError::Overflow)
     }
-    fn try_mul(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_mul(self, rhs: Self) -> Result<Self, MathError> {
         self.checked_mul(rhs).ok_or(MathError::Overflow)
     }
-    fn try_div(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_div(self, rhs: Self) -> Result<Self, MathError> {
         if rhs == 0 {
             Err(MathError::DivisionByZero)
         } else {
             self.checked_div(rhs).ok_or(MathError::Overflow)
         }
     }
-    fn try_neg(self) -> Result<Self, MathError> {
+    fn checked_neg(self) -> Result<Self, MathError> {
         self.checked_neg().ok_or(MathError::Overflow)
     }
 
@@ -363,7 +406,28 @@ impl Scalar for i64 {
 
 // Implementation for f32
 impl Scalar for f32 {
-    fn try_add(self, rhs: Self) -> Result<Self, MathError> {
+    fn is_finite(self) -> bool {
+        self.is_finite()
+    }
+    fn checked_abs(self) -> Result<Self, MathError> {
+        if self.is_finite() {
+            Ok(self.abs())
+        } else {
+            Err(MathError::NonFinite)
+        }
+    }
+
+    fn checked_rem(self, rhs: Self) -> Result<Self, MathError> {
+        if !self.is_finite() || !rhs.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        if rhs == 0.0 {
+            return Err(MathError::DivisionByZero);
+        }
+        Ok(self % rhs)
+    }
+
+    fn checked_add(self, rhs: Self) -> Result<Self, MathError> {
         if !self.is_finite() || !rhs.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -374,7 +438,7 @@ impl Scalar for f32 {
             Err(MathError::Overflow)
         }
     }
-    fn try_sub(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_sub(self, rhs: Self) -> Result<Self, MathError> {
         if !self.is_finite() || !rhs.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -385,7 +449,7 @@ impl Scalar for f32 {
             Err(MathError::Overflow)
         }
     }
-    fn try_mul(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_mul(self, rhs: Self) -> Result<Self, MathError> {
         if !self.is_finite() || !rhs.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -396,7 +460,7 @@ impl Scalar for f32 {
             Err(MathError::Overflow)
         }
     }
-    fn try_div(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_div(self, rhs: Self) -> Result<Self, MathError> {
         if !self.is_finite() || !rhs.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -410,7 +474,7 @@ impl Scalar for f32 {
             Err(MathError::Overflow)
         }
     }
-    fn try_neg(self) -> Result<Self, MathError> {
+    fn checked_neg(self) -> Result<Self, MathError> {
         if self.is_finite() {
             Ok(-self)
         } else {
@@ -450,7 +514,28 @@ impl Scalar for f32 {
 
 // Implementation for f64
 impl Scalar for f64 {
-    fn try_add(self, rhs: Self) -> Result<Self, MathError> {
+    fn is_finite(self) -> bool {
+        self.is_finite()
+    }
+    fn checked_abs(self) -> Result<Self, MathError> {
+        if self.is_finite() {
+            Ok(self.abs())
+        } else {
+            Err(MathError::NonFinite)
+        }
+    }
+
+    fn checked_rem(self, rhs: Self) -> Result<Self, MathError> {
+        if !self.is_finite() || !rhs.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        if rhs == 0.0 {
+            return Err(MathError::DivisionByZero);
+        }
+        Ok(self % rhs)
+    }
+
+    fn checked_add(self, rhs: Self) -> Result<Self, MathError> {
         if !self.is_finite() || !rhs.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -461,7 +546,7 @@ impl Scalar for f64 {
             Err(MathError::Overflow)
         }
     }
-    fn try_sub(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_sub(self, rhs: Self) -> Result<Self, MathError> {
         if !self.is_finite() || !rhs.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -472,7 +557,7 @@ impl Scalar for f64 {
             Err(MathError::Overflow)
         }
     }
-    fn try_mul(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_mul(self, rhs: Self) -> Result<Self, MathError> {
         if !self.is_finite() || !rhs.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -483,7 +568,7 @@ impl Scalar for f64 {
             Err(MathError::Overflow)
         }
     }
-    fn try_div(self, rhs: Self) -> Result<Self, MathError> {
+    fn checked_div(self, rhs: Self) -> Result<Self, MathError> {
         if !self.is_finite() || !rhs.is_finite() {
             return Err(MathError::NonFinite);
         }
@@ -497,7 +582,7 @@ impl Scalar for f64 {
             Err(MathError::Overflow)
         }
     }
-    fn try_neg(self) -> Result<Self, MathError> {
+    fn checked_neg(self) -> Result<Self, MathError> {
         if self.is_finite() {
             Ok(-self)
         } else {
@@ -537,12 +622,19 @@ impl Scalar for f64 {
 
 #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 impl RealScalar for f32 {
-    type Reciprocal = Self;
-    fn try_reciprocal(self) -> Result<Self, MathError> {
-        <Self as Scalar>::try_div(1.0, self)
+    fn reciprocal(self) -> Self {
+        1.0 / self
     }
-    fn try_mul_reciprocal(self, reciprocal: Self) -> Result<Self, MathError> {
-        <Self as Scalar>::try_mul(self, reciprocal)
+    fn mul_reciprocal(self, reciprocal: Self) -> Self {
+        self * reciprocal
+    }
+
+    type Reciprocal = Self;
+    fn checked_reciprocal(self) -> Result<Self, MathError> {
+        <Self as Scalar>::checked_div(1.0, self)
+    }
+    fn checked_mul_reciprocal(self, reciprocal: Self) -> Result<Self, MathError> {
+        <Self as Scalar>::checked_mul(self, reciprocal)
     }
     fn epsilon() -> Self {
         EPS_F32
@@ -552,16 +644,6 @@ impl RealScalar for f32 {
     }
     fn quarter() -> Self {
         0.25
-    }
-    fn is_finite(self) -> bool {
-        self.is_finite()
-    }
-    fn try_abs(self) -> Result<Self, MathError> {
-        if self.is_finite() {
-            Ok(self.abs())
-        } else {
-            Err(MathError::NonFinite)
-        }
     }
     fn tsqrt(self) -> Self {
         Math::sqrt_f32(self)
@@ -582,12 +664,19 @@ impl RealScalar for f32 {
 
 #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
 impl RealScalar for f64 {
-    type Reciprocal = Self;
-    fn try_reciprocal(self) -> Result<Self, MathError> {
-        <Self as Scalar>::try_div(1.0, self)
+    fn reciprocal(self) -> Self {
+        1.0 / self
     }
-    fn try_mul_reciprocal(self, reciprocal: Self) -> Result<Self, MathError> {
-        <Self as Scalar>::try_mul(self, reciprocal)
+    fn mul_reciprocal(self, reciprocal: Self) -> Self {
+        self * reciprocal
+    }
+
+    type Reciprocal = Self;
+    fn checked_reciprocal(self) -> Result<Self, MathError> {
+        <Self as Scalar>::checked_div(1.0, self)
+    }
+    fn checked_mul_reciprocal(self, reciprocal: Self) -> Result<Self, MathError> {
+        <Self as Scalar>::checked_mul(self, reciprocal)
     }
     fn epsilon() -> Self {
         EPS_F64
@@ -597,16 +686,6 @@ impl RealScalar for f64 {
     }
     fn quarter() -> Self {
         0.25
-    }
-    fn is_finite(self) -> bool {
-        self.is_finite()
-    }
-    fn try_abs(self) -> Result<Self, MathError> {
-        if self.is_finite() {
-            Ok(self.abs())
-        } else {
-            Err(MathError::NonFinite)
-        }
     }
     fn tsqrt(self) -> Self {
         Math::sqrt_f64(self)

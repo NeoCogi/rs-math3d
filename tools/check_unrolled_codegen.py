@@ -116,10 +116,10 @@ def main():
         for dimension in (2, 3, 4):
             name = f"unroll_rows_{label}_{dimension}"
             matrix = f"Matrix{dimension}<{scalar}>"
-            source.append(f"#[no_mangle] pub fn {name}(m: &{matrix}) -> Result<{matrix},MathError> {{ m.try_inverse_rows() }}")
+            source.append(f"#[no_mangle] pub fn {name}(m: &{matrix}) -> Result<{matrix},MathError> {{ m.checked_inverse_rows() }}")
             names.append(name)
         name = f"unroll_dot_{label}"
-        source.append(f"#[no_mangle] pub fn {name}(a: &Vector4<{scalar}>, b: &Vector4<{scalar}>) -> Result<{scalar},MathError> {{ Vector4::try_dot(a,b) }}")
+        source.append(f"#[no_mangle] pub fn {name}(a: &Vector4<{scalar}>, b: &Vector4<{scalar}>) -> Result<{scalar},MathError> {{ Vector4::checked_dot(a,b) }}")
         names.append(name)
     with tempfile.TemporaryDirectory(prefix="rs-math3d-unroll-codegen-") as temporary:
         temporary = Path(temporary)
@@ -140,7 +140,7 @@ def main():
         numeric_helpers = [(name, graph) for name, graph in graphs.items()
                           if any(marker in name for marker in (
                               "invert_rows2", "invert_rows3", "invert_rows4",
-                              "try_inverse_rows", "try_dot", "sum_products_pair"))]
+                              "checked_inverse_rows", "checked_dot", "sum_products_pair"))]
         for name, graph in numeric_helpers:
             assert_acyclic(name, graph)
         library_graphs = functions(library_ir)

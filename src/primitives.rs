@@ -67,7 +67,7 @@
 //!     &Vector3::new(0.0, 0.0, 5.0)
 //! );
 //!
-//! let checked = Plane::try_new(
+//! let checked = Plane::checked_new(
 //!     &Vector3::new(0.0f32, 0.0, -1.0),
 //!     &Vector3::new(0.0, 0.0, 5.0),
 //!     EPS_F32,
@@ -325,7 +325,7 @@ impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
     ///
     /// Returns `None` if the points are too close.
     pub fn from_start_end(s: &V, e: &V, epsilon: T) -> Option<Self> {
-        let dir = V::try_sub_vv(e, s).ok()?;
+        let dir = V::checked_sub_vv(e, s).ok()?;
         Self::new(s, &dir, epsilon)
     }
     /// Finds the closest point on the line to a given point.
@@ -337,10 +337,11 @@ impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
     /// Returns `None` if the line direction is too small.
     pub fn closest_point_on_line(&self, p: &V, epsilon: T) -> Option<(T, V)> {
         let direction = self.d.checked_normalize(epsilon).ok()?;
-        let delta = V::try_sub_vv(p, &self.p).ok()?;
-        let travel = V::try_dot(&direction, &delta).ok()?;
-        let t = travel.try_div(self.d.try_length().ok()?).ok()?;
-        let point = V::try_add_vv(&self.p, &V::try_mul_vs(&direction, travel).ok()?).ok()?;
+        let delta = V::checked_sub_vv(p, &self.p).ok()?;
+        let travel = V::checked_dot(&direction, &delta).ok()?;
+        let t = travel.checked_div(self.d.checked_length().ok()?).ok()?;
+        let point =
+            V::checked_add_vv(&self.p, &V::checked_mul_vs(&direction, travel).ok()?).ok()?;
         Some((t, point))
     }
 
@@ -390,33 +391,33 @@ pub fn shortest_segment3d_between_lines3d<T: RealScalar>(
 
     let unit0 = direction0.unit();
     let unit1 = direction1.unit();
-    let separation = Vector3::try_sub_vv(&line0.p, &line1.p).ok()?;
+    let separation = Vector3::checked_sub_vv(&line0.p, &line1.p).ok()?;
 
     // For unit directions, the Gram determinant is |u0 x u1|^2. Computing it
     // from the cross product avoids the cancellation in 1 - dot(u0, u1)^2 for
     // nearly parallel lines.
-    let cross = Vector3::try_cross(&unit0, &unit1).ok()?;
-    let denominator = Vector3::try_dot(&cross, &cross).ok()?;
+    let cross = Vector3::checked_cross(&unit0, &unit1).ok()?;
+    let denominator = Vector3::checked_dot(&cross, &cross).ok()?;
     if !is_finite_scalar(denominator) || denominator <= <T as Zero>::zero() {
         return None;
     }
 
     // Solve the two normal equations in distance-along-unit-direction space.
     // These parameters are independent of the magnitudes stored in line.d.
-    let direction_dot = Vector3::try_dot(&unit0, &unit1).ok()?;
-    let projection0 = Vector3::try_dot(&unit0, &separation).ok()?;
-    let projection1 = Vector3::try_dot(&unit1, &separation).ok()?;
+    let direction_dot = Vector3::checked_dot(&unit0, &unit1).ok()?;
+    let projection0 = Vector3::checked_dot(&unit0, &separation).ok()?;
+    let projection1 = Vector3::checked_dot(&unit1, &separation).ok()?;
     let distance0 = direction_dot
-        .try_mul(projection1)
+        .checked_mul(projection1)
         .ok()?
-        .try_sub(projection0)
+        .checked_sub(projection0)
         .ok()?
-        .try_div(denominator)
+        .checked_div(denominator)
         .ok()?;
     let distance1 = projection1
-        .try_sub(direction_dot.try_mul(projection0).ok()?)
+        .checked_sub(direction_dot.checked_mul(projection0).ok()?)
         .ok()?
-        .try_div(denominator)
+        .checked_div(denominator)
         .ok()?;
     if !is_finite_scalar(distance0) || !is_finite_scalar(distance1) {
         return None;
@@ -425,8 +426,10 @@ pub fn shortest_segment3d_between_lines3d<T: RealScalar>(
     // Reconstruct the closest point on each line from unit directions. This
     // avoids multiplying an extreme stored direction by an inverse-scale t.
     let start =
-        Vector3::try_add_vv(&line0.p, &Vector3::try_mul_vs(&unit0, distance0).ok()?).ok()?;
-    let end = Vector3::try_add_vv(&line1.p, &Vector3::try_mul_vs(&unit1, distance1).ok()?).ok()?;
+        Vector3::checked_add_vv(&line0.p, &Vector3::checked_mul_vs(&unit0, distance0).ok()?)
+            .ok()?;
+    let end = Vector3::checked_add_vv(&line1.p, &Vector3::checked_mul_vs(&unit1, distance1).ok()?)
+        .ok()?;
     if !is_finite_vector3(&start) || !is_finite_vector3(&end) {
         return None;
     }
@@ -465,19 +468,20 @@ impl<T: RealScalar, V: RealVector<T>> Segment<T, V> {
     ///
     /// Returns `None` if the segment is too small.
     pub fn closest_point_on_segment(&self, p: &V, epsilon: T) -> Option<(T, V)> {
-        let delta = V::try_sub_vv(&self.e, &self.s).ok()?;
+        let delta = V::checked_sub_vv(&self.e, &self.s).ok()?;
         let direction = delta.checked_normalize(epsilon).ok()?;
-        let length = delta.try_length().ok()?;
-        let offset = V::try_sub_vv(p, &self.s).ok()?;
-        let travel = V::try_dot(&direction, &offset).ok()?;
+        let length = delta.checked_length().ok()?;
+        let offset = V::checked_sub_vv(p, &self.s).ok()?;
+        let travel = V::checked_dot(&direction, &offset).ok()?;
         if travel <= <T as Zero>::zero() {
             return Some((<T as Zero>::zero(), self.s));
         }
         if travel >= length {
             return Some((<T as One>::one(), self.e));
         }
-        let t = travel.try_div(length).ok()?;
-        let point = V::try_add_vv(&self.s, &V::try_mul_vs(&direction, travel).ok()?).ok()?;
+        let t = travel.checked_div(length).ok()?;
+        let point =
+            V::checked_add_vv(&self.s, &V::checked_mul_vs(&direction, travel).ok()?).ok()?;
         Some((t, point))
     }
     /// Computes the distance from a point to the segment.
@@ -485,7 +489,7 @@ impl<T: RealScalar, V: RealVector<T>> Segment<T, V> {
     /// Returns `None` if the segment is too small.
     pub fn distance(&self, p: &V, epsilon: T) -> Option<T> {
         let (_, closest) = self.closest_point_on_segment(p, epsilon)?;
-        V::try_sub_vv(&closest, p).ok()?.try_length().ok()
+        V::checked_sub_vv(&closest, p).ok()?.checked_length().ok()
     }
 }
 
@@ -569,16 +573,20 @@ impl<T: RealScalar> Ray<T, Vector3<T>> {
         // internally constructed coefficient-scaled planes consistently.
         let unit_constant = normal_metric.divide_by_length(p.constant())?;
         let numerator = unit_constant
-            .try_add(Vector3::try_dot(&unit_normal, &self.start).ok()?)
+            .checked_add(Vector3::checked_dot(&unit_normal, &self.start).ok()?)
             .ok()?;
-        let denominator = Vector3::try_dot(&unit_normal, &unit_direction).ok()?;
+        let denominator = Vector3::checked_dot(&unit_normal, &unit_direction).ok()?;
         if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
             return None;
         }
 
         // `distance` is physical travel along the unit ray direction, so its
         // sign is unaffected by positive rescaling of the stored direction.
-        let distance = numerator.try_neg().ok()?.try_div(denominator).ok()?;
+        let distance = numerator
+            .checked_neg()
+            .ok()?
+            .checked_div(denominator)
+            .ok()?;
         if !is_finite_scalar(distance) || distance < <T as Zero>::zero() {
             return None;
         }
@@ -588,9 +596,9 @@ impl<T: RealScalar> Ray<T, Vector3<T>> {
         // possibly extreme parameter scale and would add avoidable rounding or
         // overflow risk. Positive direction rescaling leaves both operands in
         // this expression unchanged.
-        let point = Vector3::try_add_vv(
+        let point = Vector3::checked_add_vv(
             &self.start,
-            &Vector3::try_mul_vs(&unit_direction, distance).ok()?,
+            &Vector3::checked_mul_vs(&unit_direction, distance).ok()?,
         )
         .ok()?;
         is_finite_vector3(&point).then_some(point)
@@ -643,13 +651,16 @@ impl<T: RealScalar> Tri3<T> {
 
     /// Computes barycentric coordinates with checked normalized Gram solving.
     /// Degenerate axes and unrepresentable arithmetic are explicit errors.
-    pub fn try_barycentric_coordinates(&self, point: &Vector3<T>) -> Result<Vector3<T>, MathError> {
-        let x = Vector3::try_sub_vv(&self.vertices[1], &self.vertices[0])?;
-        let y = Vector3::try_sub_vv(&self.vertices[2], &self.vertices[0])?;
-        let delta = Vector3::try_sub_vv(point, &self.vertices[0])?;
+    pub fn checked_barycentric_coordinates(
+        &self,
+        point: &Vector3<T>,
+    ) -> Result<Vector3<T>, MathError> {
+        let x = Vector3::checked_sub_vv(&self.vertices[1], &self.vertices[0])?;
+        let y = Vector3::checked_sub_vv(&self.vertices[2], &self.vertices[0])?;
+        let delta = Vector3::checked_sub_vv(point, &self.vertices[0])?;
         let uv = checked_span_coordinates(&x, &y, &delta)?;
         Ok(Vector3::new(
-            <T as One>::one().try_sub(uv.x)?.try_sub(uv.y)?,
+            <T as One>::one().checked_sub(uv.x)?.checked_sub(uv.y)?,
             uv.x,
             uv.y,
         ))
@@ -659,9 +670,9 @@ impl<T: RealScalar> Tri3<T> {
     ///
     /// # Panics
     /// Panics for degenerate triangles or unrepresentable arithmetic. Use
-    /// `try_barycentric_coordinates` for a checked result.
+    /// `checked_barycentric_coordinates` for a checked result.
     pub fn barycentric_coordinates(&self, pt: &Vector3<T>) -> Vector3<T> {
-        self.try_barycentric_coordinates(pt)
+        self.checked_barycentric_coordinates(pt)
             .expect("barycentric coordinates failed")
     }
 }
@@ -678,17 +689,17 @@ fn checked_span_coordinates<T: RealScalar>(
     let y = checked_normalized3(y)?;
     let ux = x.unit();
     let uy = y.unit();
-    let a = Vector3::try_dot(&ux, &ux)?;
-    let b = Vector3::try_dot(&ux, &uy)?;
-    let c = Vector3::try_dot(&uy, &uy)?;
-    let d = Vector3::try_dot(delta, &ux)?;
-    let e = Vector3::try_dot(delta, &uy)?;
-    let det = T::try_sum_products(&[(a, c, false), (b, b, true)])?;
+    let a = Vector3::checked_dot(&ux, &ux)?;
+    let b = Vector3::checked_dot(&ux, &uy)?;
+    let c = Vector3::checked_dot(&uy, &uy)?;
+    let d = Vector3::checked_dot(delta, &ux)?;
+    let e = Vector3::checked_dot(delta, &uy)?;
+    let det = T::checked_sum_products(&[(a, c, false), (b, b, true)])?;
     if det <= <T as Zero>::zero() {
         return Err(MathError::Degenerate);
     }
-    let cx = T::try_sum_products(&[(d, c, false), (e, b, true)])?.try_div(det)?;
-    let cy = T::try_sum_products(&[(e, a, false), (d, b, true)])?.try_div(det)?;
+    let cx = T::checked_sum_products(&[(d, c, false), (e, b, true)])?.checked_div(det)?;
+    let cy = T::checked_sum_products(&[(e, a, false), (d, b, true)])?.checked_div(det)?;
     Ok(Vector2::new(
         x.checked_divide_by_length(cx)?,
         y.checked_divide_by_length(cy)?,
@@ -722,33 +733,33 @@ impl<T: RealScalar> Plane<T> {
     /// Creates a plane from a normal and a point on the plane.
     ///
     /// # Panics
-    /// Panics if `n` is too small to normalize. Use [`Plane::try_new`] when the
+    /// Panics if `n` is too small to normalize. Use [`Plane::checked_new`] when the
     /// input may be degenerate.
     pub fn new(n: &Vector3<T>, p: &Vector3<T>) -> Self {
-        Self::try_new(n, p, T::epsilon()).expect("plane normal must be non-zero")
+        Self::checked_new(n, p, T::epsilon()).expect("plane normal must be non-zero")
     }
 
     /// Creates a plane from a normal and a point on the plane.
     ///
     /// Returns `None` if `n` is too small to normalize.
-    pub fn try_new(n: &Vector3<T>, p: &Vector3<T>, epsilon: T) -> Option<Self> {
+    pub fn checked_new(n: &Vector3<T>, p: &Vector3<T>, epsilon: T) -> Option<Self> {
         let norm = n.try_normalize(epsilon)?;
-        let d = Vector3::try_dot(&norm, p).ok()?;
+        let d = Vector3::checked_dot(&norm, p).ok()?;
         Some(Self {
             a: norm.x,
             b: norm.y,
             c: norm.z,
-            d: d.try_neg().ok()?,
+            d: d.checked_neg().ok()?,
         })
     }
 
     /// Creates a plane from triangle vertices.
     ///
     /// # Panics
-    /// Panics if the triangle is degenerate. Use [`Plane::try_from_tri`] when
+    /// Panics if the triangle is degenerate. Use [`Plane::checked_from_tri`] when
     /// the input may be degenerate.
     pub fn from_tri(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Self {
-        Self::try_from_tri(v0, v1, v2, T::epsilon()).expect("triangle must define a plane")
+        Self::checked_from_tri(v0, v1, v2, T::epsilon()).expect("triangle must define a plane")
     }
 
     /// Creates a plane from triangle vertices.
@@ -758,7 +769,7 @@ impl<T: RealScalar> Plane<T> {
     /// tolerance, which must be finite and in `0..=1`. Uniformly scaling
     /// representable triangle offsets does not affect this degeneracy decision
     /// or the resulting unit normal. Invalid tolerances also return `None`.
-    pub fn try_from_tri(
+    pub fn checked_from_tri(
         v0: &Vector3<T>,
         v1: &Vector3<T>,
         v2: &Vector3<T>,
@@ -766,20 +777,20 @@ impl<T: RealScalar> Plane<T> {
     ) -> Option<Self> {
         // Build the normal through the shared scale-stable edge-orientation
         // path, then anchor the normalized plane equation at the first vertex.
-        let n = try_tri_normal(v0, v1, v2, epsilon)?;
-        Self::try_new(&n, v0, epsilon)
+        let n = checked_tri_normal(v0, v1, v2, epsilon)?;
+        Self::checked_new(&n, v0, epsilon)
     }
     /// Creates a plane from quad vertices.
     ///
     /// # Panics
     /// Panics if the quad diagonals do not define a plane. Use
-    /// [`Plane::try_from_quad`] when the input may be degenerate.
+    /// [`Plane::checked_from_quad`] when the input may be degenerate.
     ///
     /// This routine does not validate that the four vertices are coplanar.
     /// For non-coplanar quads it returns the diagonal-derived representative
-    /// plane described by [`Plane::try_from_quad`].
+    /// plane described by [`Plane::checked_from_quad`].
     pub fn from_quad(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>, v3: &Vector3<T>) -> Self {
-        Self::try_from_quad(v0, v1, v2, v3, T::epsilon()).expect("quad must define a plane")
+        Self::checked_from_quad(v0, v1, v2, v3, T::epsilon()).expect("quad must define a plane")
     }
 
     /// Creates a plane from quad vertices.
@@ -793,7 +804,7 @@ impl<T: RealScalar> Plane<T> {
     /// vertex centroid. This is a representative plane for the quad and does
     /// not validate coplanarity. For non-coplanar input, the returned plane is
     /// not guaranteed to pass through any of the vertices.
-    pub fn try_from_quad(
+    pub fn checked_from_quad(
         v0: &Vector3<T>,
         v1: &Vector3<T>,
         v2: &Vector3<T>,
@@ -802,24 +813,24 @@ impl<T: RealScalar> Plane<T> {
     ) -> Option<Self> {
         // Derive a scale-stable unit normal from the diagonals before choosing
         // the centroid used to anchor the representative plane equation.
-        let n = try_quad_normal(v0, v1, v2, v3, epsilon)?;
+        let n = checked_quad_normal(v0, v1, v2, v3, epsilon)?;
         let q = T::quarter();
         let c = Vector3::new(
-            T::try_sum_products(&[
+            T::checked_sum_products(&[
                 (v0.x, q, false),
                 (v1.x, q, false),
                 (v2.x, q, false),
                 (v3.x, q, false),
             ])
             .ok()?,
-            T::try_sum_products(&[
+            T::checked_sum_products(&[
                 (v0.y, q, false),
                 (v1.y, q, false),
                 (v2.y, q, false),
                 (v3.y, q, false),
             ])
             .ok()?,
-            T::try_sum_products(&[
+            T::checked_sum_products(&[
                 (v0.z, q, false),
                 (v1.z, q, false),
                 (v2.z, q, false),
@@ -827,7 +838,7 @@ impl<T: RealScalar> Plane<T> {
             ])
             .ok()?,
         );
-        Self::try_new(&n, &c, epsilon)
+        Self::checked_new(&n, &c, epsilon)
     }
 
     /// Computes the intersection of this plane with a ray.
@@ -883,9 +894,9 @@ impl<T: RealScalar> Plane<T> {
         let unit_direction = direction_metric.unit();
         let unit_constant = normal_metric.divide_by_length(self.constant())?;
         let numerator = unit_constant
-            .try_add(Vector3::try_dot(&unit_normal, &line.p).ok()?)
+            .checked_add(Vector3::checked_dot(&unit_normal, &line.p).ok()?)
             .ok()?;
-        let denominator = Vector3::try_dot(&unit_normal, &unit_direction).ok()?;
+        let denominator = Vector3::checked_dot(&unit_normal, &unit_direction).ok()?;
         if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
             return None;
         }
@@ -893,7 +904,11 @@ impl<T: RealScalar> Plane<T> {
         // Solve first in physical distance along a unit direction. Dividing by
         // the stored direction length then restores the caller's original line
         // parameterization without using an overflow-prone raw length.
-        let distance = numerator.try_neg().ok()?.try_div(denominator).ok()?;
+        let distance = numerator
+            .checked_neg()
+            .ok()?
+            .checked_div(denominator)
+            .ok()?;
         if !is_finite_scalar(distance) {
             return None;
         }
@@ -907,9 +922,9 @@ impl<T: RealScalar> Plane<T> {
         // potentially extreme reciprocal pair `line.d * t`. Both expressions
         // represent the same point, but the unit-direction form remains bounded
         // over a much wider range of stored direction magnitudes.
-        let point = Vector3::try_add_vv(
+        let point = Vector3::checked_add_vv(
             &line.p,
-            &Vector3::try_mul_vs(&unit_direction, distance).ok()?,
+            &Vector3::checked_mul_vs(&unit_direction, distance).ok()?,
         )
         .ok()?;
         if !is_finite_vector3(&point) {
@@ -926,7 +941,8 @@ impl<T: RealScalar> Plane<T> {
         let zero = <T as Zero>::zero();
         if t != zero && t.tabs() * T::half() == zero {
             let parameterized_point =
-                Vector3::try_add_vv(&line.p, &Vector3::try_mul_vs(&line.d, t).ok()?).ok()?;
+                Vector3::checked_add_vv(&line.p, &Vector3::checked_mul_vs(&line.d, t).ok()?)
+                    .ok()?;
             if parameterized_point.x != point.x
                 || parameterized_point.y != point.y
                 || parameterized_point.z != point.z
@@ -965,7 +981,7 @@ impl<T: RealScalar> ParametricPlane<T> {
 
     /// Converts the parametric plane to an infinite plane.
     pub fn plane(&self) -> Plane<T> {
-        self.try_plane(T::epsilon())
+        self.checked_plane(T::epsilon())
             .expect("parametric plane axes must span a plane")
     }
 
@@ -974,11 +990,11 @@ impl<T: RealScalar> ParametricPlane<T> {
     /// Returns `None` if either axis is zero or non-finite, or if the axes are
     /// parallel within the dimensionless angular `epsilon` tolerance. The
     /// tolerance must be finite and in `0..=1`; invalid values return `None`.
-    pub fn try_plane(&self, epsilon: T) -> Option<Plane<T>> {
+    pub fn checked_plane(&self, epsilon: T) -> Option<Plane<T>> {
         // Build the normal with the same scale-invariant classification used by
         // intersection routines, then anchor the resulting plane at the center.
-        let normal = self.try_normal(epsilon)?;
-        Plane::try_new(&normal, &self.center, epsilon)
+        let normal = self.checked_normal(epsilon)?;
+        Plane::checked_new(&normal, &self.center, epsilon)
     }
 
     /// Computes the unit normal defined by the two plane axes.
@@ -987,11 +1003,11 @@ impl<T: RealScalar> ParametricPlane<T> {
     ///
     /// Panics if either axis is zero or non-finite, or if their sine-angle
     /// magnitude is at most [`RealScalar::epsilon`]. Use
-    /// [`ParametricPlane::try_normal`] for checked input.
+    /// [`ParametricPlane::checked_normal`] for checked input.
     pub fn normal(&self) -> Vector3<T> {
         // The infallible convenience API applies the scalar's default angular
         // tolerance and makes its invalid-axis precondition explicit by panic.
-        self.try_normal(T::epsilon())
+        self.checked_normal(T::epsilon())
             .expect("parametric plane axes must span a plane")
     }
 
@@ -1001,10 +1017,10 @@ impl<T: RealScalar> ParametricPlane<T> {
     /// their angle is at most the dimensionless `epsilon` tolerance. The
     /// tolerance must be finite and in `0..=1`; invalid values return `None`.
     /// Axis magnitudes do not affect the returned decision or unit normal.
-    pub fn try_normal(&self, epsilon: T) -> Option<Vector3<T>> {
+    pub fn checked_normal(&self, epsilon: T) -> Option<Vector3<T>> {
         // Delegate to the shared spanning-vector path so tiny and huge but
         // well-conditioned axes receive identical treatment.
-        try_normal_from_spanning_vectors(&self.x_axis, &self.y_axis, epsilon)
+        checked_normal_from_spanning_vectors(&self.x_axis, &self.y_axis, epsilon)
     }
 
     /// Computes the intersection of this parametric plane with a ray.
@@ -1017,7 +1033,7 @@ impl<T: RealScalar> ParametricPlane<T> {
     pub fn intersect_ray(&self, r: &Ray<T, Vector3<T>>, epsilon: T) -> Option<Vector3<T>> {
         // Validate and canonicalize the spanning axes once, then reuse the
         // ordinary plane/ray query and its forward-ray semantics.
-        let plane = self.try_plane(epsilon)?;
+        let plane = self.checked_plane(epsilon)?;
         r.intersect_plane(&plane, epsilon)
     }
 
@@ -1035,23 +1051,23 @@ impl<T: RealScalar> ParametricPlane<T> {
     ) -> Option<(T, Vector3<T>)> {
         // Convert through the checked unit-normal representation before
         // delegating to the single line/plane intersection implementation.
-        let plane = self.try_plane(epsilon)?;
+        let plane = self.checked_plane(epsilon)?;
         plane.intersect_line(line, epsilon)
     }
 
     /// Projects with a checked, dimensionless Gram system for independent axes.
     /// Degenerate axes and unrepresentable arithmetic are explicit errors.
-    pub fn try_project(&self, value: &Vector3<T>) -> Result<Vector2<T>, MathError> {
-        let delta = Vector3::try_sub_vv(value, &self.center)?;
+    pub fn checked_project(&self, value: &Vector3<T>) -> Result<Vector2<T>, MathError> {
+        let delta = Vector3::checked_sub_vv(value, &self.center)?;
         checked_span_coordinates(&self.x_axis, &self.y_axis, &delta)
     }
 
     /// Projects a 3D point onto the plane's 2D coordinates, allowing oblique axes.
     /// # Panics
-    /// Panics for dependent axes or unrepresentable arithmetic. Use `try_project`
+    /// Panics for dependent axes or unrepresentable arithmetic. Use `checked_project`
     /// to inspect the numerical error.
     pub fn project(&self, v: &Vector3<T>) -> Vector2<T> {
-        self.try_project(v)
+        self.checked_project(v)
             .expect("parametric plane projection failed")
     }
 }
@@ -1064,12 +1080,12 @@ impl<T: RealScalar> ParametricPlane<T> {
 /// # Panics
 ///
 /// Panics if either edge is zero or non-finite, or if the edges are parallel
-/// within [`RealScalar::epsilon`]. Use [`try_tri_normal`] for checked input.
+/// within [`RealScalar::epsilon`]. Use [`checked_tri_normal`] for checked input.
 ////////////////////////////////////////////////////////////////////////////////
 pub fn tri_normal<T: RealScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<T>) -> Vector3<T> {
     // Apply the scalar's default dimensionless tolerance while keeping the
     // checked implementation authoritative for orientation and normalization.
-    try_tri_normal(v0, v1, v2, T::epsilon()).expect("triangle must be non-degenerate")
+    checked_tri_normal(v0, v1, v2, T::epsilon()).expect("triangle must be non-degenerate")
 }
 
 /// Computes the unit normal of a triangle.
@@ -1078,7 +1094,7 @@ pub fn tri_normal<T: RealScalar>(v0: &Vector3<T>, v1: &Vector3<T>, v2: &Vector3<
 /// angle between the edges is at most the dimensionless `epsilon` tolerance.
 /// The tolerance must be finite and in `0..=1`; invalid values return `None`.
 /// Edge magnitudes do not affect the decision or returned unit normal.
-pub fn try_tri_normal<T: RealScalar>(
+pub fn checked_tri_normal<T: RealScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
@@ -1086,9 +1102,9 @@ pub fn try_tri_normal<T: RealScalar>(
 ) -> Option<Vector3<T>> {
     // Translate vertices into edge directions before applying a dimensionless
     // shape test; the absolute triangle area is not a degeneracy criterion.
-    let v10 = Vector3::try_sub_vv(v1, v0).ok()?;
-    let v20 = Vector3::try_sub_vv(v2, v0).ok()?;
-    try_normal_from_spanning_vectors(&v10, &v20, epsilon)
+    let v10 = Vector3::checked_sub_vv(v1, v0).ok()?;
+    let v20 = Vector3::checked_sub_vv(v2, v0).ok()?;
+    checked_normal_from_spanning_vectors(&v10, &v20, epsilon)
 }
 
 /// Computes the diagonal-derived unit normal of a quadrilateral.
@@ -1101,7 +1117,7 @@ pub fn try_tri_normal<T: RealScalar>(
 /// # Panics
 ///
 /// Panics if either diagonal is zero or non-finite, or if the diagonals are
-/// parallel within [`RealScalar::epsilon`]. Use [`try_quad_normal`] for
+/// parallel within [`RealScalar::epsilon`]. Use [`checked_quad_normal`] for
 /// checked input.
 pub fn quad_normal<T: RealScalar>(
     v0: &Vector3<T>,
@@ -1111,7 +1127,7 @@ pub fn quad_normal<T: RealScalar>(
 ) -> Vector3<T> {
     // Apply the scalar's default dimensionless tolerance while keeping the
     // checked diagonal-orientation implementation authoritative.
-    try_quad_normal(v0, v1, v2, v3, T::epsilon()).expect("quad must be non-degenerate")
+    checked_quad_normal(v0, v1, v2, v3, T::epsilon()).expect("quad must be non-degenerate")
 }
 
 /// Computes the diagonal-derived unit normal of a quadrilateral.
@@ -1119,7 +1135,7 @@ pub fn quad_normal<T: RealScalar>(
 /// Returns `None` if either diagonal is zero or non-finite, or if the diagonals
 /// are parallel within the dimensionless angular `epsilon` tolerance. The
 /// tolerance must be finite and in `0..=1`; invalid values return `None`.
-pub fn try_quad_normal<T: RealScalar>(
+pub fn checked_quad_normal<T: RealScalar>(
     v0: &Vector3<T>,
     v1: &Vector3<T>,
     v2: &Vector3<T>,
@@ -1128,9 +1144,9 @@ pub fn try_quad_normal<T: RealScalar>(
 ) -> Option<Vector3<T>> {
     // Diagonal magnitudes depend on the caller's coordinate scale, so only
     // their validity and relative orientation participate in this decision.
-    let v20 = Vector3::try_sub_vv(v2, v0).ok()?;
-    let v31 = Vector3::try_sub_vv(v3, v1).ok()?;
-    try_normal_from_spanning_vectors(&v20, &v31, epsilon)
+    let v20 = Vector3::checked_sub_vv(v2, v0).ok()?;
+    let v31 = Vector3::checked_sub_vv(v3, v1).ok()?;
+    checked_normal_from_spanning_vectors(&v20, &v31, epsilon)
 }
 
 /// Produces a unit normal from two vectors that should span a plane.
@@ -1139,7 +1155,7 @@ pub fn try_quad_normal<T: RealScalar>(
 /// non-finite vectors and treats vectors whose sine-angle magnitude is at most
 /// `epsilon` as parallel. It uses only normalized temporary values, preventing
 /// the raw cross product from overflowing or underflowing with input scale.
-fn try_normal_from_spanning_vectors<T: RealScalar>(
+fn checked_normal_from_spanning_vectors<T: RealScalar>(
     left: &Vector3<T>,
     right: &Vector3<T>,
     epsilon: T,
@@ -1166,7 +1182,7 @@ fn try_normal_from_spanning_vectors<T: RealScalar>(
     // the orientation required by plane constructors.
     let left_unit = left_metric.unit();
     let right_unit = right_metric.unit();
-    let cross = Vector3::try_cross(&left_unit, &right_unit).ok()?;
+    let cross = Vector3::checked_cross(&left_unit, &right_unit).ok()?;
     Some(try_normalized3(&cross)?.unit())
 }
 
@@ -1272,7 +1288,7 @@ mod tests {
         let tri = Tri3::new([v0, v1, v2]);
         let test_point = Vector3::new(0.5f32, 0.0, 0.0);
         assert!(matches!(
-            tri.try_barycentric_coordinates(&test_point),
+            tri.checked_barycentric_coordinates(&test_point),
             Err(MathError::Degenerate)
         ));
     }
@@ -1423,7 +1439,7 @@ mod tests {
 
         // Plane-normal construction consumes the parallel classifier. Its
         // valid right-angle edges still fail when policy itself is negative.
-        assert!(try_tri_normal(&origin, &x, &y, -EPS_F32).is_none());
+        assert!(checked_tri_normal(&origin, &x, &y, -EPS_F32).is_none());
     }
 
     /// Verifies that closest-line classification depends on direction angle,
@@ -1782,7 +1798,7 @@ mod tests {
 
     #[test]
     fn test_plane_try_new_zero_normal_none() {
-        let plane = Plane::try_new(
+        let plane = Plane::checked_new(
             &Vector3::new(0.0f32, 0.0, 0.0),
             &Vector3::new(0.0, 0.0, 0.0),
             EPS_F32,
@@ -1883,8 +1899,8 @@ mod tests {
             &Vector3::new(1.0, 0.0, 0.0),
             &Vector3::new(2.0, 0.0, 0.0),
         );
-        assert!(plane.try_normal(EPS_F32).is_none());
-        assert!(plane.try_plane(EPS_F32).is_none());
+        assert!(plane.checked_normal(EPS_F32).is_none());
+        assert!(plane.checked_plane(EPS_F32).is_none());
     }
 
     /// Checks that plane-producing cross products use axis orientation rather
@@ -1895,7 +1911,7 @@ mod tests {
 
         // The old cross-then-length-squared path underflowed for these vectors,
         // although they form a perfectly conditioned right angle.
-        let triangle_normal = try_tri_normal(
+        let triangle_normal = checked_tri_normal(
             &Vector3::new(0.0f32, 0.0, 0.0),
             &Vector3::new(tiny, 0.0, 0.0),
             &Vector3::new(0.0, tiny, 0.0),
@@ -1912,7 +1928,7 @@ mod tests {
             &Vector3::new(0.0, tiny, 0.0),
         );
         let normal = parametric
-            .try_normal(EPS_F32)
+            .checked_normal(EPS_F32)
             .expect("tiny perpendicular axes should span a plane");
         assert!((normal.z - 1.0).abs() < 1.0e-5);
     }

@@ -158,15 +158,16 @@ pub fn rotation_from_axis_angle<T: RealScalar>(
 /// Checked transform_vec3 construction/calculation for finite represented scalars.
 /// Returns an error for invalid domains, zero denominators, degenerate bases,
 /// or unrepresentable intermediate/output values; performs no float conversion.
-pub fn try_transform_vec3<T: RealScalar>(
+pub fn checked_transform_vec3<T: RealScalar>(
     m: &Matrix4<T>,
     v: &Vector3<T>,
 ) -> Result<Vector3<T>, MathError> {
-    let out = Matrix4::try_mul_matrix_vector(m, &Vector4::new(v.x, v.y, v.z, <T as One>::one()))?;
+    let out =
+        Matrix4::checked_mul_matrix_vector(m, &Vector4::new(v.x, v.y, v.z, <T as One>::one()))?;
     Ok(Vector3::new(
-        out.x.try_div(out.w)?,
-        out.y.try_div(out.w)?,
-        out.z.try_div(out.w)?,
+        out.x.checked_div(out.w)?,
+        out.y.checked_div(out.w)?,
+        out.z.checked_div(out.w)?,
     ))
 }
 
@@ -174,34 +175,34 @@ pub fn try_transform_vec3<T: RealScalar>(
 ///
 /// The vector is treated as a point (w=1) and the result is divided by w.
 pub fn transform_vec3<T: RealScalar>(m: &Matrix4<T>, v: &Vector3<T>) -> Vector3<T> {
-    try_transform_vec3(m, v).expect("transform_vec3 calculation failed")
+    checked_transform_vec3(m, v).expect("transform_vec3 calculation failed")
 }
 
 /// Checked project3 construction/calculation for finite represented scalars.
 /// Returns an error for invalid domains, zero denominators, degenerate bases,
 /// or unrepresentable intermediate/output values; performs no float conversion.
-pub fn try_project3<T: RealScalar>(
+pub fn checked_project3<T: RealScalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
     lb: &Vector2<T>,
     rt: &Vector2<T>,
     pt: &Vector3<T>,
 ) -> Result<Vector3<T>, MathError> {
-    let combined = Matrix4::try_mul_matrix_matrix(persp, world)?;
-    let point = try_transform_vec3(&combined, pt)?;
+    let combined = Matrix4::checked_mul_matrix_matrix(persp, world)?;
+    let point = checked_transform_vec3(&combined, pt)?;
     let one = <T as One>::one();
     let x =
-        rt.x.try_sub(lb.x)?
-            .try_mul(point.x.try_add(one)?.try_mul(T::half())?)?
-            .try_add(lb.x)?;
+        rt.x.checked_sub(lb.x)?
+            .checked_mul(point.x.checked_add(one)?.checked_mul(T::half())?)?
+            .checked_add(lb.x)?;
     let y =
-        rt.y.try_sub(lb.y)?
-            .try_mul(point.y.try_add(one)?.try_mul(T::half())?)?
-            .try_add(lb.y)?;
+        rt.y.checked_sub(lb.y)?
+            .checked_mul(point.y.checked_add(one)?.checked_mul(T::half())?)?
+            .checked_add(lb.y)?;
     Ok(Vector3::new(
         x,
         y,
-        point.z.try_add(one)?.try_mul(T::half())?,
+        point.z.checked_add(one)?.checked_mul(T::half())?,
     ))
 }
 
@@ -223,38 +224,38 @@ pub fn project3<T: RealScalar>(
     rt: &Vector2<T>,
     pt: &Vector3<T>,
 ) -> Vector3<T> {
-    try_project3(world, persp, lb, rt, pt).expect("project3 calculation failed")
+    checked_project3(world, persp, lb, rt, pt).expect("project3 calculation failed")
 }
 
 /// Checked unproject3 construction/calculation for finite represented scalars.
 /// Returns an error for invalid domains, zero denominators, degenerate bases,
 /// or unrepresentable intermediate/output values; performs no float conversion.
-pub fn try_unproject3<T: RealScalar>(
+pub fn checked_unproject3<T: RealScalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
     lb: &Vector2<T>,
     rt: &Vector2<T>,
     pt: &Vector3<T>,
 ) -> Result<Vector3<T>, MathError> {
-    let combined = Matrix4::try_mul_matrix_matrix(persp, world)?;
+    let combined = Matrix4::checked_mul_matrix_matrix(persp, world)?;
     let inverse = if combined.is_affine(T::epsilon()) {
-        combined.try_inverse_affine()?
+        combined.checked_inverse_affine()?
     } else {
-        combined.try_inverse()?
+        combined.checked_inverse()?
     };
     let one = <T as One>::one();
     let x =
-        pt.x.try_sub(lb.x)?
-            .try_div(rt.x.try_sub(lb.x)?)?
-            .try_mul(T::two())?
-            .try_sub(one)?;
+        pt.x.checked_sub(lb.x)?
+            .checked_div(rt.x.checked_sub(lb.x)?)?
+            .checked_mul(T::two())?
+            .checked_sub(one)?;
     let y =
-        pt.y.try_sub(lb.y)?
-            .try_div(rt.y.try_sub(lb.y)?)?
-            .try_mul(T::two())?
-            .try_sub(one)?;
-    let z = pt.z.try_mul(T::two())?.try_sub(one)?;
-    try_transform_vec3(&inverse, &Vector3::new(x, y, z))
+        pt.y.checked_sub(lb.y)?
+            .checked_div(rt.y.checked_sub(lb.y)?)?
+            .checked_mul(T::two())?
+            .checked_sub(one)?;
+    let z = pt.z.checked_mul(T::two())?.checked_sub(one)?;
+    checked_transform_vec3(&inverse, &Vector3::new(x, y, z))
 }
 
 /// Unprojects screen coordinates back to 3D world space.
@@ -275,44 +276,44 @@ pub fn unproject3<T: RealScalar>(
     rt: &Vector2<T>,
     pt: &Vector3<T>,
 ) -> Vector3<T> {
-    try_unproject3(world, persp, lb, rt, pt).expect("unproject3 calculation failed")
+    checked_unproject3(world, persp, lb, rt, pt).expect("unproject3 calculation failed")
 }
 
 /// Checked frustum construction/calculation for finite represented scalars.
 /// Returns an error for invalid domains, zero denominators, degenerate bases,
 /// or unrepresentable intermediate/output values; performs no float conversion.
-pub fn try_frustum<T: RealScalar>(
+pub fn checked_frustum<T: RealScalar>(
     lbn: &Vector3<T>,
     rtf: &Vector3<T>,
 ) -> Result<Matrix4<T>, MathError> {
     let zero = <T as Zero>::zero();
     let one = <T as One>::one();
-    let width = rtf.x.try_sub(lbn.x)?;
-    let height = rtf.y.try_sub(lbn.y)?;
-    let depth = rtf.z.try_sub(lbn.z)?;
-    let a = one.try_add(T::two().try_mul(lbn.x.try_div(width)?)?)?;
-    let b = one.try_add(T::two().try_mul(lbn.y.try_div(height)?)?)?;
+    let width = rtf.x.checked_sub(lbn.x)?;
+    let height = rtf.y.checked_sub(lbn.y)?;
+    let depth = rtf.z.checked_sub(lbn.z)?;
+    let a = one.checked_add(T::two().checked_mul(lbn.x.checked_div(width)?)?)?;
+    let b = one.checked_add(T::two().checked_mul(lbn.y.checked_div(height)?)?)?;
     let c = one
-        .try_add(T::two().try_mul(lbn.z.try_div(depth)?)?)?
-        .try_neg()?;
+        .checked_add(T::two().checked_mul(lbn.z.checked_div(depth)?)?)?
+        .checked_neg()?;
     let d = lbn
         .z
-        .try_mul(rtf.z.try_div(depth)?)?
-        .try_mul(T::two())?
-        .try_neg()?;
+        .checked_mul(rtf.z.checked_div(depth)?)?
+        .checked_mul(T::two())?
+        .checked_neg()?;
     Ok(Matrix4::new(
-        lbn.z.try_div(width)?.try_mul(T::two())?,
+        lbn.z.checked_div(width)?.checked_mul(T::two())?,
         zero,
         zero,
         zero,
         zero,
-        lbn.z.try_div(height)?.try_mul(T::two())?,
+        lbn.z.checked_div(height)?.checked_mul(T::two())?,
         zero,
         zero,
         a,
         b,
         c,
-        one.try_neg()?,
+        one.checked_neg()?,
         zero,
         zero,
         d,
@@ -328,13 +329,13 @@ pub fn try_frustum<T: RealScalar>(
 ///
 /// The frustum is defined by the near and far clipping planes.
 pub fn frustum<T: RealScalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> {
-    try_frustum(lbn, rtf).expect("frustum calculation failed")
+    checked_frustum(lbn, rtf).expect("frustum calculation failed")
 }
 
 /// Checked ortho4 construction/calculation for finite represented scalars.
 /// Returns an error for invalid domains, zero denominators, degenerate bases,
 /// or unrepresentable intermediate/output values; performs no float conversion.
-pub fn try_ortho4<T: RealScalar>(
+pub fn checked_ortho4<T: RealScalar>(
     left: T,
     right: T,
     bottom: T,
@@ -344,30 +345,30 @@ pub fn try_ortho4<T: RealScalar>(
 ) -> Result<Matrix4<T>, MathError> {
     let zero = <T as Zero>::zero();
     let one = <T as One>::one();
-    let width = right.try_sub(left)?;
-    let height = top.try_sub(bottom)?;
-    let depth = far.try_sub(near)?;
+    let width = right.checked_sub(left)?;
+    let height = top.checked_sub(bottom)?;
+    let depth = far.checked_sub(near)?;
     let x = one
-        .try_add(T::two().try_mul(left.try_div(width)?)?)?
-        .try_neg()?;
+        .checked_add(T::two().checked_mul(left.checked_div(width)?)?)?
+        .checked_neg()?;
     let y = one
-        .try_add(T::two().try_mul(bottom.try_div(height)?)?)?
-        .try_neg()?;
+        .checked_add(T::two().checked_mul(bottom.checked_div(height)?)?)?
+        .checked_neg()?;
     let z = one
-        .try_add(T::two().try_mul(near.try_div(depth)?)?)?
-        .try_neg()?;
+        .checked_add(T::two().checked_mul(near.checked_div(depth)?)?)?
+        .checked_neg()?;
     Ok(Matrix4::new(
-        T::two().try_div(width)?,
+        T::two().checked_div(width)?,
         zero,
         zero,
         zero,
         zero,
-        T::two().try_div(height)?,
+        T::two().checked_div(height)?,
         zero,
         zero,
         zero,
         zero,
-        T::two().try_neg()?.try_div(depth)?,
+        T::two().checked_neg()?.checked_div(depth)?,
         zero,
         x,
         y,
@@ -385,13 +386,13 @@ pub fn try_ortho4<T: RealScalar>(
 ///
 /// Objects maintain their size regardless of depth in orthographic projection.
 pub fn ortho4<T: RealScalar>(left: T, right: T, bottom: T, top: T, near: T, far: T) -> Matrix4<T> {
-    try_ortho4(left, right, bottom, top, near, far).expect("ortho4 calculation failed")
+    checked_ortho4(left, right, bottom, top, near, far).expect("ortho4 calculation failed")
 }
 
 /// Checked perspective construction/calculation for finite represented scalars.
 /// Returns an error for invalid domains, zero denominators, degenerate bases,
 /// or unrepresentable intermediate/output values; performs no float conversion.
-pub fn try_perspective<T: RealScalar>(
+pub fn checked_perspective<T: RealScalar>(
     fovy: T,
     aspect: T,
     near: T,
@@ -405,22 +406,22 @@ pub fn try_perspective<T: RealScalar>(
     if fovy <= zero || aspect <= zero || near <= zero || far <= near {
         return Err(MathError::Domain);
     }
-    let tangent = fovy.try_mul(T::half())?.try_tan()?;
+    let tangent = fovy.checked_mul(T::half())?.checked_tan()?;
     if tangent <= zero {
         return Err(MathError::Domain);
     }
-    let f = one.try_div(tangent)?;
-    let depth = far.try_sub(near)?;
+    let f = one.checked_div(tangent)?;
+    let depth = far.checked_sub(near)?;
     let a = one
-        .try_add(T::two().try_mul(near.try_div(depth)?)?)?
-        .try_neg()?;
+        .checked_add(T::two().checked_mul(near.checked_div(depth)?)?)?
+        .checked_neg()?;
     // Divide comparable quantities before multiplying physical distances.
     let b = near
-        .try_mul(far.try_div(depth)?)?
-        .try_mul(T::two())?
-        .try_neg()?;
+        .checked_mul(far.checked_div(depth)?)?
+        .checked_mul(T::two())?
+        .checked_neg()?;
     Ok(Matrix4::new(
-        f.try_div(aspect)?,
+        f.checked_div(aspect)?,
         zero,
         zero,
         zero,
@@ -431,7 +432,7 @@ pub fn try_perspective<T: RealScalar>(
         zero,
         zero,
         a,
-        one.try_neg()?,
+        one.checked_neg()?,
         zero,
         zero,
         b,
@@ -449,39 +450,39 @@ pub fn try_perspective<T: RealScalar>(
 ///
 /// Uses the standard OpenGL perspective projection formula.
 pub fn perspective<T: RealScalar>(fovy: T, aspect: T, near: T, far: T) -> Matrix4<T> {
-    try_perspective(fovy, aspect, near, far).expect("perspective calculation failed")
+    checked_perspective(fovy, aspect, near, far).expect("perspective calculation failed")
 }
 
 /// Checked lookat construction/calculation for finite represented scalars.
 /// Returns an error for invalid domains, zero denominators, degenerate bases,
 /// or unrepresentable intermediate/output values; performs no float conversion.
-pub fn try_lookat<T: RealScalar>(
+pub fn checked_lookat<T: RealScalar>(
     eye: &Vector3<T>,
     dest: &Vector3<T>,
     up: &Vector3<T>,
 ) -> Result<Matrix4<T>, MathError> {
     let zero = <T as Zero>::zero();
     let one = <T as One>::one();
-    let forward = Vector3::try_sub_vv(dest, eye)?.checked_normalize(T::epsilon())?;
+    let forward = Vector3::checked_sub_vv(dest, eye)?.checked_normalize(T::epsilon())?;
     let up = up.checked_normalize(T::epsilon())?;
-    let side = Vector3::try_cross(&forward, &up)?.checked_normalize(T::epsilon())?;
-    let up = Vector3::try_cross(&side, &forward)?.checked_normalize(T::epsilon())?;
+    let side = Vector3::checked_cross(&forward, &up)?.checked_normalize(T::epsilon())?;
+    let up = Vector3::checked_cross(&side, &forward)?.checked_normalize(T::epsilon())?;
     Ok(Matrix4::new(
         side.x,
         up.x,
-        forward.x.try_neg()?,
+        forward.x.checked_neg()?,
         zero,
         side.y,
         up.y,
-        forward.y.try_neg()?,
+        forward.y.checked_neg()?,
         zero,
         side.z,
         up.z,
-        forward.z.try_neg()?,
+        forward.z.checked_neg()?,
         zero,
-        Vector3::try_dot(&side, eye)?.try_neg()?,
-        Vector3::try_dot(&up, eye)?.try_neg()?,
-        Vector3::try_dot(&forward, eye)?,
+        Vector3::checked_dot(&side, eye)?.checked_neg()?,
+        Vector3::checked_dot(&up, eye)?.checked_neg()?,
+        Vector3::checked_dot(&forward, eye)?,
         one,
     ))
 }
@@ -500,9 +501,9 @@ pub fn try_lookat<T: RealScalar>(
 /// - `up` must not be parallel, or nearly parallel, to the viewing direction
 ///
 /// Panics when these preconditions or checked range requirements fail.
-/// Use [`try_lookat`] to receive the numerical error.
+/// Use [`checked_lookat`] to receive the numerical error.
 pub fn lookat<T: RealScalar>(eye: &Vector3<T>, dest: &Vector3<T>, up: &Vector3<T>) -> Matrix4<T> {
-    try_lookat(eye, dest, up).expect("lookat calculation failed")
+    checked_lookat(eye, dest, up).expect("lookat calculation failed")
 }
 
 /// Components of a nonsingular affine transformation.
@@ -550,42 +551,46 @@ pub fn decompose_affine<T: RealScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>>
 
     // Modified Gram-Schmidt gives A = R * U. Dividing the off-diagonal
     // entries of U by its diagonal separates U into H * S.
-    let scale_x = a0.try_length().ok()?;
+    let scale_x = a0.checked_length().ok()?;
     if scale_x.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
         return None;
     }
-    let mut r0 = Vector3::try_div_vs(&a0, scale_x).ok()?;
+    let mut r0 = Vector3::checked_div_vs(&a0, scale_x).ok()?;
 
-    let projection_xy = Vector3::try_dot(&r0, &a1).ok()?;
+    let projection_xy = Vector3::checked_dot(&r0, &a1).ok()?;
     let a1_orthogonal =
-        Vector3::try_sub_vv(&a1, &Vector3::try_mul_vs(&r0, projection_xy).ok()?).ok()?;
-    let scale_y = a1_orthogonal.try_length().ok()?;
+        Vector3::checked_sub_vv(&a1, &Vector3::checked_mul_vs(&r0, projection_xy).ok()?).ok()?;
+    let scale_y = a1_orthogonal.checked_length().ok()?;
     if scale_y.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
         return None;
     }
-    let mut r1 = Vector3::try_div_vs(&a1_orthogonal, scale_y).ok()?;
-    let shear_xy = projection_xy.try_div(scale_y).ok()?;
+    let mut r1 = Vector3::checked_div_vs(&a1_orthogonal, scale_y).ok()?;
+    let shear_xy = projection_xy.checked_div(scale_y).ok()?;
 
-    let projection_xz = Vector3::try_dot(&r0, &a2).ok()?;
+    let projection_xz = Vector3::checked_dot(&r0, &a2).ok()?;
     let a2_without_x =
-        Vector3::try_sub_vv(&a2, &Vector3::try_mul_vs(&r0, projection_xz).ok()?).ok()?;
-    let projection_yz = Vector3::try_dot(&r1, &a2_without_x).ok()?;
-    let a2_orthogonal = Vector3::try_sub_vv(
+        Vector3::checked_sub_vv(&a2, &Vector3::checked_mul_vs(&r0, projection_xz).ok()?).ok()?;
+    let projection_yz = Vector3::checked_dot(&r1, &a2_without_x).ok()?;
+    let a2_orthogonal = Vector3::checked_sub_vv(
         &a2_without_x,
-        &Vector3::try_mul_vs(&r1, projection_yz).ok()?,
+        &Vector3::checked_mul_vs(&r1, projection_yz).ok()?,
     )
     .ok()?;
-    let scale_z = a2_orthogonal.try_length().ok()?;
+    let scale_z = a2_orthogonal.checked_length().ok()?;
     if scale_z.partial_cmp(&epsilon) != Some(core::cmp::Ordering::Greater) {
         return None;
     }
-    let mut r2 = Vector3::try_div_vs(&a2_orthogonal, scale_z).ok()?;
-    let shear_xz = projection_xz.try_div(scale_z).ok()?;
-    let shear_yz = projection_yz.try_div(scale_z).ok()?;
+    let mut r2 = Vector3::checked_div_vs(&a2_orthogonal, scale_z).ok()?;
+    let shear_xz = projection_xz.checked_div(scale_z).ok()?;
+    let shear_yz = projection_yz.checked_div(scale_z).ok()?;
 
     let mut scale = Vector3::new(scale_x, scale_y, scale_z);
-    let rotation_determinant = Vector3::try_dot(&r0, &Vector3::try_cross(&r1, &r2).ok()?).ok()?;
-    if rotation_determinant.try_abs().ok()?.partial_cmp(&epsilon)
+    let rotation_determinant =
+        Vector3::checked_dot(&r0, &Vector3::checked_cross(&r1, &r2).ok()?).ok()?;
+    if rotation_determinant
+        .checked_abs()
+        .ok()?
+        .partial_cmp(&epsilon)
         != Some(core::cmp::Ordering::Greater)
     {
         return None;
@@ -595,10 +600,10 @@ pub fn decompose_affine<T: RealScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>>
         // Negating both R and S leaves R * H * S unchanged. Flipping all
         // three axes preserves the crate's established reflection convention
         // while making R proper for quaternion conversion.
-        r0 = Vector3::try_mul_vs(&r0, -<T as One>::one()).ok()?;
-        r1 = Vector3::try_mul_vs(&r1, -<T as One>::one()).ok()?;
-        r2 = Vector3::try_mul_vs(&r2, -<T as One>::one()).ok()?;
-        scale = Vector3::try_mul_vs(&scale, -<T as One>::one()).ok()?;
+        r0 = Vector3::checked_mul_vs(&r0, -<T as One>::one()).ok()?;
+        r1 = Vector3::checked_mul_vs(&r1, -<T as One>::one()).ok()?;
+        r2 = Vector3::checked_mul_vs(&r2, -<T as One>::one()).ok()?;
+        scale = Vector3::checked_mul_vs(&scale, -<T as One>::one()).ok()?;
     }
 
     let rotation_matrix = Matrix3::new(r0.x, r0.y, r0.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z);
@@ -621,9 +626,9 @@ pub fn decompose_affine<T: RealScalar>(m: &Matrix4<T>) -> Option<AffineParts<T>>
 pub fn decompose<T: RealScalar>(m: &Matrix4<T>) -> Option<(Vector3<T>, Quat<T>, Vector3<T>)> {
     let parts = decompose_affine(m)?;
     let epsilon = T::epsilon();
-    if parts.shear.x.try_abs().ok()? > epsilon
-        || parts.shear.y.try_abs().ok()? > epsilon
-        || parts.shear.z.try_abs().ok()? > epsilon
+    if parts.shear.x.checked_abs().ok()? > epsilon
+        || parts.shear.y.checked_abs().ok()? > epsilon
+        || parts.shear.z.checked_abs().ok()? > epsilon
     {
         return None;
     }

@@ -30,6 +30,28 @@
 
 use crate::MathError;
 
+/// Rounds a widened quotient without checking domain or destination range.
+/// Callers supply a nonzero divisor and narrow the low bits at their boundary.
+#[inline]
+pub(super) fn div(n: i128, d: i128) -> i128 {
+    let a = n.unsigned_abs();
+    let b = d.unsigned_abs();
+    let q = a / b;
+    let r = a % b;
+    let rounded = q.wrapping_add((r > b - r || (r == b - r && q & 1 != 0)) as u128);
+    signed_wrapping(rounded, (n < 0) != (d < 0))
+}
+
+/// Restores a sign modulo 2^128. Narrowing later preserves the low storage bits.
+#[inline]
+pub(super) fn signed_wrapping(magnitude: u128, negative: bool) -> i128 {
+    if negative {
+        (magnitude as i128).wrapping_neg()
+    } else {
+        magnitude as i128
+    }
+}
+
 /// Divides signed integers, rounding to nearest with ties to an even quotient.
 /// Magnitudes avoid negating a signed minimum; the caller checks output range.
 pub(super) fn round_div(n: i128, d: i128) -> Result<i128, MathError> {
@@ -92,6 +114,32 @@ pub(super) struct Accumulator {
 }
 
 impl Accumulator {
+    /// Adds a product modulo the accumulator width without range validation.
+    pub(super) fn add_wrapping(&mut self, value: i128, subtract: bool) {
+        let magnitude = value.unsigned_abs();
+        let negative = (value < 0) != subtract;
+        if self.negative == negative {
+            let (low, carry) = self.low.overflowing_add(magnitude);
+            self.high = self.high.wrapping_add(carry as u128);
+            self.low = low;
+        } else if self.high != 0 || self.low >= magnitude {
+            let (low, borrow) = self.low.overflowing_sub(magnitude);
+            self.high = self.high.wrapping_sub(borrow as u128);
+            self.low = low;
+        } else {
+            self.low = magnitude - self.low;
+            self.negative = negative;
+        }
+        if self.high == 0 && self.low == 0 {
+            self.negative = false;
+        }
+    }
+
+    /// Rounds once and returns the low bits. High limbs cannot affect any of
+    /// the supported 64-bit destinations after shifting by at most 63 bits.
+    pub(super) fn finish_wrapping(self, frac: u32) -> i128 {
+        signed_wrapping(round_shift(self.low, frac), self.negative)
+    }
     /// Adds or subtracts one widened product without quantizing it.
     pub(super) fn add(&mut self, value: i128, subtract: bool) -> Result<(), MathError> {
         let magnitude = value.unsigned_abs();

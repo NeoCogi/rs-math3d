@@ -139,9 +139,55 @@ fn cordic_vectoring(x: i128, y: i128) -> i128 {
     state.angle
 }
 
+use super::arithmetic::div;
+
 impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
+    /// Integer square root without domain validation. Supply a nonnegative input.
+    pub fn sqrt(self) -> Self {
+        let radicand = (self.bits.widen() as u128).wrapping_mul(Self::scale() as u128);
+        Self::wrapping_raw(rounded_sqrt(radicand) as i128)
+    }
+    /// Computes sine and cosine without destination range validation.
+    pub fn sin_cos(self) -> (Self, Self) {
+        let (sin, cos) = self.sin_cos_wide();
+        (
+            Self::wrapping_raw(div(sin, 1i128 << (96 - F))),
+            Self::wrapping_raw(div(cos, 1i128 << (96 - F))),
+        )
+    }
+    /// Integer-only sine with ordinary wrapping output quantization.
+    pub fn sin(self) -> Self {
+        self.sin_cos().0
+    }
+    /// Integer-only cosine with ordinary wrapping output quantization.
+    pub fn cos(self) -> Self {
+        self.sin_cos().1
+    }
+    /// Integer-only tangent without range or pole validation.
+    pub fn tan(self) -> Self {
+        let (sin, cos) = self.sin_cos_wide();
+        Self::wrapping_raw(div(
+            div(sin, 1i128 << 32) * Self::scale(),
+            div(cos, 1i128 << 32),
+        ))
+    }
+    /// Arc cosine without domain validation. Supply a value in [-1, 1].
+    pub fn acos(self) -> Self {
+        let raw = self.bits.widen();
+        let x = raw.abs() << (62 - F);
+        let y = integer_sqrt((1u128 << 124).wrapping_sub((x * x) as u128)) as i128;
+        let angle = cordic_vectoring(x << 34, y << 34);
+        Self::wrapping_raw(div(
+            if raw < 0 {
+                constants::PI - angle
+            } else {
+                angle
+            },
+            1i128 << (96 - F),
+        ))
+    }
     /// Computes a correctly rounded fixed square root without a float backend.
-    pub fn try_sqrt(self) -> Result<Self, MathError> {
+    pub fn checked_sqrt(self) -> Result<Self, MathError> {
         if self.bits.widen() < 0 {
             return Err(MathError::Domain);
         }
@@ -151,7 +197,7 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
 
     /// Computes sine/cosine together, retaining Q96 precision until narrowing.
     /// Range reduction's error is bounded relative to this format's quantum.
-    pub fn try_sin_cos(self) -> Result<(Self, Self), MathError> {
+    pub fn checked_sin_cos(self) -> Result<(Self, Self), MathError> {
         let (sin, cos) = self.sin_cos_wide();
         Ok((Self::from_q96(sin)?, Self::from_q96(cos)?))
     }
@@ -189,16 +235,16 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     }
 
     /// Integer-only sine, rounded to this format's quantum.
-    pub fn try_sin(self) -> Result<Self, MathError> {
-        self.try_sin_cos().map(|pair| pair.0)
+    pub fn checked_sin(self) -> Result<Self, MathError> {
+        self.checked_sin_cos().map(|pair| pair.0)
     }
     /// Integer-only cosine, rounded to this format's quantum.
-    pub fn try_cos(self) -> Result<Self, MathError> {
-        self.try_sin_cos().map(|pair| pair.1)
+    pub fn checked_cos(self) -> Result<Self, MathError> {
+        self.checked_sin_cos().map(|pair| pair.1)
     }
     /// Divides guarded sine/cosine before output quantization. A cosine rounded
     /// to zero in the destination format therefore does not create a fake pole.
-    pub fn try_tan(self) -> Result<Self, MathError> {
+    pub fn checked_tan(self) -> Result<Self, MathError> {
         let (sin, cos) = self.sin_cos_wide();
         // Both components fit Q96; first reduce to Q64 so scaling the quotient
         // cannot exceed i128 even for the largest supported fractional width.
@@ -209,7 +255,7 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
 
     /// Arc cosine on [-1, 1]. Guarded `sqrt(1-x*x)` and CORDIC vectoring avoid
     /// the endpoint precision loss caused by squaring directly in this format.
-    pub fn try_acos(self) -> Result<Self, MathError> {
+    pub fn checked_acos(self) -> Result<Self, MathError> {
         let raw = self.bits.widen();
         if raw.abs() > Self::scale() {
             return Err(MathError::Domain);
@@ -232,6 +278,19 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
 }
 
 impl<R: ScalarFormat<F>, const F: u32> Scalar for Fixed<R, F> {
+    fn is_finite(self) -> bool {
+        true
+    }
+    fn checked_abs(self) -> Result<Self, MathError> {
+        Self::checked_abs(self)
+    }
+    fn checked_rem(self, rhs: Self) -> Result<Self, MathError> {
+        Self::checked_rem(self, rhs)
+    }
+    #[inline(always)]
+    fn sum_products(terms: &[(Self, Self, bool)]) -> Self {
+        Self::sum_products(terms)
+    }
     fn two() -> Self {
         Self::try_from_int(2).expect("scalar format represents two")
     }
@@ -242,36 +301,51 @@ impl<R: ScalarFormat<F>, const F: u32> Scalar for Fixed<R, F> {
         core::cmp::max(a, b)
     }
     fn tabs(self) -> Self {
-        self.try_abs().expect("fixed absolute value overflow")
+        self.abs()
     }
-    fn try_add(self, rhs: Self) -> Result<Self, MathError> {
-        Self::try_add(self, rhs)
+    fn checked_add(self, rhs: Self) -> Result<Self, MathError> {
+        Self::checked_add(self, rhs)
     }
-    fn try_sub(self, rhs: Self) -> Result<Self, MathError> {
-        Self::try_sub(self, rhs)
+    fn checked_sub(self, rhs: Self) -> Result<Self, MathError> {
+        Self::checked_sub(self, rhs)
     }
-    fn try_mul(self, rhs: Self) -> Result<Self, MathError> {
-        Self::try_mul(self, rhs)
+    fn checked_mul(self, rhs: Self) -> Result<Self, MathError> {
+        Self::checked_mul(self, rhs)
     }
-    fn try_div(self, rhs: Self) -> Result<Self, MathError> {
-        Self::try_div(self, rhs)
+    fn checked_div(self, rhs: Self) -> Result<Self, MathError> {
+        Self::checked_div(self, rhs)
     }
-    fn try_neg(self) -> Result<Self, MathError> {
-        Self::try_neg(self)
+    fn checked_neg(self) -> Result<Self, MathError> {
+        Self::checked_neg(self)
     }
     #[inline(always)]
-    fn try_sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
-        Self::sum_products(terms)
+    fn checked_sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
+        Self::checked_sum_products(terms)
     }
 }
 
 impl<R: RealFormat<F>, const F: u32> RealScalar for Fixed<R, F> {
-    type Reciprocal = super::FixedReciprocal<R, F>;
-    fn try_reciprocal(self) -> Result<Self::Reciprocal, MathError> {
+    fn reciprocal(self) -> Self::Reciprocal {
         super::FixedReciprocal::new(self)
     }
-    fn try_mul_reciprocal(self, reciprocal: Self::Reciprocal) -> Result<Self, MathError> {
+    fn mul_reciprocal(self, reciprocal: Self::Reciprocal) -> Self {
         reciprocal.apply(self)
+    }
+    #[inline(always)]
+    fn norm(values: &[Self]) -> Self {
+        let mut squared = 0u128;
+        unroll_short_slice!(values, &value => {
+            let raw = value.bits.widen();
+            squared = squared.wrapping_add((raw*raw) as u128);
+        });
+        Self::wrapping_raw(rounded_sqrt(squared) as i128)
+    }
+    type Reciprocal = super::FixedReciprocal<R, F>;
+    fn checked_reciprocal(self) -> Result<Self::Reciprocal, MathError> {
+        super::FixedReciprocal::checked_new(self)
+    }
+    fn checked_mul_reciprocal(self, reciprocal: Self::Reciprocal) -> Result<Self, MathError> {
+        reciprocal.checked_apply(self)
     }
     fn epsilon() -> Self {
         Self::raw(4).expect("real format represents four quanta")
@@ -282,44 +356,38 @@ impl<R: RealFormat<F>, const F: u32> RealScalar for Fixed<R, F> {
     fn quarter() -> Self {
         Self::raw(Self::scale() / 4).expect("real format represents quarter")
     }
-    fn is_finite(self) -> bool {
-        true
-    }
-    fn try_abs(self) -> Result<Self, MathError> {
-        Self::try_abs(self)
-    }
     fn tsqrt(self) -> Self {
-        self.try_sqrt().expect("fixed square root failed")
+        self.sqrt()
     }
     fn tsin(self) -> Self {
-        self.try_sin().expect("fixed sine failed")
+        self.sin()
     }
     fn tcos(self) -> Self {
-        self.try_cos().expect("fixed cosine failed")
+        self.cos()
     }
     fn ttan(self) -> Self {
-        self.try_tan().expect("fixed tangent failed")
+        self.tan()
     }
     fn tacos(self) -> Self {
-        self.try_acos().expect("fixed arc cosine failed")
+        self.acos()
     }
-    fn try_sqrt(self) -> Result<Self, MathError> {
-        Self::try_sqrt(self)
+    fn checked_sqrt(self) -> Result<Self, MathError> {
+        Self::checked_sqrt(self)
     }
-    fn try_sin(self) -> Result<Self, MathError> {
-        Self::try_sin(self)
+    fn checked_sin(self) -> Result<Self, MathError> {
+        Self::checked_sin(self)
     }
-    fn try_cos(self) -> Result<Self, MathError> {
-        Self::try_cos(self)
+    fn checked_cos(self) -> Result<Self, MathError> {
+        Self::checked_cos(self)
     }
-    fn try_tan(self) -> Result<Self, MathError> {
-        Self::try_tan(self)
+    fn checked_tan(self) -> Result<Self, MathError> {
+        Self::checked_tan(self)
     }
-    fn try_acos(self) -> Result<Self, MathError> {
-        Self::try_acos(self)
+    fn checked_acos(self) -> Result<Self, MathError> {
+        Self::checked_acos(self)
     }
     #[inline(always)]
-    fn try_norm(values: &[Self]) -> Result<Self, MathError> {
+    fn checked_norm(values: &[Self]) -> Result<Self, MathError> {
         let mut squared = 0u128;
         unroll_short_slice!(values, &value => {
             let raw = value.bits.widen();
@@ -330,7 +398,7 @@ impl<R: RealFormat<F>, const F: u32> RealScalar for Fixed<R, F> {
         Self::raw(rounded_sqrt(squared) as i128)
     }
     #[inline(always)]
-    fn norm_exceeds(values: &[Self], epsilon: Self) -> Result<bool, MathError> {
+    fn checked_norm_exceeds(values: &[Self], epsilon: Self) -> Result<bool, MathError> {
         let epsilon = epsilon.bits.widen();
         if epsilon < 0 {
             return Err(MathError::InvalidTolerance);

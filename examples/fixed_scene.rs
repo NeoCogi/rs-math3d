@@ -48,7 +48,7 @@ fn main() -> Result<(), MathError> {
         F::DELTA,
     )
     .ok_or(MathError::Degenerate)?;
-    if let Some((parameter, point)) = ray.try_intersection(&triangle)? {
+    if let Some((parameter, point)) = ray.checked_intersection(&triangle)? {
         println!(
             "hit ({}, {}, {}) at t={}",
             point.x, point.y, point.z, parameter

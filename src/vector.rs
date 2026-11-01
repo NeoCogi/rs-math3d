@@ -129,15 +129,25 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
     fn dot(l: &Self, r: &Self) -> T;
 
     /// Adds components with checked arithmetic.
-    fn try_add_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
+    fn checked_add_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
     /// Subtracts components with checked arithmetic.
-    fn try_sub_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
+    fn checked_sub_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
     /// Multiplies every component with checked arithmetic.
-    fn try_mul_vs(l: &Self, r: T) -> Result<Self, MathError>;
+    fn checked_mul_vs(l: &Self, r: T) -> Result<Self, MathError>;
     /// Divides every component with zero/range checks.
-    fn try_div_vs(l: &Self, r: T) -> Result<Self, MathError>;
+    fn checked_div_vs(l: &Self, r: T) -> Result<Self, MathError>;
     /// Computes a dot product with one fixed-point quantization.
-    fn try_dot(l: &Self, r: &Self) -> Result<T, MathError>;
+    /// Checked componentwise multiplication.
+    fn checked_mul_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
+    /// Checked componentwise division.
+    fn checked_div_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
+    /// Checked componentwise remainder.
+    fn checked_rem_vv(l: &Self, r: &Self) -> Result<Self, MathError>;
+    /// Checked scalar remainder.
+    fn checked_rem_vs(l: &Self, r: T) -> Result<Self, MathError>;
+    /// Checked componentwise negation.
+    fn checked_neg(&self) -> Result<Self, MathError>;
+    fn checked_dot(l: &Self, r: &Self) -> Result<T, MathError>;
 
     /// Returns a vector with the minimum components from both vectors.
     fn min(l: &Self, r: &Self) -> Self;
@@ -160,7 +170,7 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
     fn length(&self) -> T;
 
     /// Computes length with a checked, scale-aware scalar norm.
-    fn try_length(&self) -> Result<T, MathError>;
+    fn checked_length(&self) -> Result<T, MathError>;
 
     /// Checks every component for IEEE exceptional values; fixed values are finite.
     fn is_finite(&self) -> bool;
@@ -198,6 +208,14 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
         Self::dot(self, self)
     }
 
+    /// Computes squared length with checked product accumulation.
+    fn checked_length_squared(&self) -> Result<T, MathError> {
+        Self::checked_dot(self, self)
+    }
+    /// Computes distance with checked subtraction and a stable checked norm.
+    fn checked_distance(l: &Self, r: &Self) -> Result<T, MathError> {
+        Self::checked_sub_vv(l, r)?.checked_length()
+    }
     /// Returns a normalized vector or `None` when the length is too small.
     fn try_normalize(&self, epsilon: T) -> Option<Self> {
         self.checked_normalize(epsilon).ok()
@@ -215,7 +233,7 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
 
     /// Tests represented length against a finite nonnegative tolerance without
     /// requiring the unscaled norm or small squared tolerance to fit.
-    fn norm_exceeds(&self, epsilon: T) -> Result<bool, MathError>;
+    fn checked_norm_exceeds(&self, epsilon: T) -> Result<bool, MathError>;
 
     /// Normalizes with precomputed length squared and inverse length.
     fn try_normalize_with_inv_len(&self, len_sq: T, inv_len: T, epsilon: T) -> Option<Self> {
@@ -226,10 +244,10 @@ pub trait RealVector<T: RealScalar>: Vector<T> {
         {
             return None;
         }
-        if !self.norm_exceeds(epsilon).ok()? {
+        if !self.checked_norm_exceeds(epsilon).ok()? {
             return None;
         }
-        Self::try_mul_vs(self, inv_len).ok()
+        Self::checked_mul_vs(self, inv_len).ok()
     }
 }
 
@@ -289,11 +307,16 @@ macro_rules! implVector {
 
         impl<T: Scalar> Vector<T> for $vecName<T> {
             fn zero() -> Self { Self { $($field: <T as Zero>::zero()),* } }
-            fn try_add_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.try_add(r.$field)?),*)) }
-            fn try_sub_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.try_sub(r.$field)?),*)) }
-            fn try_mul_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.try_mul(r)?),*)) }
-            fn try_div_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.try_div(r)?),*)) }
-            fn try_dot(l: &Self, r: &Self) -> Result<T, MathError> { T::try_sum_products(&[$((l.$field,r.$field,false)),*]) }
+            fn checked_add_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_add(r.$field)?),*)) }
+            fn checked_sub_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_sub(r.$field)?),*)) }
+            fn checked_mul_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_mul(r)?),*)) }
+            fn checked_div_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_div(r)?),*)) }
+            fn checked_mul_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_mul(r.$field)?),*)) }
+            fn checked_div_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_div(r.$field)?),*)) }
+            fn checked_rem_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_rem(r.$field)?),*)) }
+            fn checked_rem_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_rem(r)?),*)) }
+            fn checked_neg(&self) -> Result<Self, MathError> { Ok(Self::new($(self.$field.checked_neg()?),*)) }
+            fn checked_dot(l: &Self, r: &Self) -> Result<T, MathError> { T::checked_sum_products(&[$((l.$field,r.$field,false)),*]) }
             fn dot  (l: &Self, r: &Self) -> T { T::sum_products(&[$((l.$field, r.$field, false)),*]) }
             fn add_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field + r.$field),*) }
             fn sub_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field - r.$field),*) }
@@ -393,21 +416,19 @@ macro_rules! implRealVector {
     ($vecName:ident, $($field:ident),+) => {
         impl<T: RealScalar> RealVector<T> for $vecName<T> {
             fn length(&self) -> T {
-                // Float overflow retains IEEE behavior in this convenience
-                // operation; fixed callers use try_length to inspect errors.
-                Self::try_length(self).unwrap_or_else(|_| Self::dot(self,self).tsqrt())
+                T::norm(&[$(self.$field),*])
             }
-            fn try_length(&self) -> Result<T, MathError> { T::try_norm(&[$(self.$field),*]) }
+            fn checked_length(&self) -> Result<T, MathError> { T::checked_norm(&[$(self.$field),*]) }
             fn is_finite(&self) -> bool { $(self.$field.is_finite() &&)* true }
-            fn norm_exceeds(&self, epsilon: T) -> Result<bool, MathError> { T::norm_exceeds(&[$(self.$field),*],epsilon) }
+            fn checked_norm_exceeds(&self, epsilon: T) -> Result<bool, MathError> { T::checked_norm_exceeds(&[$(self.$field),*],epsilon) }
             fn checked_normalize(&self, epsilon: T) -> Result<Self, MathError> {
                 let values = [$(self.$field),*];
-                if !T::norm_exceeds(&values, epsilon)? { return Err(MathError::Degenerate); }
+                if !T::checked_norm_exceeds(&values, epsilon)? { return Err(MathError::Degenerate); }
                 let mut scale = <T as Zero>::zero();
-                $(scale = T::max(scale, self.$field.try_abs()?);)*
-                let scaled = Self::try_div_vs(self, scale)?;
-                let length = scaled.try_length()?;
-                Self::try_div_vs(&scaled, length)
+                $(scale = T::max(scale, self.$field.checked_abs()?);)*
+                let scaled = Self::checked_div_vs(self, scale)?;
+                let length = scaled.checked_length()?;
+                Self::checked_div_vs(&scaled, length)
             }
             fn normalize(&self) -> Self {
                 let len = Self::length(self);
@@ -491,11 +512,11 @@ implRealVector!(Vector4, x, y, z, w);
 impl<T: Scalar> Vector3<T> {
     /// Computes a cross product with checked, single-rounding differences of
     /// products, preserving cancellation below one stored quantum.
-    pub fn try_cross(l: &Self, r: &Self) -> Result<Self, MathError> {
+    pub fn checked_cross(l: &Self, r: &Self) -> Result<Self, MathError> {
         Ok(Self::new(
-            T::try_sum_products(&[(l.y, r.z, false), (l.z, r.y, true)])?,
-            T::try_sum_products(&[(l.z, r.x, false), (l.x, r.z, true)])?,
-            T::try_sum_products(&[(l.x, r.y, false), (l.y, r.x, true)])?,
+            T::checked_sum_products(&[(l.y, r.z, false), (l.z, r.y, true)])?,
+            T::checked_sum_products(&[(l.z, r.x, false), (l.x, r.z, true)])?,
+            T::checked_sum_products(&[(l.x, r.y, false), (l.y, r.x, true)])?,
         ))
     }
 }
@@ -578,7 +599,7 @@ impl<T: RealScalar> Normalized3<T> {
 
         // Divide quantities of comparable scale first. In particular, this
         // preserves ratios between equally tiny or equally large values.
-        let scale_adjusted = value.try_div(self.scale);
+        let scale_adjusted = value.checked_div(self.scale);
         if let Ok(scale_adjusted) = scale_adjusted {
             // Axis-aligned inputs have scaled length exactly one, a common case
             // in CAD and game geometry where the second division can be elided.
@@ -587,7 +608,7 @@ impl<T: RealScalar> Normalized3<T> {
             let quotient = if self.scaled_length == <T as One>::one() {
                 scale_adjusted
             } else {
-                scale_adjusted.try_div(self.scaled_length).ok()?
+                scale_adjusted.checked_div(self.scaled_length).ok()?
             };
             if is_finite_scalar(quotient) {
                 return Some(quotient);
@@ -600,12 +621,12 @@ impl<T: RealScalar> Normalized3<T> {
         let length_adjusted = if self.scaled_length == <T as One>::one() {
             value
         } else {
-            value.try_div(self.scaled_length).ok()?
+            value.checked_div(self.scaled_length).ok()?
         };
         if !is_finite_scalar(length_adjusted) {
             return None;
         }
-        let quotient = length_adjusted.try_div(self.scale).ok()?;
+        let quotient = length_adjusted.checked_div(self.scale).ok()?;
         is_finite_scalar(quotient).then_some(quotient)
     }
 
@@ -613,9 +634,13 @@ impl<T: RealScalar> Normalized3<T> {
     /// an overflowing first intermediate. No invalid scalar is constructed.
     pub(crate) fn checked_divide_by_length(&self, value: T) -> Result<T, MathError> {
         value
-            .try_div(self.scale)
-            .and_then(|q| q.try_div(self.scaled_length))
-            .or_else(|_| value.try_div(self.scaled_length)?.try_div(self.scale))
+            .checked_div(self.scale)
+            .and_then(|q| q.checked_div(self.scaled_length))
+            .or_else(|_| {
+                value
+                    .checked_div(self.scaled_length)?
+                    .checked_div(self.scale)
+            })
     }
 
     /// Divides by the original vector length without collapsing nonzero to zero.
@@ -715,18 +740,18 @@ pub(crate) fn checked_normalized3<T: RealScalar>(
         return Err(MathError::NonFinite);
     }
     let scale = T::max(
-        vector.x.try_abs()?,
-        T::max(vector.y.try_abs()?, vector.z.try_abs()?),
+        vector.x.checked_abs()?,
+        T::max(vector.y.checked_abs()?, vector.z.checked_abs()?),
     );
     if scale == <T as Zero>::zero() {
         return Err(MathError::Degenerate);
     }
-    let scaled = Vector3::try_div_vs(vector, scale)?;
-    let scaled_length = scaled.try_length()?;
+    let scaled = Vector3::checked_div_vs(vector, scale)?;
+    let scaled_length = scaled.checked_length()?;
     let unit = if scaled_length == <T as One>::one() {
         scaled
     } else {
-        Vector3::try_div_vs(&scaled, scaled_length)?
+        Vector3::checked_div_vs(&scaled, scaled_length)?
     };
     Ok(Normalized3 {
         unit,
@@ -758,11 +783,11 @@ pub(crate) fn classify_nearly_parallel_normalized3<T: RealScalar>(
         return AngularClassification::Invalid;
     }
 
-    let cross = match Vector3::try_cross(&left.unit(), &right.unit()) {
+    let cross = match Vector3::checked_cross(&left.unit(), &right.unit()) {
         Ok(value) => value,
         Err(_) => return AngularClassification::Invalid,
     };
-    match T::norm_exceeds(&[cross.x, cross.y, cross.z], angular_epsilon) {
+    match T::checked_norm_exceeds(&[cross.x, cross.y, cross.z], angular_epsilon) {
         Ok(true) => AngularClassification::OutsideTolerance,
         Ok(false) => AngularClassification::WithinTolerance,
         Err(_) => AngularClassification::Invalid,
@@ -793,7 +818,7 @@ pub(crate) fn classify_nearly_perpendicular_normalized3<T: RealScalar>(
 
     // Stored units make the absolute dot product dimensionless and invariant
     // under independent nonzero scaling of either original vector.
-    let cosine = match Vector3::try_dot(&left.unit(), &right.unit()) {
+    let cosine = match Vector3::checked_dot(&left.unit(), &right.unit()) {
         Ok(value) => value,
         Err(_) => return AngularClassification::Invalid,
     };
@@ -803,7 +828,7 @@ pub(crate) fn classify_nearly_perpendicular_normalized3<T: RealScalar>(
 
     // Compare the magnitude directly so the caller's inclusive tolerance is
     // neither widened nor squared into an underflow-prone representation.
-    let cosine_magnitude = match cosine.try_abs() {
+    let cosine_magnitude = match cosine.checked_abs() {
         Ok(value) => value,
         Err(_) => return AngularClassification::Invalid,
     };

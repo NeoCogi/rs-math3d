@@ -144,21 +144,21 @@ backend is active.
   quaternion to identity; use `Quat::try_normalize` when invalid or near-zero input must be
   detected.
 - Orthonormal basis construction makes handedness explicit:
-  `basis_from_unit_rh`/`try_basis_from_unit_rh` return `[u, v, w]` with `u × v = w`, while
+  `basis_from_unit_rh`/`checked_basis_from_unit_rh` return `[u, v, w]` with `u × v = w`, while
   the `_lh` variants return `[u, v, w]` with `u × v = -w`. These replace the old ambiguous
-  `basis_from_unit` and `try_basis_from_unit` names.
+  `basis_from_unit` and `checked_basis_from_unit` names.
 - Point-to-plane distance uses the general `abs(n · p + d) / |n|` equation and is therefore
   invariant when all plane coefficients are scaled by the same nonzero value.
 - `ParametricPlane::project` solves the 2x2 Gram system of the plane axes, so projection
   works for non-orthogonal axes as well as orthogonal ones.
 - `Sphere3::new` canonicalizes the radius with `abs(radius)`.
 - `Quat::mat3` and `Quat::mat4` normalize the quaternion before converting it to a matrix.
-- `Plane::from_quad` and `Plane::try_from_quad` use a diagonal-derived representative plane.
+- `Plane::from_quad` and `Plane::checked_from_quad` use a diagonal-derived representative plane.
   They do not validate that the four vertices are coplanar.
 - `transforms::lookat` assumes `eye != dest` and an `up` vector that is not parallel to the
-  view direction. The convenience function panics on invalid input; `try_lookat` reports a numerical error.
+  view direction. The convenience function panics on invalid input; `checked_lookat` reports a numerical error.
 - `Tri3::barycentric_coordinates` assumes a non-degenerate triangle. Degenerate triangles
-  panic in the convenience method; `try_barycentric_coordinates` returns `MathError::Degenerate`.
+  panic in the convenience method; `checked_barycentric_coordinates` returns `MathError::Degenerate`.
 
 ## Example
 

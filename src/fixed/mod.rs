@@ -159,7 +159,44 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
     }
     /// Converts an IEEE single-precision value exactly before quantization.
     pub fn try_from_f32(value: f32) -> Result<Self, MathError> {
-        Self::try_from_f64(value as f64)
+        let bits = value.to_bits();
+        let exponent = ((bits >> 23) & 0xff) as i32;
+        if exponent == 0xff {
+            return Err(MathError::NonFinite);
+        }
+        // Every supported format has F<=63: even the largest f32 subnormal
+        // scales to less than half a quantum. Signed zero has the same result.
+        if exponent == 0 {
+            return Ok(Self::ZERO);
+        }
+        let mantissa = (bits & 0x7f_ffff) | (1 << 23);
+        let shift = exponent - 150 + F as i32;
+        let magnitude = if shift >= 0 {
+            // A normalized mantissa is at least 2^23.
+            // Shifts above 40 exceed every supported signed storage range.
+            if shift > 40 {
+                return Err(MathError::Overflow);
+            }
+            (mantissa as u64) << shift
+        } else {
+            let shift = (-shift) as u32;
+            if shift > 24 {
+                return Ok(Self::ZERO);
+            }
+            // Only 24 mantissa bits exist, so rounding needs no u128 divider
+            // or wide shift. Retain the original single ties-to-even rounding.
+            let quotient = mantissa >> shift;
+            let remainder = mantissa & ((1 << shift) - 1);
+            let halfway = 1 << (shift - 1);
+            (quotient + (remainder > halfway || (remainder == halfway && quotient & 1 != 0)) as u32)
+                as u64
+        };
+        let raw = if bits >> 31 == 0 {
+            magnitude as i128
+        } else {
+            -(magnitude as i128)
+        };
+        Self::raw(raw)
     }
     /// Decodes IEEE bits before quantization, preserving range checks even
     /// where converting a signed integer maximum to `f64` rounds upward.
@@ -205,12 +242,18 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
         Fixed::<S, G>::raw(result)
     }
     /// Adds without wrapping, returning an error if the result is out of range.
+    #[inline]
     pub fn checked_add(self, rhs: Self) -> Result<Self, MathError> {
-        Self::raw(self.bits.widen() + rhs.bits.widen())
+        R::checked_add_storage(self.bits, rhs.bits)
+            .map(Self::from_bits)
+            .ok_or(MathError::Overflow)
     }
     /// Subtracts without wrapping.
+    #[inline]
     pub fn checked_sub(self, rhs: Self) -> Result<Self, MathError> {
-        Self::raw(self.bits.widen() - rhs.bits.widen())
+        R::checked_sub_storage(self.bits, rhs.bits)
+            .map(Self::from_bits)
+            .ok_or(MathError::Overflow)
     }
     /// Multiplies widened integers and rounds exactly once.
     #[inline]
@@ -261,9 +304,8 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
     /// Each tuple contains `(left, right, subtract_product)`.
     #[inline(always)]
     pub(crate) fn checked_sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
-        // Row elimination repeatedly uses two products. Sharing that expanded
-        // kernel avoids duplicating wide signed-magnitude bookkeeping in every
-        // matrix cell, while retaining an exact, loop-free two-term schedule.
+        // Two products fit a smaller exact kernel. Inlining also removes
+        // constant-zero components in checked vector geometry under opt-level=z.
         if let [left, right] = terms {
             return Self::checked_sum_products_pair(left, right);
         }
@@ -274,18 +316,23 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
         Self::raw(accumulator.finish(F)?)
     }
 
-    /// Accumulates exactly two signed products without an iterator or counter.
-    /// Keep the wide bookkeeping shared across expanded matrix/geometry calls;
-    /// only the final result is rounded and checked against the scalar range.
-    #[inline(never)]
+    /// Accumulates two signed products exactly, rounding and narrowing only once.
+    /// Unlike a longer sum, an overflowing pair has no later cancellation term.
+    #[inline(always)]
     fn checked_sum_products_pair(
         left: &(Self, Self, bool),
         right: &(Self, Self, bool),
     ) -> Result<Self, MathError> {
-        let mut accumulator = Accumulator::default();
-        accumulator.add(left.0.bits.widen() * left.1.bits.widen(), left.2)?;
-        accumulator.add(right.0.bits.widen() * right.1.bits.widen(), right.2)?;
-        Self::raw(accumulator.finish(F)?)
+        // Storage is at most i64, so every product fits signed i128 and negation
+        // is safe. A pair can reach positive 2^127, but that cannot fit any
+        // supported result even after the largest allowed fractional shift (63).
+        // Negative -2^127 is representable and still reaches normal range checks.
+        let a = left.0.bits.widen() * left.1.bits.widen();
+        let b = right.0.bits.widen() * right.1.bits.widen();
+        let a = if left.2 { -a } else { a };
+        let b = if right.2 { -b } else { b };
+        let sum = a.checked_add(b).ok_or(MathError::Overflow)?;
+        Self::raw(signed(round_shift(sum.unsigned_abs(), F), sum < 0)?)
     }
     /// Accumulates widened products and rounds once, wrapping the final result.
     #[inline(always)]

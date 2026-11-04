@@ -63,6 +63,10 @@ pub trait Repr: sealed::Sealed + Copy + Default + Debug + Eq + Ord + Hash {
     fn narrow(value: i128) -> Option<Self>;
     /// Keeps the low storage bits, with two's-complement wrapping.
     fn wrapping_narrow(value: i128) -> Self;
+    /// Adds in the storage width, rejecting overflow without widened range bookkeeping.
+    fn checked_add_storage(self, rhs: Self) -> Option<Self>;
+    /// Subtracts in the storage width, rejecting overflow without changing the fixed scale.
+    fn checked_sub_storage(self, rhs: Self) -> Option<Self>;
 }
 
 /// A valid signed binary format with `FRAC < Repr::BITS`.
@@ -114,6 +118,10 @@ macro_rules! repr {
         const ZERO: Self = 0;
         const UNIT: Self = 1;
         fn widen(self) -> i128 { self as i128 }
+        #[inline(always)]
+        fn checked_add_storage(self, rhs: Self) -> Option<Self> { <$r>::checked_add(self, rhs) }
+        #[inline(always)]
+        fn checked_sub_storage(self, rhs: Self) -> Option<Self> { <$r>::checked_sub(self, rhs) }
         fn wrapping_narrow(value: i128) -> Self { value as Self }
         fn narrow(value: i128) -> Option<Self> {
             if value < <Self as Repr>::MIN || value > <Self as Repr>::MAX {

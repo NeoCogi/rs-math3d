@@ -476,3 +476,137 @@ fn ordinary_analytic_operations_match_checked_valid_results() {
         }
     }
 }
+
+/// Pair specialization must match the original exact accumulator across edge values and signs.
+#[test]
+fn two_product_kernel_matches_exact_accumulator_at_storage_boundaries() {
+    fn verify<const F: u32>()
+    where
+        i64: Format<F>,
+    {
+        let cases = [
+            i64::MIN,
+            i64::MIN + 1,
+            -(1i64 << 40),
+            -8193,
+            -4096,
+            -3,
+            -1,
+            0,
+            1,
+            3,
+            4096,
+            8193,
+            1i64 << 40,
+            i64::MAX - 1,
+            i64::MAX,
+        ];
+        for &a in &cases {
+            for &b in &cases {
+                for &c in &cases {
+                    for &d in &cases {
+                        for subtract_a in [false, true] {
+                            for subtract_b in [false, true] {
+                                let mut exact = Accumulator::default();
+                                exact.add(a as i128 * b as i128, subtract_a).unwrap();
+                                exact.add(c as i128 * d as i128, subtract_b).unwrap();
+                                let expected = exact.finish(F).and_then(Fixed::<i64, F>::raw);
+                                let terms = [
+                                    (Fixed::from_bits(a), Fixed::from_bits(b), subtract_a),
+                                    (Fixed::from_bits(c), Fixed::from_bits(d), subtract_b),
+                                ];
+                                assert_eq!(Fixed::<i64, F>::checked_sum_products(&terms), expected);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    verify::<0>();
+    verify::<6>();
+    verify::<12>();
+    verify::<32>();
+    verify::<63>();
+}
+
+/// Storage-width overflow flags must agree with independent widened range checks at every scale.
+#[test]
+fn checked_storage_arithmetic_matches_widened_reference() {
+    fn check<R: Format<F>, const F: u32>(cases: &[R]) {
+        for &a in cases {
+            for &b in cases {
+                let left = Fixed::<R, F>::from_bits(a);
+                let right = Fixed::<R, F>::from_bits(b);
+                let expected = |bits| {
+                    R::narrow(bits)
+                        .map(Fixed::<R, F>::from_bits)
+                        .ok_or(MathError::Overflow)
+                };
+                assert_eq!(left.checked_add(right), expected(a.widen() + b.widen()));
+                assert_eq!(left.checked_sub(right), expected(a.widen() - b.widen()));
+            }
+        }
+    }
+    let small: [i8; 256] = core::array::from_fn(|index| index as i8);
+    check::<i8, 0>(&small);
+    check::<i8, 7>(&small);
+    check::<i16, 8>(&[i16::MIN, i16::MIN + 1, -1, 0, 1, i16::MAX - 1, i16::MAX]);
+    check::<i32, 6>(&[i32::MIN, i32::MIN + 1, -1, 0, 1, i32::MAX - 1, i32::MAX]);
+    let wide = [i64::MIN, i64::MIN + 1, -1, 0, 1, i64::MAX - 1, i64::MAX];
+    check::<i64, 0>(&wide);
+    check::<i64, 12>(&wide);
+    check::<i64, 63>(&wide);
+}
+
+/// Direct f32 decoding must equal the independent full-width f64 decoder after exact widening,
+/// across exponent/sign boundaries, halfway mantissas, extreme formats and deterministic raw bits.
+#[test]
+fn single_precision_conversion_matches_exact_widened_decoder() {
+    fn check<R: Format<F>, const F: u32>(bits: u32) {
+        let value = f32::from_bits(bits);
+        assert_eq!(
+            Fixed::<R, F>::try_from_f32(value),
+            Fixed::<R, F>::try_from_f64(value as f64),
+            "bits={bits:08x}, F={F}"
+        );
+    }
+    let verify = |bits| {
+        check::<i8, 0>(bits);
+        check::<i8, 7>(bits);
+        check::<i16, 8>(bits);
+        check::<i32, 6>(bits);
+        check::<i64, 0>(bits);
+        check::<i64, 12>(bits);
+        check::<i64, 63>(bits);
+    };
+    for exponent in 0..=255 {
+        for fraction in [0, 1, 2, 0x3f_ffff, 0x40_0000, 0x7f_fffe, 0x7f_ffff] {
+            for sign in [0, 1 << 31] {
+                verify(sign | (exponent << 23) | fraction);
+            }
+        }
+    }
+    let mut state = 0x9e37_79b9_u32;
+    for _ in 0..100_000 {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        verify(state);
+    }
+    type Pixel = Fixed<i32, 6>;
+    for (value, expected) in [
+        (1. / 128., 0),
+        (3. / 128., 2),
+        (5. / 128., 2),
+        (-1. / 128., 0),
+        (-3. / 128., -2),
+    ] {
+        assert_eq!(Pixel::try_from_f32(value).unwrap().to_bits(), expected);
+    }
+    assert_eq!(
+        Fixed::<i64, 63>::try_from_f32(-1.).unwrap().to_bits(),
+        i64::MIN
+    );
+    assert_eq!(Fixed::<i64, 63>::try_from_f32(1.), Err(MathError::Overflow));
+}

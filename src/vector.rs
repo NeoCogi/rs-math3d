@@ -307,7 +307,9 @@ macro_rules! implVector {
 
         impl<T: Scalar> Vector<T> for $vecName<T> {
             fn zero() -> Self { Self { $($field: <T as Zero>::zero()),* } }
+            #[inline(always)]
             fn checked_add_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_add(r.$field)?),*)) }
+            #[inline(always)]
             fn checked_sub_vv(l: &Self, r: &Self) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_sub(r.$field)?),*)) }
             fn checked_mul_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_mul(r)?),*)) }
             fn checked_div_vs(l: &Self, r: T) -> Result<Self, MathError> { Ok(Self::new($(l.$field.checked_div(r)?),*)) }

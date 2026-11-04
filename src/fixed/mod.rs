@@ -79,7 +79,7 @@ mod storage;
 use crate::MathError;
 use arithmetic::{div, round_div, round_shift, signed, signed_wrapping, Accumulator};
 use core::{fmt, ops::*, str::FromStr};
-use num_traits::{FromPrimitive, Num, NumCast, One, ToPrimitive, Zero};
+use num_traits::{CheckedAdd, CheckedSub, FromPrimitive, Num, NumCast, One, ToPrimitive, Zero};
 pub use reciprocal::FixedReciprocal;
 pub use storage::{Format, RealFormat, Repr, ScalarFormat, UnitFormat};
 
@@ -242,16 +242,19 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
         Fixed::<S, G>::raw(result)
     }
     /// Adds without wrapping, returning an error if the result is out of range.
+    /// Both operands have the same scale, so native raw addition is exact and
+    /// storage overflow is precisely fixed-point result overflow.
     #[inline]
     pub fn checked_add(self, rhs: Self) -> Result<Self, MathError> {
-        R::checked_add_storage(self.bits, rhs.bits)
+        CheckedAdd::checked_add(&self.bits, &rhs.bits)
             .map(Self::from_bits)
             .ok_or(MathError::Overflow)
     }
-    /// Subtracts without wrapping.
+    /// Subtracts exactly at the shared scale, returning [`MathError::Overflow`]
+    /// if the raw integer difference does not fit the storage width.
     #[inline]
     pub fn checked_sub(self, rhs: Self) -> Result<Self, MathError> {
-        R::checked_sub_storage(self.bits, rhs.bits)
+        CheckedSub::checked_sub(&self.bits, &rhs.bits)
             .map(Self::from_bits)
             .ok_or(MathError::Overflow)
     }

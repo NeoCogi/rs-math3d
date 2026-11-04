@@ -530,9 +530,11 @@ fn two_product_kernel_matches_exact_accumulator_at_storage_boundaries() {
     verify::<63>();
 }
 
-/// Storage-width overflow flags must agree with independent widened range checks at every scale.
+/// Exhausts i8 operands and checks wider endpoints at every valid scale, including
+/// formats without numeric one. Only Format is required by generic fixed arithmetic.
 #[test]
 fn checked_storage_arithmetic_matches_widened_reference() {
+    /// Uses widened arithmetic as an independent reference for native overflow checks.
     fn check<R: Format<F>, const F: u32>(cases: &[R]) {
         for &a in cases {
             for &b in cases {
@@ -543,20 +545,42 @@ fn checked_storage_arithmetic_matches_widened_reference() {
                         .map(Fixed::<R, F>::from_bits)
                         .ok_or(MathError::Overflow)
                 };
-                assert_eq!(left.checked_add(right), expected(a.widen() + b.widen()));
-                assert_eq!(left.checked_sub(right), expected(a.widen() - b.widen()));
+                assert_eq!(
+                    left.checked_add(right),
+                    expected(a.widen() + b.widen()),
+                    "addition: {a:?}, {b:?}, {} storage bits, F={F}",
+                    R::BITS
+                );
+                assert_eq!(
+                    left.checked_sub(right),
+                    expected(a.widen() - b.widen()),
+                    "subtraction: {a:?}, {b:?}, {} storage bits, F={F}",
+                    R::BITS
+                );
             }
         }
     }
+    // Instantiate each Format at compile time so an accidental Num/Scalar bound
+    // cannot silently remove raw arithmetic from the highest fractional widths.
+    macro_rules! check_formats {
+        ($r:ty, $cases:expr; $($f:literal),+ $(,)?) => {
+            $(check::<$r, $f>($cases);)+
+        };
+    }
     let small: [i8; 256] = core::array::from_fn(|index| index as i8);
-    check::<i8, 0>(&small);
-    check::<i8, 7>(&small);
-    check::<i16, 8>(&[i16::MIN, i16::MIN + 1, -1, 0, 1, i16::MAX - 1, i16::MAX]);
-    check::<i32, 6>(&[i32::MIN, i32::MIN + 1, -1, 0, 1, i32::MAX - 1, i32::MAX]);
+    check_formats!(i8, &small; 0, 1, 2, 3, 4, 5, 6, 7);
+    let medium = [i16::MIN, i16::MIN + 1, -1, 0, 1, i16::MAX - 1, i16::MAX];
+    check_formats!(i16, &medium; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    let large = [i32::MIN, i32::MIN + 1, -1, 0, 1, i32::MAX - 1, i32::MAX];
+    check_formats!(i32, &large;
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31);
     let wide = [i64::MIN, i64::MIN + 1, -1, 0, 1, i64::MAX - 1, i64::MAX];
-    check::<i64, 0>(&wide);
-    check::<i64, 12>(&wide);
-    check::<i64, 63>(&wide);
+    check_formats!(i64, &wide;
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+        48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63);
 }
 
 /// Direct f32 decoding must equal the independent full-width f64 decoder after exact widening,

@@ -139,6 +139,16 @@ Division and remainder by zero can panic. Explicit `checked_add`, `checked_sub`,
 `checked_mul`, `checked_div`, `checked_rem`, `checked_neg`, and `checked_abs` return errors instead.
 The positive counterpart of a signed minimum does not fit its representation.
 
+`Repr` composes `num_traits::CheckedAdd` and `CheckedSub` for native raw-integer
+overflow detection. These capabilities return `Option` and have no fixed-point
+scale. `Fixed` owns the shared scale, constructs the result, and translates raw
+overflow into `MathError::Overflow`. This preserves native arithmetic without
+custom storage forwarding methods. Generic `R: Format<F>` arithmetic inherits
+these capabilities even when the format cannot represent positive one. Raw
+generic callers use the `num_traits` capabilities directly; the previous
+`Repr::checked_add_storage` and `Repr::checked_sub_storage` hooks are removed.
+Multiplication and division retain their separate scaling and rounding logic.
+
 `trunc` rounds toward zero and `floor` toward negative infinity. `ceil`, `round`,
 and `abs` use ordinary wrapping arithmetic; `checked_ceil`, `checked_round`, and
 `checked_abs` reject an unrepresentable result. Remainder follows truncating

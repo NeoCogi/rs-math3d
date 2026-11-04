@@ -31,6 +31,7 @@
 //! construction and `Default`, rather than waiting for an arithmetic operation.
 
 use core::{fmt::Debug, hash::Hash};
+use num_traits::{CheckedAdd, CheckedSub};
 
 /// Prevents external storage implementations from violating widening invariants.
 mod sealed {
@@ -46,7 +47,31 @@ mod sealed {
 ///
 /// This trait is sealed. Use `i8`, `i16`, `i32`, or `i64`; representation
 /// conversions expose checked and wrapping narrowing explicitly.
-pub trait Repr: sealed::Sealed + Copy + Default + Debug + Eq + Ord + Hash {
+/// [`CheckedAdd`] and [`CheckedSub`] provide native raw-integer overflow checks,
+/// returning `None` if the exact result does not fit the storage width. They do
+/// not interpret a fixed-point scale; [`super::Fixed`] owns numeric construction
+/// and translates storage overflow into [`crate::MathError::Overflow`].
+///
+/// Generic raw arithmetic needs only the representation bound:
+///
+/// ```
+/// use num_traits::{CheckedAdd, CheckedSub};
+/// use rs_math3d::fixed::Repr;
+///
+/// fn checked_pair<R: Repr>(left: R, right: R) -> (Option<R>, Option<R>) {
+///     (
+///         CheckedAdd::checked_add(&left, &right),
+///         CheckedSub::checked_sub(&left, &right),
+///     )
+/// }
+///
+/// assert_eq!(checked_pair(7_i8, 3), (Some(10), Some(4)));
+/// assert_eq!(checked_pair(i8::MIN, 1), (Some(-127), None));
+/// assert_eq!(checked_pair(i8::MAX, 1), (None, Some(126)));
+/// ```
+pub trait Repr:
+    sealed::Sealed + Copy + Default + Debug + Eq + Ord + Hash + CheckedAdd + CheckedSub
+{
     /// Storage width, including its sign bit.
     const BITS: u32;
     /// Smallest stored integer, widened without changing its value.
@@ -63,10 +88,6 @@ pub trait Repr: sealed::Sealed + Copy + Default + Debug + Eq + Ord + Hash {
     fn narrow(value: i128) -> Option<Self>;
     /// Keeps the low storage bits, with two's-complement wrapping.
     fn wrapping_narrow(value: i128) -> Self;
-    /// Adds in the storage width, rejecting overflow without widened range bookkeeping.
-    fn checked_add_storage(self, rhs: Self) -> Option<Self>;
-    /// Subtracts in the storage width, rejecting overflow without changing the fixed scale.
-    fn checked_sub_storage(self, rhs: Self) -> Option<Self>;
 }
 
 /// A valid signed binary format with `FRAC < Repr::BITS`.
@@ -118,10 +139,6 @@ macro_rules! repr {
         const ZERO: Self = 0;
         const UNIT: Self = 1;
         fn widen(self) -> i128 { self as i128 }
-        #[inline(always)]
-        fn checked_add_storage(self, rhs: Self) -> Option<Self> { <$r>::checked_add(self, rhs) }
-        #[inline(always)]
-        fn checked_sub_storage(self, rhs: Self) -> Option<Self> { <$r>::checked_sub(self, rhs) }
         fn wrapping_narrow(value: i128) -> Self { value as Self }
         fn narrow(value: i128) -> Option<Self> {
             if value < <Self as Repr>::MIN || value > <Self as Repr>::MAX {

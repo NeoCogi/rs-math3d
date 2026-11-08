@@ -55,6 +55,10 @@ both triangle trees, including flat-reference and cross-scalar comparisons.
 The [arithmetic-policy selection](docs/fixed-rounding.md) records the native
 default's timings, precision and contact behavior alongside the earlier comparison.
 
+The [example physics engine](docs/physics.md) adds two-phase collision detection,
+rigid-body impulses, friction and resting contacts. Run its teapot/bunny scene
+with `cargo run --release --example physics_headless -- fixed32 1200`.
+
 The [const-selected CORDIC experiment](docs/cordic.md) compares
 `angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with
 compile-time guard precision, speed measurements and independent high-precision errors.

@@ -36,6 +36,10 @@ required-features = ["std"]
 name = "mesh_bench"
 required-features = ["std"]
 
+[[example]]
+name = "physics_headless"
+required-features = ["std"]
+
 [features]
 # Hosted applications, including `#![no_std]` crates that can explicitly link
 # Rust's standard library, use its floating-point operations by default.

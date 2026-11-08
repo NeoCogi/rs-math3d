@@ -9,10 +9,11 @@ The [static triangle-soup AABB tree](triangle-soup.md) adds accelerated nearest-
 capsule/OBB and mesh/mesh intersection queries using offline teapot/bunny fixtures.
 
 All ten unordered shape pairings return a boolean. Boundary contact counts as
-overlap in exact arithmetic. There are no contact points, normals, penetration
-depths, manifolds, integration, constraint solver or continuous
-collision detection. Swapping arguments to a mixed pair means calling the same
-function with its documented shape order.
+overlap in exact arithmetic. The [contact submodule](../examples/collision/contact.rs)
+now adds witnesses, normals, penetration depths and bounded manifolds for the
+[example rigid-body engine](physics.md). The original boolean entry points retain
+their contracts. There is no continuous collision detection. Swapping arguments
+to a mixed boolean pair means calling the same documented shape order.
 
 | Pair | Algorithm |
 | --- | --- |

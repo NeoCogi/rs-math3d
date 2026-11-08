@@ -143,7 +143,7 @@ pub struct AabbTree<T: RealScalar> {
 }
 
 /// Componentwise closed bound of exactly three represented vertices.
-fn triangle_bounds<T: RealScalar>(triangle: &Tri3<T>) -> Box3<T> {
+pub(super) fn triangle_bounds<T: RealScalar>(triangle: &Tri3<T>) -> Box3<T> {
     let [a, b, c] = *triangle.vertices();
     Box3::new(
         &Vector3::min(&a, &Vector3::min(&b, &c)),
@@ -152,7 +152,7 @@ fn triangle_bounds<T: RealScalar>(triangle: &Tri3<T>) -> Box3<T> {
 }
 
 /// Closed interval overlap, preserving face/edge/point contacts.
-fn overlap<T: RealScalar>(a: &Box3<T>, b: &Box3<T>) -> bool {
+pub(super) fn overlap<T: RealScalar>(a: &Box3<T>, b: &Box3<T>) -> bool {
     a.min.x <= b.max.x
         && a.max.x >= b.min.x
         && a.min.y <= b.max.y
@@ -163,7 +163,7 @@ fn overlap<T: RealScalar>(a: &Box3<T>, b: &Box3<T>) -> bool {
 
 /// Componentwise capsule envelope. Nonnegative radius and representable expanded
 /// endpoints are caller preconditions; coincident endpoints form a sphere.
-fn capsule_bounds<T: RealScalar>(capsule: &Capsule<T>) -> Box3<T> {
+pub(super) fn capsule_bounds<T: RealScalar>(capsule: &Capsule<T>) -> Box3<T> {
     let radius = Vector3::new(capsule.radius, capsule.radius, capsule.radius);
     Box3::new(
         &(Vector3::min(&capsule.a, &capsule.b) - radius),
@@ -174,7 +174,7 @@ fn capsule_bounds<T: RealScalar>(capsule: &Capsule<T>) -> Box3<T> {
 /// Bounds both signed ends of each half axis. Floor quantization is not odd:
 /// negating a rounded positive product need not enclose the negative corner.
 /// Sizes and envelope intermediates must fit the selected scalar.
-fn obb_bounds<T: RealScalar>(obb: &Obb<T>) -> Box3<T> {
+pub(super) fn obb_bounds<T: RealScalar>(obb: &Obb<T>) -> Box3<T> {
     let mut lo = obb.center;
     let mut hi = obb.center;
     // Retain corner addition order: floating addition is not associative.
@@ -358,6 +358,53 @@ impl<T: RealScalar> AabbTree<T> {
     /// Retrieves geometry by stable input ID, including duplicate triangles.
     pub fn triangle(&self, id: usize) -> Option<&Tri3<T>> {
         self.entries.get(id).map(|e| &e.triangle)
+    }
+
+    /// Visits every triangle whose represented bounds touch `bounds`, in stable
+    /// tree order. The callback owns narrow phase; no candidate is dropped after
+    /// a first hit. Traversal allocates no scratch and cannot mutate the tree.
+    /// `triangle_tests` counts leaf candidates delivered to the callback.
+    pub fn for_each_candidate(
+        &self,
+        bounds: &Box3<T>,
+        mut visitor: impl FnMut(usize, &Tri3<T>),
+    ) -> QueryStats {
+        let mut stats = QueryStats::default();
+        if !self.nodes.is_empty() {
+            self.visit_candidates(0, bounds, &mut visitor, &mut stats);
+        }
+        stats
+    }
+
+    /// Shared recursive broad phase, with the same mandatory leaf envelope test
+    /// used by the any-hit queries. Recursion is bounded by balanced tree depth.
+    fn visit_candidates(
+        &self,
+        index: usize,
+        bounds: &Box3<T>,
+        visitor: &mut impl FnMut(usize, &Tri3<T>),
+        stats: &mut QueryStats,
+    ) {
+        let node = &self.nodes[index];
+        stats.bounds_tests += 1;
+        if !overlap(&node.bounds, bounds) {
+            return;
+        }
+        match node.kind {
+            Kind::Leaf { start } => {
+                for &id in &self.order[start..start + node.count] {
+                    stats.bounds_tests += 1;
+                    if overlap(&self.entries[id].bounds, bounds) {
+                        stats.triangle_tests += 1;
+                        visitor(id, &self.entries[id].triangle);
+                    }
+                }
+            }
+            Kind::Branch { left, right } => {
+                self.visit_candidates(left, bounds, visitor, stats);
+                self.visit_candidates(right, bounds, visitor, stats);
+            }
+        }
     }
 
     /// Returns any triangle touching the capsule volume, using squared-distance

@@ -33,7 +33,7 @@ use crate::MathError;
 /// Rounds a widened quotient without checking domain or destination range.
 /// Callers supply a nonzero divisor and narrow the low bits at their boundary.
 #[inline]
-pub(super) fn div(n: i128, d: i128) -> i128 {
+pub(super) fn round_div_wrapping(n: i128, d: i128) -> i128 {
     let a = n.unsigned_abs();
     let b = d.unsigned_abs();
     let q = a / b;
@@ -145,7 +145,11 @@ impl Accumulator {
         if self.high != 0 {
             return Err(MathError::Overflow);
         }
-        signed(round_shift(self.low, frac), self.negative)
+        // Arithmetic right shift of a negative exact sum is floor division:
+        // its magnitude needs a ceiling whenever discarded bits are nonzero.
+        let discarded = frac != 0 && self.low & ((1u128 << frac) - 1) != 0;
+        let magnitude = (self.low >> frac) + (self.negative && discarded) as u128;
+        signed(magnitude, self.negative)
     }
 }
 

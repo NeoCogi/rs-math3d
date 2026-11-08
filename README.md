@@ -57,13 +57,13 @@ nearest-even with native-style shifts/division, including timing, bias and conta
 
 The [const-selected CORDIC experiment](docs/cordic.md) compares
 `angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with
-compile-time guard precision, speed measurements and independent Decimal errors.
+compile-time guard precision, speed measurements and independent high-precision errors.
 Both widths use one generic kernel with sealed precision backends.
 Run `cargo run --release --example cordic_bench -- 1000 7` to reproduce it.
 
 Fixed-count numeric kernels use explicit expansion for matrix dimensions, vector
 reductions, geometry queries and CORDIC steps. Run
-`python3 tools/check_unrolled_codegen.py` to check optimized host control flow;
+`cargo run --release --manifest-path tools/Cargo.toml --bin check-unrolled-codegen` to check optimized host control flow;
 the fixed-point guide describes the remaining input-dependent loops and tradeoffs.
 
 ## Usage
@@ -133,8 +133,9 @@ backend is active.
 
 Ordinary methods and operators are unchecked by default. Use `checked_*` to
 receive `MathError` for invalid inputs or unrepresentable arithmetic. Fixed
-operators round nearest, ties to even, and wrap overflow consistently in debug
-and release. Fixed division by zero can panic; unchecked float arithmetic follows
+products floor-shift, division truncates toward zero, and operators wrap overflow
+consistently in debug and release. Checked fixed arithmetic uses the same
+quantization before range validation. Fixed division by zero can panic; unchecked float arithmetic follows
 IEEE behavior. Ordinary normalization no longer substitutes identity for a zero
 quaternion. Conversions retain their documented `try_*` / `From` contracts.
 

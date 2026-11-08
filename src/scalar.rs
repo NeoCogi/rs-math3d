@@ -91,7 +91,7 @@ pub trait Scalar:
     fn is_finite(self) -> bool;
     /// Computes an absolute value with a range check.
     fn checked_abs(self) -> Result<Self, MathError>;
-    /// Accumulates signed products. Fixed implementations round only once.
+    /// Accumulates signed products. Fixed implementations floor-shift only once.
     #[inline(always)]
     fn checked_sum_products(terms: &[(Self, Self, bool)]) -> Result<Self, MathError> {
         let mut sum = <Self as Zero>::zero();

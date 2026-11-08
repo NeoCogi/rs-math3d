@@ -232,7 +232,11 @@ fn primitive_construction_coordinates_and_distance() {
     let coordinates = parametrized
         .checked_project(&Vector3::new(f(2), f(3), f(0)))
         .unwrap();
-    assert_eq!((coordinates.x, coordinates.y), (f(-1), f(3)));
+    // The scaled Gram solve quantizes several intermediates. Directed native
+    // arithmetic no longer gets nearest-even's accidental cancellation here;
+    // allow eight S23.8 quanta against the independent exact coordinates.
+    close(coordinates.x, -1.0, 8.0);
+    close(coordinates.y, 3.0, 8.0);
     let segment = Segment::new(&zero, &x);
     assert_eq!(
         segment

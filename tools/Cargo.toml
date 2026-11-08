@@ -1,0 +1,33 @@
+[package]
+name = "rs-math3d-tools"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Developer executables remain outside the no_std library's dependency graph.
+[workspace]
+
+[dependencies]
+rs-math3d = { path = "..", default-features = false }
+
+[features]
+default = ["std"]
+std = ["rs-math3d/std"]
+libm = ["rs-math3d/libm"]
+system-libm = ["rs-math3d/system-libm"]
+
+[[bin]]
+name = "fixed-precision"
+path = "src/bin/fixed_precision.rs"
+
+[[bin]]
+name = "check-unrolled-codegen"
+path = "src/bin/check_unrolled_codegen.rs"
+
+[[bin]]
+name = "prepare-collision-meshes"
+path = "src/bin/prepare_collision_meshes.rs"
+
+[[bin]]
+name = "generate-fixed-constants"
+path = "src/bin/generate_fixed_constants.rs"

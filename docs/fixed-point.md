@@ -131,10 +131,14 @@ explicit conversion first.
 
 ## Arithmetic and text
 
-Addition and subtraction are exact if the result fits. Multiplication,
-division, rescaling and numeric construction round nearest with ties to even.
-Negative values use the same symmetric rule. Ordinary operators wrap the rounded
-result modulo the signed storage width in both debug and release builds.
+Addition and subtraction are exact if the result fits. Multiplication uses a
+widened product followed by an arithmetic right shift, rounding toward negative
+infinity. Division scales its numerator and truncates toward zero. Checked
+operations use these same rules before testing the final storage range.
+Ordinary operators wrap the quantized result modulo the signed storage width in
+both debug and release builds. Conversions, rescaling, numeric construction and
+parsing retain nearest-even rounding, as do explicit integral `round()` and
+analytic output quantization.
 Division and remainder by zero can panic. Explicit `checked_add`, `checked_sub`,
 `checked_mul`, `checked_div`, `checked_rem`, `checked_neg`, and `checked_abs` return errors instead.
 The positive counterpart of a signed minimum does not fit its representation.
@@ -147,7 +151,7 @@ custom storage forwarding methods. Generic `R: Format<F>` arithmetic inherits
 these capabilities even when the format cannot represent positive one. Raw
 generic callers use the `num_traits` capabilities directly; the previous
 `Repr::checked_add_storage` and `Repr::checked_sub_storage` hooks are removed.
-Multiplication and division retain their separate scaling and rounding logic.
+Multiplication and division retain their separate scaling and quantization logic.
 
 `trunc` rounds toward zero and `floor` toward negative infinity. `ceil`, `round`,
 and `abs` use ordinary wrapping arithmetic; `checked_ceil`, `checked_round`, and
@@ -155,9 +159,12 @@ and `abs` use ordinary wrapping arithmetic; `checked_ceil`, `checked_round`, and
 division and has the dividend's sign.
 
 Dot/cross products, matrix products and Hamilton quaternion products accumulate
-widened integer products and quantize once per output component. Scalar
-expression chains still round at each operator; algebraically equivalent
-expressions can therefore give different rounded results.
+widened integer products and floor-shift once per output component. Scalar
+expression chains quantize at each operator; algebraically equivalent
+expressions can therefore give different results. Directed shifts are not odd:
+`DELTA * half` is zero while `-DELTA * half` is `-DELTA`. A rounded cross product
+can consequently differ from the negation of the reversed cross product by one
+quantum. Bounds that depend on opposite signed products must evaluate both ends.
 
 `Display` emits an exact terminating decimal, without allocation. Precision
 formatting flags do not truncate that representation. Decimal `FromStr` and
@@ -217,7 +224,7 @@ minors. Determinant-only methods evaluate only the first cofactor row.
 
 The fixed reciprocal retains 127 internal reciprocal fraction bits. Preparation
 performs one division; applying it uses widened multiplication and remainder
-correction. It matches checked fixed division without first quantizing `1/det`
+correction. It matches checked and ordinary truncating fixed division without first quantizing `1/det`
 to the scalar format. A representable inverse therefore does not become a zero
 matrix merely because the scalar reciprocal determinant would round to zero.
 This does not remove cofactor/determinant range limits; row mode addresses a
@@ -234,7 +241,7 @@ explicit operations. These paths do not rely on compiler loop-unrolling
 heuristics, including in debug builds. Arithmetic/error evaluation order and
 fixed-point rounding remain unchanged; data-dependent checks still branch.
 Checked two-product fixed accumulation uses a shared, explicitly expanded
-wide kernel. Unchecked accumulation uses a wrapping `i128` sum and rounds once:
+wide kernel. Unchecked accumulation uses a wrapping `i128` sum and floor-shifts once:
 discarded high bits cannot affect any supported final storage result.
 
 CORDIC's 97 steps are expanded into seven explicit chunk calls: six chunks of
@@ -255,7 +262,7 @@ Public scalar slices longer than four keep a runtime fallback. Text processing,
 searches and integer-root convergence retain their input-dependent iteration.
 Tests and constant-generation tools retain iterative reference algorithms.
 
-Run `python3 tools/check_unrolled_codegen.py` to inspect optimized host LLVM
+Run `cargo run --release --manifest-path tools/Cargo.toml --bin check-unrolled-codegen` to inspect optimized host LLVM
 control flow for `f32`, `f64`, `Fixed<i32, 8>` and `Fixed<i64, 16>` matrix/dot
 consumers and the shared CORDIC functions. The check detects control-flow cycles
 rather than assuming every backward jump is a loop. It validates the current
@@ -324,7 +331,7 @@ Square root uses an integer root and is correctly rounded. Default sine/cosine u
 Q96 CORDIC with guarded range reduction; arc cosine uses guarded integer square
 root and vectoring. Sine, cosine and arc cosine target an absolute error within
 one destination quantum. Regression coverage includes exhaustive 16-bit
-inputs and independent 120-digit Decimal references at full 64-bit angle
+inputs and independent high-precision GMP references at full 64-bit angle
 magnitudes across multiple fractional widths.
 
 Tangent divides guarded components before final quantization; its error grows
@@ -337,8 +344,10 @@ domain and representability requirements; their results are otherwise unspecifie
 numerically, and zero divisors can panic. Both tiers use integer-only algorithms.
 
 Constants and independent references are reproducible with
-`python3 tools/generate_fixed_constants.py`. Python Decimal is development
-tooling only; fixed runtime calculations do not depend on floats or `libm`.
+`cargo run --release --manifest-path tools/Cargo.toml --bin generate-fixed-constants`.
+The Rust generator uses 512-bit GMP arithmetic on the development host; a second
+768-bit run verifies guard-precision stability. Fixed runtime calculations do not
+depend on GMP, floats or `libm`. See [the Rust tools guide](../tools/README.md).
 
 ### Working width and embedded performance
 

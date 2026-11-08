@@ -36,7 +36,7 @@ and executes one more step than that precision. Examples:
 The Q60 cap leaves three integer magnitude bits in signed i64. A reduced angle
 fits pi; unit-circle vectoring grows by less than two. At least twelve working
 guard bits remain beyond the supported destination precision. Constants come
-from the existing 120-digit Decimal generator, then their selected Q60-derived
+from the independent high-precision generator, then their selected Q60-derived
 tables are rescaled in const evaluation. Rotation and vectoring expand into
 up to four chunks of sixteen literal steps. Const-false steps and unused chunks
 disappear; vectoring can still exit on an exact zero residual.
@@ -64,8 +64,8 @@ even when the result fits the destination; checked arithmetic detects domain or
 range errors, not loss of numerical accuracy. Its i64 variant remains an
 explicit experimental choice.
 
-`tools/generate_fixed_constants.py` regenerates both CORDIC tables and independent
-Decimal references. The new fixture includes exact raw integer inputs across
+`cargo run --release --manifest-path tools/Cargo.toml --bin generate-fixed-constants` regenerates both CORDIC tables and independent
+high-precision references. The new fixture includes exact raw integer inputs across
 full storage ranges, endpoints, small values, quarter-turn neighborhoods and
 deterministic random samples. Reference outputs split into an integer and a
 residual, preserving sub-quantum error measurements even above f64's consecutive
@@ -75,8 +75,8 @@ independent references; no CORDIC result is used as the accuracy oracle.
 Run `cargo test --test cordic_precision` and repeat with
 `--no-default-features`. Tests exhaust all 786,432 i16 inputs across the twelve
 analytic scales, check one-quantum sine/cosine/acos error, validate domains and
-checked/ordinary agreement, and cover full-range Decimal references through
-F=48. `python3 tools/check_unrolled_codegen.py` additionally inspects specialized
+checked/ordinary agreement, and cover full-range high-precision references through
+F=48. `cargo run --release --manifest-path tools/Cargo.toml --bin check-unrolled-codegen` additionally inspects specialized
 i64 chunks for control-flow cycles and accidental i128 step arithmetic. It
 traces concrete width-selected consumer calls to the generic chunk bodies and
 requires Q96 consumers at F=16,48,61 to share exactly fourteen chunks. Internal
@@ -102,7 +102,7 @@ values. Acos spans [-1,1). Tangent timing avoids poles; its precision samples
 include pole neighborhoods. Timings include retained reduction/root/division
 costs and are not just measurements of isolated CORDIC steps.
 
-The precision section evaluates 9,091 independently generated Decimal references
+The precision section evaluates 9,091 independently generated high-precision references
 over seven storage/scale combinations: 2,653 each for sine, cosine and tangent,
 plus 1,132 for acos. It reports absolute maximum and RMS error in *destination
 quanta*, counts beyond one quantum, rejected representable references, accepted
@@ -136,7 +136,7 @@ full-range reduction boundary on this machine. Acos improves by approximately
 2.3–4.1x while retaining the same guarded root. These changes do not accelerate
 the collision overlap queries, which contain no CORDIC calls.
 
-Maximum absolute Decimal-reference error for the i64 candidate, in destination
+Maximum absolute high-precision reference error for the i64 candidate, in destination
 quanta (1 quantum = `2^-F`):
 
 | Storage / F | max(sine error, cosine error) | Acos error | Differences from Q96, these three operations |
@@ -149,7 +149,7 @@ quanta (1 quantum = `2^-F`):
 | i64 / 44 | 0.502881 | 0.496250 | 0 |
 | i64 / 48 | 0.510074 | 0.495542 | 0 |
 
-All 6,438 sine/cosine/acos Decimal samples round identically to Q96, with no
+All 6,438 sine/cosine/acos reference samples round identically to Q96, with no
 one-quantum violations. Their RMS errors range from approximately 0.25 to 0.29
 quanta. The exhaustive i16 suite separately passes 1,572,864 sine/cosine component
 checks and 32,772 acos checks across all twelve scales. These measurements
@@ -195,7 +195,7 @@ Representative median ns/call:
 Median changes across all 56 timing rows range from -4.2% to +2.0%; this paired
 host run shows no material performance regression. All 56 precision summary
 rows are byte-identical, including maximum/RMS errors, counts, range decisions
-and worst-input fields. Existing Decimal and exhaustive i16 checks also pass.
+and worst-input fields. Existing high-precision and exhaustive i16 checks also pass.
 The internal typed iterative references additionally preserve every output
 guard bit on their Q96 grid and all 47 supported i64 fractional scales.
 

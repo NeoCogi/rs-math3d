@@ -6,11 +6,7 @@
     "bunny": {
       "collapsed_faces_removed": 0,
       "fixture_sha256": "d4f7f9a075675322d3ac11b11218a5fce851cf6c79c249ee58d208ff4ae11780",
-      "source_center": [
-        -0.01671485,
-        0.10911365,
-        -0.0016035000000000008
-      ],
+      "source_center": [-0.01671485, 0.10911365, -0.0016035000000000008],
       "source_scale": 206.05426052599216,
       "source_sha256": "a5720bd96d158df403d153381b8411a727a1d73cff2f33dc9b212d6f75455b84",
       "source_triangles": 3851,
@@ -21,11 +17,7 @@
     "teapot": {
       "collapsed_faces_removed": 0,
       "fixture_sha256": "ce6c8617829035ac7a8905666721811b542ee74b327405d7ce37a25cda9aaf48",
-      "source_center": [
-        0.21700000000000008,
-        1.575,
-        0.0
-      ],
+      "source_center": [0.21700000000000008, 1.575, 0],
       "source_scale": 4.973577867578489,
       "source_sha256": "1b5396fedd74b577e32cef41146582c2f2e1a050d5b4915193c0ac1ad4187ed4",
       "source_triangles": 6320,

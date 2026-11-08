@@ -47,8 +47,10 @@ return `QueryResult<usize>` containing any original triangle ID. Their
 and leaf filters in input order; witness IDs can differ. No query allocates.
 Shapes fully inside a closed soup without touching a triangle return no hit.
 
-Capsule bounds expand endpoint minima/maxima by radius. OBB bounds accumulate
-absolute half-axis intervals in represented corner-construction order. This
+Capsule bounds expand endpoint minima/maxima by radius. OBB bounds evaluate both
+signed ends of each half axis and accumulate their minima/maxima in represented
+corner-construction order. Native floor products are not odd, so a negative
+corner cannot be recovered by mirroring a rounded positive half axis. This also
 avoids excluding a rounded corner when floating addition of the center and a
 pre-summed extent associates differently. Capsule closest-point arithmetic uses
 a max-component-scaled face normal, an interior plane projection or closest
@@ -102,11 +104,11 @@ Source attribution and data-use terms are in
 [`assets/NOTICE.md`](../examples/collision/assets/NOTICE.md); source/fixture
 hashes, counts and transformations are in
 [`assets/manifest.json`](../examples/collision/assets/manifest.json).
-`tools/prepare_collision_meshes.py --download` reproduces the fixtures from
+`cargo run --release --manifest-path tools/Cargo.toml --bin prepare-collision-meshes -- --download` reproduces the fixtures from
 pinned sources; local source paths can also be supplied. Its integer cross-product
 filter removes collapsed faces once for every backend. Rust's checked decoder
 validates the packet version, exact byte counts and vertex indices before use.
-Ordinary tests/benchmarks need no network access, Python or external mesh files.
+Ordinary tests/benchmarks need no network access or external mesh files.
 
 Run the tests with `cargo test --test collision_examples aabb_tree`; repeat with
 `--no-default-features` for both fixed backends. The real models exercise nearest

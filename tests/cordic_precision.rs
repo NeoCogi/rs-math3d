@@ -76,9 +76,9 @@ fn all_i16_formats_meet_one_quantum_sine_cosine_acos_bounds() {
     exhaustive::<13>();
 }
 
-/// Full-range i32/i64 references use Decimal integer-plus-residual values,
+/// Full-range i32/i64 references use high-precision integer-plus-residual values,
 /// avoiding loss of input bits in a float conversion and preserving ULP metrics.
-fn decimal<const F: u32>()
+fn high_precision<const F: u32>()
 where
     i64: RealFormat<F>,
 {
@@ -118,13 +118,13 @@ where
 /// Includes all distinct working precisions in the benchmark, with F=44/48
 /// testing the Q60 cap and F=48 the minimum twelve guard bits.
 #[test]
-fn i64_core_matches_independent_decimal_references() {
-    decimal::<8>();
-    decimal::<16>();
-    decimal::<29>();
-    decimal::<32>();
-    decimal::<44>();
-    decimal::<48>();
+fn i64_core_matches_independent_high_precision_references() {
+    high_precision::<8>();
+    high_precision::<16>();
+    high_precision::<29>();
+    high_precision::<32>();
+    high_precision::<44>();
+    high_precision::<48>();
 }
 
 /// Validates endpoint identities and domain checking independently of the bulk

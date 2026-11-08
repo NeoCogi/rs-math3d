@@ -171,21 +171,20 @@ fn capsule_bounds<T: RealScalar>(capsule: &Capsule<T>) -> Box3<T> {
     )
 }
 
-/// Projects the three signed half-axis vectors onto world axes. Absolute sums
-/// enclose represented corners without rotating the soup or assuming the OBB is
-/// axis aligned. Sizes and envelope intermediates must fit the selected scalar.
+/// Bounds both signed ends of each half axis. Floor quantization is not odd:
+/// negating a rounded positive product need not enclose the negative corner.
+/// Sizes and envelope intermediates must fit the selected scalar.
 fn obb_bounds<T: RealScalar>(obb: &Obb<T>) -> Box3<T> {
-    let half_axis = |axis: Vector3<T>, size: T| {
-        let v = axis * size;
-        Vector3::new(v.x.tabs(), v.y.tabs(), v.z.tabs())
-    };
-    let x = half_axis(obb.axes[0], obb.half.x);
-    let y = half_axis(obb.axes[1], obb.half.y);
-    let z = half_axis(obb.axes[2], obb.half.z);
-    // Match represented corner construction order. Floating addition is
-    // monotone but not associative: summing extents before adding the center
-    // can otherwise exclude a corner by one rounding unit.
-    Box3::new(&(((obb.center - x) - y) - z), &(((obb.center + x) + y) + z))
+    let mut lo = obb.center;
+    let mut hi = obb.center;
+    // Retain corner addition order: floating addition is not associative.
+    for (axis, half) in obb.axes.iter().zip([obb.half.x, obb.half.y, obb.half.z]) {
+        let a = *axis * half;
+        let b = *axis * (-half);
+        lo = lo + Vector3::min(&a, &b);
+        hi = hi + Vector3::max(&a, &b);
+    }
+    Box3::new(&lo, &hi)
 }
 
 /// Translates a bound in the query's represented arithmetic. Callers establish

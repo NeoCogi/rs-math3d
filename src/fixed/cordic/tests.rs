@@ -29,8 +29,8 @@
 //! Guard-bit equivalence against the original typed iterative schedules.
 
 use super::*;
-use crate::fixed::arithmetic::div;
 use crate::fixed::arithmetic::integer_sqrt;
+use crate::fixed::arithmetic::round_div_wrapping as div;
 
 /// Original iterative rotation schedule retained as an independent oracle.
 fn reference_rotate(mut angle: i128) -> (i128, i128) {

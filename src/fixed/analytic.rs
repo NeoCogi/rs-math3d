@@ -44,7 +44,7 @@ fn rounded_sqrt(value: u128) -> u128 {
     root + (value - root * root > root) as u128
 }
 
-use super::arithmetic::div;
+use super::arithmetic::round_div_wrapping as div;
 
 impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     /// Integer square root without domain validation. Supply a nonnegative input.

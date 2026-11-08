@@ -29,7 +29,8 @@
 //! Signed binary fixed-point numbers with explicit storage and precision.
 //!
 //! [`Fixed<i32, 8>`] is S23.8: one sign bit, 23 integer value bits and eight
-//! fractional bits. Arithmetic rounds to nearest, ties to even. Operators wrap;
+//! fractional bits. Products shift toward negative infinity and division
+//! truncates toward zero. Numeric conversions round nearest, ties to even. Operators wrap;
 //! `From<f32/f64>` rejects invalid conversions; `checked_*` arithmetic methods
 //! return [`MathError`]. Floating conversions are explicit interoperability,
 //! never the implementation of fixed arithmetic or analytic functions.
@@ -78,7 +79,7 @@ mod reciprocal;
 mod storage;
 
 use crate::MathError;
-use arithmetic::{div, round_div, round_shift, signed, signed_wrapping, Accumulator};
+use arithmetic::{round_div, round_div_wrapping, round_shift, signed, Accumulator};
 use core::{fmt, ops::*, str::FromStr};
 use num_traits::{CheckedAdd, CheckedSub, FromPrimitive, Num, NumCast, One, ToPrimitive, Zero};
 pub use reciprocal::FixedReciprocal;
@@ -259,18 +260,21 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
             .map(Self::from_bits)
             .ok_or(MathError::Overflow)
     }
-    /// Multiplies widened integers and rounds exactly once.
+    /// Multiplies widened integers, shifts toward negative infinity and checks
+    /// the final storage range. Quantization matches ordinary multiplication.
     #[inline]
     pub fn checked_mul(self, rhs: Self) -> Result<Self, MathError> {
         let product = self.bits.widen() * rhs.bits.widen();
-        Self::raw(signed(round_shift(product.unsigned_abs(), F), product < 0)?)
+        Self::raw(product >> F)
     }
-    /// Divides widened integers, detecting a zero divisor and result overflow.
+    /// Divides widened integers toward zero, detecting a zero divisor and
+    /// result overflow. Quantization matches ordinary division.
     pub fn checked_div(self, rhs: Self) -> Result<Self, MathError> {
-        Self::raw(round_div(
-            self.bits.widen() * Self::scale(),
-            rhs.bits.widen(),
-        )?)
+        let divisor = rhs.bits.widen();
+        if divisor == 0 {
+            return Err(MathError::DivisionByZero);
+        }
+        Self::raw(self.bits.widen() * Self::scale() / divisor)
     }
     /// Returns the truncating remainder; its sign follows the dividend.
     pub fn checked_rem(self, rhs: Self) -> Result<Self, MathError> {
@@ -320,7 +324,7 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
         Self::raw(accumulator.finish(F)?)
     }
 
-    /// Accumulates two signed products exactly, rounding and narrowing only once.
+    /// Accumulates two signed products exactly, floor-shifting and narrowing once.
     /// Unlike a longer sum, an overflowing pair has no later cancellation term.
     #[inline(always)]
     fn checked_sum_products_pair(
@@ -336,14 +340,14 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
         let a = if left.2 { -a } else { a };
         let b = if right.2 { -b } else { b };
         let sum = a.checked_add(b).ok_or(MathError::Overflow)?;
-        Self::raw(signed(round_shift(sum.unsigned_abs(), F), sum < 0)?)
+        Self::raw(sum >> F)
     }
-    /// Accumulates widened products and rounds once, wrapping the final result.
+    /// Accumulates widened products and floor-shifts once, wrapping the final result.
     #[inline(always)]
     pub(crate) fn sum_products(terms: &[(Self, Self, bool)]) -> Self {
-        // Quantization commutes with adding 2^128: after shifting by F<=63,
-        // that difference is an even multiple of every supported storage
-        // modulus. Keep only low accumulator bits, round once, then narrow.
+        // Floor quantization commutes with adding 2^128: after shifting by
+        // F<=63, that difference is a multiple of every supported storage
+        // modulus. Keep low accumulator bits, shift once, then narrow.
         // This also handles exact sums that overflow a signed i128, without
         // sign/magnitude bookkeeping or a checked arithmetic boundary.
         let mut sum = 0i128;
@@ -351,7 +355,7 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
             let product=a.bits.widen()*b.bits.widen();
             sum=if subtract {sum.wrapping_sub(product)} else {sum.wrapping_add(product)};
         });
-        Self::wrapping_raw(signed_wrapping(round_shift(sum.unsigned_abs(), F), sum < 0))
+        Self::wrapping_raw(sum >> F)
     }
 
     /// Absolute value with wrapping at the signed storage minimum.
@@ -364,7 +368,7 @@ impl<R: Format<F>, const F: u32> Fixed<R, F> {
     }
     /// Rounds to an integer, ties to even, with wrapping on overflow.
     pub fn round(self) -> Self {
-        Self::wrapping_raw(div(self.bits.widen(), Self::scale()) * Self::scale())
+        Self::wrapping_raw(round_div_wrapping(self.bits.widen(), Self::scale()) * Self::scale())
     }
     /// Parses signed integer/fractional digits in radices 2 through 36.
     /// Whitespace, exponents and digit separators are deliberately rejected.
@@ -421,11 +425,8 @@ macro_rules! operators {
 }
 operators!(Add, add, AddAssign, add_assign, |a,b| a+b;
     Sub, sub, SubAssign, sub_assign, |a,b| a-b;
-    Mul, mul, MulAssign, mul_assign, |a,b| {
-        let product = a*b;
-        signed_wrapping(round_shift(product.unsigned_abs(), F), product < 0)
-    };
-    Div, div, DivAssign, div_assign, |a,b| div(a * Self::scale(), b);
+    Mul, mul, MulAssign, mul_assign, |a,b| (a*b) >> F;
+    Div, div, DivAssign, div_assign, |a,b| (a * Self::scale()) / b;
     Rem, rem, RemAssign, rem_assign, |a,b| a%b;);
 
 impl<R: Format<F>, const F: u32> Neg for Fixed<R, F> {

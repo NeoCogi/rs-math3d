@@ -26,16 +26,16 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Numerical probes for tools/bench_fixed_rounding.py, compiled against each
-//! isolated policy build. References use exact bounded integer numerators;
+//! Numerical probes for the native fixed arithmetic contract.
+//! References use exact bounded integer numerators;
 //! floating error conversion happens only after subtracting the integer part.
 
 #[allow(dead_code)]
-#[path = "../examples/collision/mod.rs"]
+#[path = "../../../examples/collision/mod.rs"]
 mod collision;
-#[path = "../examples/collision/fixtures.rs"]
+#[path = "../../../examples/collision/fixtures.rs"]
 mod fixtures;
-#[path = "../examples/collision/shape_cases.rs"]
+#[path = "../../../examples/collision/shape_cases.rs"]
 mod shape_cases;
 
 use collision::aabb_tree::AabbTree;
@@ -384,20 +384,10 @@ mod tests {
     /// Independent signed quotient/remainder reference; the native shift mode
     /// uses Euclidean division rather than the implementation's right shift.
     fn quotient(n: i128, d: i128, shift: bool) -> i128 {
-        if cfg!(rounding_native) {
-            return if shift { n.div_euclid(d) } else { n / d };
-        }
-        let q = n / d;
-        let r = (n % d).abs();
-        let increment = r > d.abs() - r || (r == d.abs() - r && q & 1 != 0);
-        q + if increment {
-            if (n < 0) != (d < 0) {
-                -1
-            } else {
-                1
-            }
+        if shift {
+            n.div_euclid(d)
         } else {
-            0
+            n / d
         }
     }
 

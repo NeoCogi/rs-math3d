@@ -37,7 +37,7 @@ use crate::MathError;
 /// A prepared signed fixed divisor with 127 reciprocal fraction bits.
 ///
 /// Preparing it performs one integer division. Applying it uses widened
-/// multiplication and one remainder correction, preserving ties-to-even
+/// multiplication and one remainder correction, preserving truncating
 /// division without quantizing the reciprocal to the destination format.
 #[derive(Clone, Copy, Debug)]
 pub struct FixedReciprocal<R: RealFormat<F>, const F: u32> {
@@ -60,7 +60,7 @@ impl<R: RealFormat<F>, const F: u32> FixedReciprocal<R, F> {
         })
     }
 
-    /// Applies the reciprocal with an exact single-rounding final result.
+    /// Applies the reciprocal with exact truncation toward zero and range checks.
     pub(crate) fn checked_apply(self, numerator: Fixed<R, F>) -> Result<Fixed<R, F>, MathError> {
         let (quotient, negative) = self.quotient(numerator);
         Fixed::raw(signed(quotient, negative)?)
@@ -95,14 +95,10 @@ impl<R: RealFormat<F>, const F: u32> FixedReciprocal<R, F> {
         let shift = 127 - F;
         let mut quotient = (low >> shift) | (high << (128 - shift));
         let scaled = a << F;
-        let mut remainder = scaled - quotient * b;
+        let remainder = scaled - quotient * b;
         // The floor reciprocal underestimates by less than one quotient unit:
         // a * 2^F < 2^125 for every supported RealFormat.
         if remainder >= b {
-            quotient += 1;
-            remainder -= b;
-        }
-        if remainder > b - remainder || remainder == b - remainder && quotient & 1 != 0 {
             quotient += 1;
         }
         (quotient, (n < 0) != (d < 0))

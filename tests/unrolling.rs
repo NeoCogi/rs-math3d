@@ -182,11 +182,7 @@ fn short_scalar_dispatch_preserves_rounding_errors_and_fallback() {
     type F = Fixed<i64, 8>;
     let terms = [(F::from_bits(8), F::from_bits(8), false); 8];
     for n in 0..=terms.len() {
-        let expected = F::from_bits(match n {
-            0 | 1 | 2 => 0,
-            3 | 4 | 5 => 1,
-            _ => 2,
-        });
+        let expected = F::from_bits((n / 4) as i64);
         assert_eq!(
             <F as Scalar>::checked_sum_products(&terms[..n]).unwrap(),
             expected

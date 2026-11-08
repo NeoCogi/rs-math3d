@@ -43,10 +43,14 @@ or a native arithmetic panic, including fixed division by zero. Native integer
 operators retain Rust's build-profile overflow behavior. No memory safety
 obligation is imposed on callers.
 
-Fixed arithmetic rounds nearest, ties to even, then wraps the final scaled
-integer to the storage width. A checked operation uses the same quantization
-and rejects overflow before narrowing. Wide dot/cross/matrix/Hamilton products
-round once per output component in both tiers. Floating-point checked arithmetic
+Fixed multiplication uses widened products and an arithmetic right shift,
+rounding toward negative infinity. Fixed division truncates toward zero.
+Operators wrap the final scaled integer to the storage width; checked operations
+use the same quantization and reject overflow before narrowing. Wide
+dot/cross/matrix/Hamilton products accumulate first and floor-shift once per
+output component in both tiers. Prepared reciprocals match truncating division.
+Conversions, parsing, explicit `round()` and analytic outputs retain their
+documented nearest-even rules. Floating-point checked arithmetic
 rejects nonfinite operands, zero divisors and nonfinite results; finite underflow
 may round to zero. Checked geometric parameters additionally reject a nonzero
 physical travel distance whose stored parameter rounds to zero.
@@ -151,7 +155,7 @@ Distances return a scalar directly in the ordinary tier. Checked decomposition
 returns `Result<AffineParts<_>, MathError>`; the shear-free checked tuple query
 returns `Result<Option<_>, MathError>`.
 
-`python3 tools/check_unrolled_codegen.py` verifies optimized control-flow cycles
+`cargo run --release --manifest-path tools/Cargo.toml --bin check-unrolled-codegen` verifies optimized control-flow cycles
 for both matrix/vector arithmetic tiers and shared CORDIC helpers. Run
 `cargo run --release --example inverse_modes -- 100000` for target-local checked
 and unchecked timing comparisons; no cross-target performance ratio is promised.

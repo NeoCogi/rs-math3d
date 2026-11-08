@@ -55,12 +55,12 @@ fn exhaustive_i8_arithmetic() {
             assert_eq!((-x).to_bits(), a.wrapping_neg());
             assert_eq!(
                 (x * y).to_bits(),
-                (a as f64 * b as f64 / 16.0).round_ties_even() as i16 as i8
+                (a as f64 * b as f64 / 16.0).floor() as i16 as i8
             );
             if b != 0 {
                 assert_eq!(
                     (x / y).to_bits(),
-                    (a as f64 * 16.0 / b as f64).round_ties_even() as i16 as i8
+                    (a as f64 * 16.0 / b as f64).trunc() as i16 as i8
                 );
                 assert_eq!((x % y).to_bits(), (a as i16 % b as i16) as i8);
             }
@@ -74,7 +74,7 @@ fn exhaustive_i8_arithmetic() {
             );
             assert_eq!(
                 x.checked_mul(y).map(F::to_bits),
-                expected(a as f64 * b as f64 / 16.0)
+                expected((a as f64 * b as f64 / 16.0).floor())
             );
             if b == 0 {
                 assert_eq!(x.checked_div(y), Err(MathError::DivisionByZero));
@@ -82,7 +82,7 @@ fn exhaustive_i8_arithmetic() {
             } else {
                 assert_eq!(
                     x.checked_div(y).map(F::to_bits),
-                    expected(a as f64 * 16.0 / b as f64)
+                    expected((a as f64 * 16.0 / b as f64).trunc())
                 );
                 assert_eq!(
                     x.checked_rem(y).unwrap().to_bits() as i16,
@@ -91,6 +91,69 @@ fn exhaustive_i8_arithmetic() {
             }
         }
     }
+}
+
+/// Independent integer quotients lock the selected native policy at every i8
+/// scale, including signed destinations where the unchecked result wraps.
+#[test]
+fn native_products_and_division_at_every_i8_scale() {
+    fn verify<const F: u32>()
+    where
+        i8: Format<F>,
+    {
+        let scale = 1i128 << F;
+        let narrow = |x: i128| {
+            <i8 as Repr>::narrow(x)
+                .map(Fixed::<i8, F>::from_bits)
+                .ok_or(MathError::Overflow)
+        };
+        for a in i8::MIN..=i8::MAX {
+            for b in i8::MIN..=i8::MAX {
+                let left = Fixed::<i8, F>::from_bits(a);
+                let right = Fixed::<i8, F>::from_bits(b);
+                let product = (a as i128 * b as i128).div_euclid(scale);
+                assert_eq!((left * right).to_bits(), product as i8);
+                assert_eq!(left.checked_mul(right), narrow(product));
+                if b != 0 {
+                    let quotient = a as i128 * scale / b as i128;
+                    assert_eq!((left / right).to_bits(), quotient as i8);
+                    assert_eq!(left.checked_div(right), narrow(quotient));
+                }
+            }
+        }
+    }
+    verify::<0>();
+    verify::<1>();
+    verify::<2>();
+    verify::<3>();
+    verify::<4>();
+    verify::<5>();
+    verify::<6>();
+    verify::<7>();
+}
+
+/// Checked pair and long-accumulator paths must use the same signed floor rule
+/// as the ordinary fused output, including negative sub-quantum sums.
+#[test]
+fn native_fused_products_keep_negative_remainders() {
+    type F = Fixed<i64, 16>;
+    let x = F::from_bits(1);
+    let y = F::from_bits(3);
+    for terms in [
+        &[(x, y, true)][..],
+        &[(x, y, true), (x, x, false)][..],
+        &[(x, y, true), (x, x, false), (x, x, false)][..],
+    ] {
+        assert_eq!(F::sum_products(&terms).to_bits(), -1);
+        assert_eq!(F::checked_sum_products(&terms).unwrap().to_bits(), -1);
+    }
+    let positive = F::from_bits(1) * F::half();
+    let negative = F::from_bits(-1) * F::half();
+    assert_eq!((positive.to_bits(), negative.to_bits()), (0, -1));
+    assert_eq!(
+        (F::from_bits(-3) / F::try_from_int(2).unwrap()).to_bits(),
+        -1
+    );
 }
 
 #[test]
@@ -285,7 +348,7 @@ fn vector_fixed_accumulation_and_tiny_normalization() {
     assert_eq!(left.x.to_f64(), 6.0);
     let fraction = F::from_bits(8);
     let v = Vector3::new(fraction, fraction, fraction);
-    assert_eq!(Vector3::dot(&v, &v).to_bits(), 1);
+    assert_eq!(Vector3::dot(&v, &v).to_bits(), 0);
     // A large represented direction can normalize even when its length cannot
     // fit its scalar format; normalization never constructs the raw magnitude.
     let large = Vector3::new(F::max_value(), F::max_value(), F::ZERO);
@@ -321,7 +384,7 @@ fn analytic_domains_and_high_precision_formats() {
     );
 }
 
-/// Checks guarded CORDIC against independent 120-digit Decimal Taylor values,
+/// Checks guarded CORDIC against independent high-precision Taylor values,
 /// including magnitudes where a binary float reference loses the input bits.
 fn check_wide_reference<const F: u32>()
 where
@@ -358,7 +421,7 @@ where
 }
 
 #[test]
-fn full_range_cordic_matches_decimal_reference() {
+fn full_range_cordic_matches_high_precision_reference() {
     check_wide_reference::<2>();
     check_wide_reference::<8>();
     check_wide_reference::<16>();
@@ -436,13 +499,7 @@ fn wrapping_wide_accumulation_preserves_final_bits_and_cancellation() {
             (max, max, true),
         ];
         let numerator = (1u128 << 65) - 2;
-        let quotient = if F == 0 {
-            numerator
-        } else {
-            // At the only halfway case (F=2), the truncated quotient is
-            // odd, so ties-to-even also rounds upward.
-            (numerator + (1u128 << (F - 1))) >> F
-        };
+        let quotient = numerator >> F;
         assert_eq!(Fixed::sum_products(&terms).to_bits(), quotient as i64);
         if quotient <= i64::MAX as u128 {
             assert_eq!(

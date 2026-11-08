@@ -157,7 +157,7 @@ and provide a reference cost, not a statistical estimate. Fixed-point and f32
 classification comparisons are also sample observations, not exact predicates
 or a global precision guarantee.
 
-## Host results, 2026-11-08
+## Initial ray/mesh results, 2026-11-08
 
 Intel Core Ultra 7 155H, x86_64 Linux, pinned logical CPU 0; rustc 1.98.1
 (`48a229cea`, LLVM 22.1.8), default release profile and `std` feature. No custom
@@ -200,3 +200,56 @@ S15.16's maximum parameter difference from f32 is 0.001680374 for the teapot and
 These are comparisons against f32, which also rounds; they are not absolute
 errors against an exact reference. Unscaled determinants can amplify fixed
 quantization beyond one scalar quantum, especially for small/near-parallel faces.
+
+## Capsule and OBB benchmark extension
+
+The same `mesh_bench` command now also measures shape/soup any-hit queries.
+[`shape_cases.rs`](../examples/collision/shape_cases.rs) prepares a shared corpus:
+64 evenly sampled input faces, four normal offsets per face (-1.5, -0.25, 0.25,
+1.5), and eight remote misses, giving **264 poses per shape per model**. Capsule
+centerlines follow tilted face tangents and alternate radii 0.375/0.5. OBBs rotate
+around two axes, with half extents (1, 0.5, 0.25). Centers/endpoints use Q8 and
+OBB axes Q16, exactly shared by f32, S15.16 and S31.32. Quantized axes approximate
+orthonormal frames; no backend silently receives higher-resolution query inputs.
+
+Setup normals, trigonometry, quantization and allocation occur outside timers.
+The measured query includes preparation of its envelope, node/leaf filtering,
+narrow phase, counters and result handling. Flat shape queries use one batch per
+sample and the same soup/leaf bounds as tree traversal. Both traversals' returned
+IDs are checked against their narrow-phase predicate. Witness IDs need not match;
+the acceleration oracle compares any-hit classification. f32 classifications
+are also compared separately across scalar backends.
+
+The pinned host/compiler/profile and `200 7` command are the same as above.
+Each accelerated sample contains 52,800 queries per shape/model; seven samples
+produce the following median ns/query. The extension's [full output](benchmarks/triangle-soup-shapes-x86_64.txt)
+retains ranges, flat timings, counters and the existing ray/mesh results.
+
+| Query | f32 | S15.16 / i32 | S31.32 / i64 |
+| --- | ---: | ---: | ---: |
+| Capsule / teapot | 527.81 | 2458.49 | 2648.67 |
+| Capsule / bunny | 365.86 | 1762.80 | 1826.52 |
+| OBB / teapot | 248.86 | 1367.95 | 825.52 |
+| OBB / bunny | 164.34 | 745.64 | 447.61 |
+
+The tree improves f32 capsule throughput by approximately 5.6–13.3x over flat
+traversal and OBB throughput by 11.3–33.4x. S15.16 improvements are 1.8–3.5x and
+2.4–7.1x respectively. These mixed, mostly near-surface workloads exercise more
+narrow phase than the earlier ray corpus; ratios do not generalize to arbitrary
+scene distributions or other targets. Wider fixed storage is not consistently
+slower on this host, as the S31.32 OBB rows demonstrate.
+
+All 3,168 shape/model/backend queries in the untimed verification passes agree
+with flat traversal, and every sampled hit classification matches f32. Capsule
+hits are 164/264 on teapot and 138/264 on bunny; OBB hits are 166/264 and 141/264.
+Average bound comparisons fall from 3,782.1/2,284.6 to 33.7/33.1 for capsules and
+from 3,739.0/2,307.7 to 39.6/35.2 for OBBs. Tree narrow-phase counts average
+3.6/2.4 triangles for capsules and 5.9/3.1 for OBBs. Different traversal orders
+can find different witnesses and can increase narrow-phase work while reducing
+the total bounds work substantially.
+
+This extension uses the corrected scaled-plane capsule distance kernel and the
+rounded-corner OBB envelope described above. The sample agreement does not prove
+exact geometric predicates or a global distance bound, and ARMv5/RISC-V timings
+remain unmeasured. These are discrete volume/triangle tests without penetration
+depths, contact manifolds or continuous collision detection.

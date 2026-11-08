@@ -33,6 +33,8 @@
 mod collision;
 #[path = "collision/fixtures.rs"]
 mod fixtures;
+#[path = "collision/shape_cases.rs"]
+mod shape_cases;
 
 use collision::aabb_tree::{AabbTree, QueryStats, RayHit};
 use rs_math3d::{Fixed, Ray, RealScalar, Tri3, TryCastFrom, Vector3};
@@ -56,6 +58,10 @@ struct Reference {
     offsets: Vec<[f64; 3]>,
     /// f32 surface-overlap classification at each translation.
     pairs: Vec<bool>,
+    /// f32 capsule/soup classifications, indexed by model and common pose ID.
+    capsules: [Vec<bool>; 2],
+    /// f32 OBB/soup classifications on the same model-relative workload.
+    obbs: [Vec<bool>; 2],
 }
 
 /// Exact setup conversion for this bounded fixture grid.
@@ -136,11 +142,28 @@ fn reference() -> Reference {
         .iter()
         .map(|&o| meshes[0].intersects(&meshes[1], point(o)).hit.is_some())
         .collect();
+    let shape_cases: [_; 2] = core::array::from_fn(|i| shape_cases::model_cases(&meshes[i]));
+    let capsules = core::array::from_fn(|i| {
+        shape_cases[i]
+            .capsules
+            .iter()
+            .map(|capsule| meshes[i].intersects_capsule(capsule).hit.is_some())
+            .collect()
+    });
+    let obbs = core::array::from_fn(|i| {
+        shape_cases[i]
+            .obbs
+            .iter()
+            .map(|obb| meshes[i].intersects_obb(obb).hit.is_some())
+            .collect()
+    });
     Reference {
         rays,
         hits,
         offsets,
         pairs,
+        capsules,
+        obbs,
     }
 }
 
@@ -196,6 +219,63 @@ fn build_time<T: RealScalar>(triangles: &[Tri3<T>], samples: usize) {
 fn accumulate(sum: &mut QueryStats, x: QueryStats) {
     sum.bounds_tests += x.bounds_tests;
     sum.triangle_tests += x.triangle_tests;
+}
+
+/// Validates and measures one any-hit shape workload. Tree and flat witnesses
+/// can differ, so compare classification and separately test each witness. Pose
+/// preparation is outside timing; each measured query still forms its envelope.
+fn shape_benchmark<T: RealScalar, I>(
+    label: &str,
+    inputs: &[I],
+    tree: &AabbTree<T>,
+    baseline: &[bool],
+    batches: u32,
+    samples: usize,
+    query: impl Fn(&I) -> collision::aabb_tree::QueryResult<usize>,
+    flat: impl Fn(&I) -> collision::aabb_tree::QueryResult<usize>,
+    witness: impl Fn(&I, &Tri3<T>) -> bool,
+) {
+    let (mut hits, mut changes, mut root_rejections) = (0, 0, 0);
+    let (mut tree_work, mut flat_work) = (QueryStats::default(), QueryStats::default());
+    for (i, input) in inputs.iter().enumerate() {
+        let actual = query(input);
+        let expected = flat(input);
+        assert_eq!(
+            actual.hit.is_some(),
+            expected.hit.is_some(),
+            "{} pose {}",
+            label,
+            i
+        );
+        for id in [actual.hit, expected.hit].iter().flatten() {
+            assert!(witness(
+                input,
+                tree.triangle(*id).expect("valid triangle witness")
+            ));
+        }
+        hits += actual.hit.is_some() as usize;
+        changes += (actual.hit.is_some() != baseline[i]) as usize;
+        root_rejections += (actual.hit.is_none() && actual.stats.bounds_tests == 1) as usize;
+        accumulate(&mut tree_work, actual.stats);
+        accumulate(&mut flat_work, expected.stats);
+    }
+    assert!(hits > 0 && hits < inputs.len());
+    println!("{label} poses={} hits={} root_rejections={} acceleration_mismatches=0 vs_f32_hit_changes={}",inputs.len(),hits,root_rejections,changes);
+    println!(
+        "mean work/{label}: tree bounds={:.1} triangles={:.1}; flat bounds={:.1} triangles={:.1}",
+        tree_work.bounds_tests as f64 / inputs.len() as f64,
+        tree_work.triangle_tests as f64 / inputs.len() as f64,
+        flat_work.bounds_tests as f64 / inputs.len() as f64,
+        flat_work.triangle_tests as f64 / inputs.len() as f64
+    );
+    measure(
+        &format!("tree {label}/soup"),
+        inputs,
+        batches,
+        samples,
+        query,
+    );
+    measure(&format!("flat {label}/soup"), inputs, 1, samples, flat);
 }
 
 /// Validates acceleration against flat traversal, then reports hit/ID/parameter
@@ -266,6 +346,29 @@ fn backend<T: RealScalar + TryCastFrom<f64> + Debug>(
         measure("flat nearest ray", &rays, 1, samples, |r| {
             tree.brute_raycast(r)
         });
+        let cases = shape_cases::model_cases(tree);
+        shape_benchmark(
+            "capsule",
+            &cases.capsules,
+            tree,
+            &reference.capsules[model],
+            batches,
+            samples,
+            |q| tree.intersects_capsule(q),
+            |q| tree.brute_intersects_capsule(q),
+            collision::capsule_triangle,
+        );
+        shape_benchmark(
+            "OBB",
+            &cases.obbs,
+            tree,
+            &reference.obbs[model],
+            batches,
+            samples,
+            |q| tree.intersects_obb(q),
+            |q| tree.brute_intersects_obb(q),
+            collision::box_triangle,
+        );
     }
     let offsets: Vec<_> = reference.offsets.iter().copied().map(point::<T>).collect();
     let (mut hits, mut changes, mut root_rejections) = (0, 0, 0);

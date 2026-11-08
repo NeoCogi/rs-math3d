@@ -50,6 +50,8 @@ Run `cargo run --release --example mesh_bench -- 200 7` for an AABB tree over
 Utah Teapot and Stanford Bunny triangle soups, comparing `f32`, S15.16 and S31.32
 nearest-ray and mesh/mesh queries. The [triangle-soup guide](docs/triangle-soup.md)
 describes construction, offline fixtures, correctness checks and measured results.
+The same harness also measures tilted capsule and rotated OBB queries against
+both triangle trees, including flat-reference and cross-scalar comparisons.
 
 The [const-selected CORDIC experiment](docs/cordic.md) compares
 `angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with

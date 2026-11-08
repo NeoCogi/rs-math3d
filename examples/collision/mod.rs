@@ -34,7 +34,12 @@
 //! Every intermediate must fit, including squared distances and products of dot
 //! products. Fixed-point divisions and projections must retain enough precision;
 //! rounding can change decisions near contact or parallelism. This is a narrow
-//! phase experiment, without contact manifolds, dynamics, broad phase or CCD.
+//! phase experiment, without contact manifolds, dynamics or CCD. The optional
+//! static soup tree allocates during construction; its queries do not allocate.
+
+// Consumers select different example workloads from this shared module.
+#[allow(dead_code)]
+pub mod aabb_tree;
 
 use rs_math3d::{CrossProduct, RealScalar, Sphere3, Tri3, Vector, Vector3};
 

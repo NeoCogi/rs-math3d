@@ -5,9 +5,12 @@ discrete narrow phase, generic over `RealScalar`. It reuses `Sphere3` and `Tri3`
 and adds local `Obb` and `Capsule` types. It is a starting point for measuring a
 small physics engine; it does not add a supported collision API to the crate.
 
+The [static triangle-soup AABB tree](triangle-soup.md) adds accelerated nearest-ray
+and mesh/mesh surface-intersection queries using offline teapot/bunny fixtures.
+
 All ten unordered shape pairings return a boolean. Boundary contact counts as
 overlap in exact arithmetic. There are no contact points, normals, penetration
-depths, manifolds, broad phase, integration, constraint solver or continuous
+depths, manifolds, integration, constraint solver or continuous
 collision detection. Swapping arguments to a mixed pair means calling the same
 function with its documented shape order.
 

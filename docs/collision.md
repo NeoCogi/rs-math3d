@@ -59,3 +59,83 @@ capsule centerlines, triangle face piercing, box corner contacts, coplanar
 triangles, reversed winding and rigid transforms. Independent f64 references
 check segment-box distance by convex minimization and oblique box overlap by
 edge clipping, including misses requiring edge-cross axes.
+
+## Reproducing the benchmark
+
+```sh
+cargo run --release --example collision_bench -- 1000 7
+```
+
+Arguments are positive batch and sample counts (defaults: 200 and 5). Each
+batch contains 128 deterministic pairs: 64 overlaps and 64 separated pairs.
+Centers, box rotations and separation directions vary; capsule directions are
+nonparallel and triangle pairs intersect in different planes. Hits have ample
+overlap, and misses have ample separation. Boundary behavior belongs to the
+regressions, rather than determining which backend does more work in the timer.
+Every query checks its expected classification for all fixtures before timing.
+
+The harness monomorphizes the same algorithms for `f32`, `f64`, `Fixed<i32, 8>`,
+`Fixed<i32, 16>` and `Fixed<i64, 16>`. Input generation, conversion, box rotations,
+validation, allocation and reporting are outside timing. Each operation gets a
+warmup batch. Input references and outputs use `std::hint::black_box`; the measured
+loop contains no trait objects or shape dispatch. Results report median, minimum
+and maximum sample ns/query, including iteration and black-box overhead. These
+are batch throughput measurements, not dependent instruction latencies. With an
+even sample count the reported median is the upper middle sample. Fixture
+storage grows with scalar width, and query timing includes fixture loads.
+
+The scalar section separately measures add, multiply, divide, dot3, square root
+and the common trait's sine-plus-cosine expression. A final section measures the
+fused fixed `sin_cos` API. Compiler transformations, including possible fusion of
+floating sine/cosine, remain enabled. Timings use bounded, positive scalar inputs;
+they do not characterize arbitrary input magnitudes or branch distributions.
+
+The example requires `std` for the timer and floating baselines. The collision
+module itself has no `std` dependency; its fixed-only integration tests run
+without a floating analytic backend. For bare-metal ARMv5/RISC-V, reuse the module
+and replace the hosted timer and input setup with the target's counter/harness.
+No ARM or RISC-V Rust target runtime was installed for this measurement.
+
+## Host baseline, 2026-11-08
+
+Intel Core Ultra 7 155H, x86_64 Linux, pinned to logical CPU 0; rustc 1.98.1
+(`48a229cea`, LLVM 22.1.8), default release profile and default `std` feature.
+Command: `taskset -c 0 cargo run --release --offline --example collision_bench -- 1000 7`.
+No custom `RUSTFLAGS`, LTO or target CPU selection was used. Each sample measures
+128,000 queries per row. The full ranges and scalar results are retained in the
+[raw output](benchmarks/collision-x86_64.txt).
+
+Median nanoseconds per overlap query:
+
+| Pair | f32 | f64 | S23.8 / i32 | S15.16 / i32 | S47.16 / i64 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Sphere / sphere | 1.26 | 1.17 | 2.40 | 2.40 | 3.75 |
+| Sphere / capsule | 3.43 | 3.29 | 15.32 | 16.14 | 18.67 |
+| Sphere / box | 3.11 | 2.93 | 9.26 | 9.30 | 12.26 |
+| Sphere / triangle | 8.13 | 7.81 | 29.24 | 30.19 | 29.83 |
+| Capsule / capsule | 8.69 | 8.33 | 34.35 | 36.04 | 37.37 |
+| Capsule / box | 18.62 | 18.30 | 48.49 | 49.49 | 56.64 |
+| Capsule / triangle | 38.09 | 36.49 | 119.48 | 122.95 | 123.81 |
+| Box / box | 35.43 | 36.52 | 193.59 | 199.13 | 203.01 |
+| Box / triangle | 38.15 | 36.93 | 154.76 | 156.19 | 147.42 |
+| Triangle / triangle | 63.44 | 59.66 | 203.71 | 193.48 | 184.46 |
+
+S15.16 is approximately 1.9–5.6 times the f32 query cost on this workload.
+Fixed addition is similar to float addition in the isolated throughput test;
+fixed multiplication, division, rounding and widened accumulation add cost.
+The experiment does not isolate the contribution of each mechanism, so the
+collision ratios cannot be attributed solely to `i128`.
+
+Median fused fixed `sin_cos` is 254–255 ns across these formats. The common
+sine-plus-cosine expression is approximately 503–509 ns for fixed versus 1.77 ns
+for f32 and 5.10 ns for f64 on this bounded input distribution. The current
+shared 97-step Q96 implementation explains why lower fractional precision does
+not buy fewer CORDIC iterations. See [working width and embedded performance](fixed-point.md#working-width-and-embedded-performance).
+
+This is a repeatable example workload, not an engine frame-time estimate or a
+cross-target ranking. It excludes body updates, collision candidate generation,
+contact generation, constraints and memory traffic from a large scene. CPU
+frequency, scheduling, compiler, collision distribution and scene scale matter.
+ARMv5 and RV32/RV64 may use different instruction sequences or software routines;
+floating hardware and integer multiply/divide support must be evaluated on the
+actual core before choosing a representation.

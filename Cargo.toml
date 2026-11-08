@@ -24,6 +24,10 @@ libm = { version = "0.2", optional = true }
 name = "inverse_modes"
 required-features = ["std"]
 
+[[example]]
+name = "collision_bench"
+required-features = ["std"]
+
 [features]
 # Hosted applications, including `#![no_std]` crates that can explicitly link
 # Rust's standard library, use its floating-point operations by default.

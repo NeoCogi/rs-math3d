@@ -41,6 +41,11 @@ The fixed reciprocal retains guard precision even if scalar `1/det` rounds to ze
 Run `cargo run --release --example inverse_modes` to compare both on your target,
 or `cargo run --no-default-features --example fixed_scene` for a fixed-only scene.
 
+Run `cargo run --release --example collision_bench -- 1000 7` to compare all ten
+pairings of oriented boxes, spheres, capsules and triangles using `f32`, `f64`,
+S23.8, S15.16 and S47.16. The [collision experiment](docs/collision.md) documents
+the unchecked kernels, numerical limits, timing methodology and host results.
+
 Fixed-count numeric kernels use explicit expansion for matrix dimensions, vector
 reductions, geometry queries and CORDIC steps. Run
 `python3 tools/check_unrolled_codegen.py` to check optimized host control flow;

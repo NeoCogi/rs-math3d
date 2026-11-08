@@ -334,6 +334,41 @@ Constants and independent references are reproducible with
 `python3 tools/generate_fixed_constants.py`. Python Decimal is development
 tooling only; fixed runtime calculations do not depend on floats or `libm`.
 
+### Working width and embedded performance
+
+`Fixed<R, F>` is generic over storage and scale; its analytic implementation is
+currently shared Q96 CORDIC in `i128`, with 97 rotation steps. That width preserves
+guard bits for the highest-precision `i64` formats and the documented accuracy
+checks. It is not a claim that the processor has a native 128-bit integer ALU.
+LLVM can split unsupported integer operations into smaller operations; see its
+[type legalization documentation](https://llvm.org/docs/CodeGenerator.html#selectiondag-legalizetypes-phase).
+Depending on the operation and target, software support can dominate the cost.
+
+A smaller CORDIC working type and a shorter iteration schedule are reasonable
+future optimizations for lower-precision formats. The type, fractional working
+precision, iteration count, gain, angle table and error bounds must be selected
+together. Making only the integer type generic would permit invalid combinations
+and would not automatically preserve the accuracy contract. An internal
+associated working type selected by format would keep those choices coherent.
+This experiment does not change that contract or add a working-type parameter.
+
+Full-range angle reduction is separate from rotation: the current reduction
+shifts the input to Q64 in `i128` before taking the remainder. Simply substituting
+`i64` would overflow. Tangent and arc cosine also have their own guarded division
+and square-root requirements. Beyond analytics, ordinary scalar division and
+dot/cross accumulation use widened `i128`/`u128` arithmetic too. A single `i32`
+product fits `i64`, but three worst-case signed `i32` products can sum to `3*2^62`,
+which exceeds positive `i64`. A narrower accumulator therefore needs either a
+bounded-input contract or an algorithm preserving the existing rounding/range
+semantics; it cannot silently wrap early.
+
+Use the [collision benchmark](collision.md) to separate scalar arithmetic,
+square root and trigonometry from narrow-phase queries. It includes fused fixed
+`sin_cos` measurements as well as the common trait's `sin` plus `cos` expression.
+None of its overlap kernels calls CORDIC. On ARMv5 or RISC-V, measure on the
+actual core with its compiler, multiplication/division support and floating-point
+extensions; the host results do not predict those timings.
+
 ## Backend-free builds
 
 Fixed analytic math is allocation-free and works with `core` alone:

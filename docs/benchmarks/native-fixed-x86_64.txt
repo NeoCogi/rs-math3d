@@ -1,0 +1,157 @@
+Native fixed default host baseline, 2026-11-08 (America/Toronto)
+Implementation: f4dddfa, native-fixed-rust-tools
+CPU: Intel Core Ultra 7 155H, pinned logical CPU 0
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01), LLVM 22.1.8
+Host: x86_64-unknown-linux-gnu; default std/release; no custom RUSTFLAGS/LTO/target-cpu.
+Timing command: taskset -c 0 cargo run --release --offline --example mesh_bench -- 200 7
+Precision command: cargo run --release --offline --manifest-path tools/Cargo.toml --bin fixed-precision
+Multiply/fused outputs floor-shift; division and prepared reciprocals truncate toward zero.
+Both checked and ordinary arithmetic use this contract. OBB signed-end bounds included.
+Conversion and analytic nearest-even rules retained. Setup excluded from query timers.
+
+Static triangle-soup AABB tree; leaf_size=4; 200 tree batches x 7 samples
+Flat ray timings use 1 batch/sample; flat mesh timing uses 1 batch/1 sample. Both traversals use a soup AABB prefilter; counters are included.
+
+f32
+Utah teapot: triangles=6320 nodes=4095 depth=12 reserved=659136 bytes
+build median=1.289 [1.264, 1.344] ms
+rays=448 hits=71 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=0.000000e0
+mean work/ray: tree bounds=17.4 triangles=1.19; flat bounds=1496.4 triangles=1.19
+tree nearest ray                 98.65 [97.80, 100.00] ns/query
+flat nearest ray               4788.00 [4514.77, 5138.16] ns/query
+capsule poses=264 hits=164 root_rejections=14 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/capsule: tree bounds=33.7 triangles=3.6; flat bounds=3782.1 triangles=3.8
+tree capsule/soup               485.83 [473.28, 521.95] ns/query
+flat capsule/soup              3110.17 [3038.62, 3332.79] ns/query
+OBB poses=264 hits=166 root_rejections=15 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/OBB: tree bounds=39.6 triangles=5.9; flat bounds=3739.0 triangles=5.3
+tree OBB/soup                   260.62 [256.82, 270.85] ns/query
+flat OBB/soup                  2725.44 [2717.26, 2813.70] ns/query
+Stanford bunny: triangles=3851 nodes=2047 depth=11 reserved=376556 bytes
+build median=0.630 [0.625, 0.723] ms
+rays=448 hits=128 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=0.000000e0
+mean work/ray: tree bounds=28.5 triangles=1.72; flat bounds=1806.2 triangles=1.72
+tree nearest ray                189.76 [182.63, 199.56] ns/query
+flat nearest ray               8469.43 [8457.40, 8580.19] ns/query
+capsule poses=264 hits=138 root_rejections=11 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/capsule: tree bounds=33.1 triangles=2.4; flat bounds=2284.6 triangles=2.2
+tree capsule/soup               330.11 [321.68, 369.58] ns/query
+flat capsule/soup              4832.76 [4800.03, 4926.28] ns/query
+OBB poses=264 hits=141 root_rejections=10 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/OBB: tree bounds=35.2 triangles=3.1; flat bounds=2307.7 triangles=2.6
+tree OBB/soup                   167.82 [166.84, 174.43] ns/query
+flat OBB/soup                  4820.02 [4790.92, 5335.13] ns/query
+teapot/bunny poses=12 hits=8 root_rejections=3 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/pose: tree bounds=380.5 triangles=27.5; flat bounds=4434181.9 triangles=10.2
+tree mesh/mesh                 1815.25 [1805.33, 1978.00] ns/query
+flat mesh/mesh (1 sample)  10318858.75 [10318858.75, 10318858.75] ns/query
+
+S15.16 (i32)
+Utah teapot: triangles=6320 nodes=4095 depth=12 reserved=659136 bytes
+build median=0.859 [0.851, 0.910] ms
+rays=448 hits=71 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=2.441406e-3
+mean work/ray: tree bounds=17.4 triangles=1.19; flat bounds=1496.4 triangles=1.19
+tree nearest ray                121.21 [118.60, 127.41] ns/query
+flat nearest ray               5776.47 [5761.77, 6131.70] ns/query
+capsule poses=264 hits=164 root_rejections=14 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/capsule: tree bounds=33.7 triangles=3.6; flat bounds=3782.1 triangles=3.8
+tree capsule/soup               660.97 [645.20, 699.96] ns/query
+flat capsule/soup              2458.35 [2441.26, 2598.74] ns/query
+OBB poses=264 hits=166 root_rejections=15 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/OBB: tree bounds=39.6 triangles=5.9; flat bounds=3739.0 triangles=5.3
+tree OBB/soup                   287.38 [283.10, 299.00] ns/query
+flat OBB/soup                  2143.35 [2126.48, 2252.77] ns/query
+Stanford bunny: triangles=3851 nodes=2047 depth=11 reserved=376556 bytes
+build median=0.438 [0.430, 0.547] ms
+rays=448 hits=128 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=4.692078e-4
+mean work/ray: tree bounds=28.5 triangles=1.72; flat bounds=1806.2 triangles=1.72
+tree nearest ray                224.59 [220.57, 237.62] ns/query
+flat nearest ray               8341.48 [8226.76, 8767.12] ns/query
+capsule poses=264 hits=138 root_rejections=11 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/capsule: tree bounds=33.1 triangles=2.4; flat bounds=2284.6 triangles=2.2
+tree capsule/soup               481.14 [457.19, 527.51] ns/query
+flat capsule/soup              4893.78 [4824.81, 4975.86] ns/query
+OBB poses=264 hits=141 root_rejections=10 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/OBB: tree bounds=35.2 triangles=3.1; flat bounds=2307.7 triangles=2.6
+tree OBB/soup                   185.86 [182.48, 193.48] ns/query
+flat OBB/soup                  4530.95 [4499.33, 4569.31] ns/query
+teapot/bunny poses=12 hits=8 root_rejections=3 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/pose: tree bounds=380.5 triangles=27.5; flat bounds=4434181.9 triangles=10.2
+tree mesh/mesh                 2079.28 [2042.23, 2091.88] ns/query
+flat mesh/mesh (1 sample)  15771100.25 [15771100.25, 15771100.25] ns/query
+
+S31.32 (i64)
+Utah teapot: triangles=6320 nodes=4095 depth=12 reserved=1136640 bytes
+build median=0.781 [0.770, 0.964] ms
+rays=448 hits=71 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=4.363712e-6
+mean work/ray: tree bounds=17.4 triangles=1.19; flat bounds=1496.4 triangles=1.19
+tree nearest ray                236.51 [234.29, 242.66] ns/query
+flat nearest ray               9140.64 [9083.37, 9341.04] ns/query
+capsule poses=264 hits=164 root_rejections=14 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/capsule: tree bounds=33.7 triangles=3.6; flat bounds=3782.1 triangles=3.8
+tree capsule/soup               912.19 [903.36, 962.76] ns/query
+flat capsule/soup              3145.92 [2911.88, 3599.20] ns/query
+OBB poses=264 hits=166 root_rejections=15 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/OBB: tree bounds=39.6 triangles=5.9; flat bounds=3739.0 triangles=5.3
+tree OBB/soup                   351.41 [346.62, 378.09] ns/query
+flat OBB/soup                  2575.59 [2486.92, 2759.70] ns/query
+Stanford bunny: triangles=3851 nodes=2047 depth=11 reserved=656768 bytes
+build median=0.484 [0.475, 0.557] ms
+rays=448 hits=128 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=3.135763e-6
+mean work/ray: tree bounds=28.5 triangles=1.72; flat bounds=1806.2 triangles=1.72
+tree nearest ray                429.82 [418.11, 490.05] ns/query
+flat nearest ray              12887.18 [12609.82, 13321.10] ns/query
+capsule poses=264 hits=138 root_rejections=11 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/capsule: tree bounds=33.1 triangles=2.4; flat bounds=2284.6 triangles=2.2
+tree capsule/soup               644.89 [629.36, 649.54] ns/query
+flat capsule/soup              4901.09 [4872.86, 5079.72] ns/query
+OBB poses=264 hits=141 root_rejections=10 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/OBB: tree bounds=35.2 triangles=3.1; flat bounds=2307.7 triangles=2.6
+tree OBB/soup                   232.26 [221.69, 246.21] ns/query
+flat OBB/soup                  4805.21 [4659.03, 4941.61] ns/query
+teapot/bunny poses=12 hits=8 root_rejections=3 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/pose: tree bounds=380.5 triangles=27.5; flat bounds=4434181.9 triangles=10.2
+tree mesh/mesh                 2206.98 [2200.61, 2257.70] ns/query
+flat mesh/mesh (1 sample)  15157806.50 [15157806.50, 15157806.50] ns/query
+
+Exact-rational errors (quanta), signed drift and geometric checks
+error,s15,multiply,100000,-4.976121443176e-1,4.976121443176e-1,5.750718893929e-1,9.999694824219e-1
+error,s15,divide,87253,-2.077332040434e-3,5.002775680583e-1,5.777169421648e-1,9.999701251755e-1
+error,s15,dot,100000,-4.990568919373e-1,4.990568919373e-1,5.762620699852e-1,9.999847412109e-1
+error,s15,cross,300000,-4.992340436300e-1,4.992340436300e-1,5.765813720540e-1,9.999847412109e-1
+error,s15,negative_multiply,49859,-4.971755598591e-1,4.971755598591e-1,5.746109706502e-1,9.999694824219e-1
+error,s15,cross_antisymmetry,300000,-9.999466666667e-1,9.999466666667e-1,9.999733329778e-1,1.000000000000e0
+drift,s15,0.000000000000e0,-1.525878906250e-1,8.390285074711e-2
+error,s31,multiply,100000,-4.996847726768e-1,4.996847726768e-1,5.768964897585e-1,9.999866262078e-1
+error,s31,divide,87437,3.863955095665e-3,5.015248278995e-1,5.786916215282e-1,9.999957063858e-1
+error,s31,dot,100000,-4.988404667189e-1,4.988404667189e-1,5.761268011803e-1,9.999757241458e-1
+error,s31,cross,300000,-5.002488835252e-1,5.002488835252e-1,5.776870486795e-1,9.999985240865e-1
+error,s31,negative_multiply,50149,-4.987023621897e-1,4.987023621897e-1,5.763253615420e-1,9.999866262078e-1
+error,s31,cross_antisymmetry,300000,-1.000000000000e0,1.000000000000e0,1.000000000000e0,1.000000000000e0
+drift,s31,8.333241567016e-2,-8.333474397659e-2,8.333332727974e-2
+
+Boundary cases: count,false_positive,false_negative
+s15/capsule: 102,8,0
+s15/obb: 102,0,0
+s31/capsule: 102,8,0
+s31/obb: 102,0,0
+
+Geometry vs f64: count,hit_changes,witness_changes,paired_rays,max_parameter_delta,rms_parameter_delta
+f32/bunny/capsule: 264,0,0,0,0.000000000000e0,0.000000000000e0
+f32/bunny/obb: 264,0,0,0,0.000000000000e0,0.000000000000e0
+f32/bunny/ray: 448,0,0,128,3.135981224034e-6,1.172932249480e-6
+f32/teapot/capsule: 264,0,0,0,0.000000000000e0,0.000000000000e0
+f32/teapot/obb: 264,0,0,0,0.000000000000e0,0.000000000000e0
+f32/teapot/ray: 448,0,0,71,4.363606191049e-6,1.261036450131e-6
+s15/bunny/capsule: 264,0,0,0,0.000000000000e0,0.000000000000e0
+s15/bunny/obb: 264,0,0,0,0.000000000000e0,0.000000000000e0
+s15/bunny/ray: 448,0,0,128,4.671430213925e-4,7.078022917229e-5
+s15/teapot/capsule: 264,0,0,0,0.000000000000e0,0.000000000000e0
+s15/teapot/obb: 264,0,0,0,0.000000000000e0,0.000000000000e0
+s15/teapot/ray: 448,0,0,71,2.440040415369e-3,4.055093333835e-4
+s31/bunny/capsule: 264,0,0,0,0.000000000000e0,0.000000000000e0
+s31/bunny/obb: 264,0,0,0,0.000000000000e0,0.000000000000e0
+s31/bunny/ray: 448,0,0,128,2.290434508723e-10,1.378680424955e-10
+s31/teapot/capsule: 264,0,0,0,0.000000000000e0,0.000000000000e0
+s31/teapot/obb: 264,0,0,0,0.000000000000e0,0.000000000000e0
+s31/teapot/ray: 448,0,0,71,2.300808432665e-10,1.334187535030e-10

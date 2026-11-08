@@ -34,7 +34,35 @@ below. Those adaptation costs are included in the historical native measurements
 The [Rust developer tools guide](../tools/README.md) covers reproduction of
 constants, independent references, pinned mesh data and the LLVM codegen audit.
 
-## Host results, 2026-11-08
+## Native default baseline, 2026-11-08
+
+The supported native implementation (`f4dddfa`) was rerun on the same pinned
+x86_64 host with the default release/std configuration, 200 batches and seven
+samples. Median ns/query:
+
+| Query | f32 | S15.16 / i32 | S31.32 / i64 |
+| --- | ---: | ---: | ---: |
+| capsule / teapot | 485.83 | 660.97 | 912.19 |
+| capsule / bunny | 330.11 | 481.14 | 644.89 |
+| OBB / teapot | 260.62 | 287.38 | 351.41 |
+| OBB / bunny | 167.82 | 185.86 | 232.26 |
+
+The [native raw baseline](benchmarks/native-fixed-x86_64.txt) retains ranges,
+flat comparisons, work counters, exact-rational errors, signed integration,
+near-contact classifications and per-backend f64 comparisons. Its complete
+precision CSV matches the selected native experiment byte for byte. All 7,808
+geometric records were checked, including the f64 reference itself; the other
+backends have zero sampled hit or witness changes relative to it. Capsule
+near-contact false positives remain 8/102 per fixed format, with no false
+negatives in that constructed set. ARMv5/RISC-V timing remains unmeasured.
+
+The completed default passes 156 library unit, 42 integration and 36 example
+tests; the fixed-only suite and 24 doctests also pass. The Rust tools pass 27
+tests. The codegen audit verifies 65 consumers, 14 shared wide chunks and 28
+narrow chunks. Mesh reproduction retains both binary SHA256 values, and the
+independent generator reproduces its output at both 512 and 768 working bits.
+
+## Historical policy comparison, 2026-11-08
 
 These measurements use an Intel Core Ultra 7 155H, pinned logical CPU 0,
 `rustc 1.98.1 (48a229cea 2026-09-01)` with LLVM 22.1.8 on x86_64 Linux.

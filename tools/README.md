@@ -4,6 +4,9 @@ Run these from any directory by supplying the path to `tools/Cargo.toml`.
 The tools are a separate hosted package; the math library keeps its existing
 dependencies and `no_std` support.
 
+Repository policy: Python tooling is not permitted. Keep developer executables
+in this Rust package and document any host utility or native-library requirement.
+
 | Tool | Purpose |
 | --- | --- |
 | `check-unrolled-codegen` | Compiles public consumers and audits LLVM CFGs and CORDIC operand widths. |

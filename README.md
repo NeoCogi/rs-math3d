@@ -52,8 +52,8 @@ nearest-ray and mesh/mesh queries. The [triangle-soup guide](docs/triangle-soup.
 describes construction, offline fixtures, correctness checks and measured results.
 The same harness also measures tilted capsule and rotated OBB queries against
 both triangle trees, including flat-reference and cross-scalar comparisons.
-The [rounding-policy experiment](docs/fixed-rounding.md) compares optimized
-nearest-even with native-style shifts/division, including timing, bias and contacts.
+The [arithmetic-policy selection](docs/fixed-rounding.md) records the native
+default's timings, precision and contact behavior alongside the earlier comparison.
 
 The [const-selected CORDIC experiment](docs/cordic.md) compares
 `angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with

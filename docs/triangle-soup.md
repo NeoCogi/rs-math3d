@@ -161,6 +161,10 @@ or a global precision guarantee.
 
 ## Initial ray/mesh results, 2026-11-08
 
+These initial measurements predate the native arithmetic default. See the
+[selected native baseline](fixed-rounding.md#native-default-baseline-2026-11-08)
+for the current policy's timings and precision checks.
+
 Intel Core Ultra 7 155H, x86_64 Linux, pinned logical CPU 0; rustc 1.98.1
 (`48a229cea`, LLVM 22.1.8), default release profile and `std` feature. No custom
 build flags, LTO or CPU selection were supplied. Command:

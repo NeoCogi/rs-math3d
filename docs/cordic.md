@@ -110,7 +110,7 @@ reference overflows, differences from Q96, and worst-case raw inputs. The Q96
 path is measured against the same oracle, rather than treated as exact truth.
 Results outside destination range are counted separately from numerical error.
 
-## Host results, 2026-11-08
+## Initial width comparison, 2026-11-08
 
 Intel Core Ultra 7 155H, x86_64 Linux, pinned logical CPU 0, rustc 1.98.1
 (`48a229cea`, LLVM 22.1.8), default release profile and `std` feature, without
@@ -171,3 +171,36 @@ option for F<=48. Keep tangent and current automatic format selection on Q96.
 Changing defaults warrants target measurements and stronger analysis across
 the remaining wide formats. ARMv5/RISC-V timings were not measured, and this
 implementation still requires wide arithmetic outside the CORDIC step core.
+
+## Shared engine verification, 2026-11-08
+
+The duplicate engines were consolidated after the initial width comparison.
+Paired runs use the same host, pinned CPU, compiler, profile, input sets and
+`1000 7` arguments described above. The original implementation is `c9a0f71`;
+the shared generic engine is `83e5c5e`. Full paired records retain all timing
+ranges and precision statistics: [before](benchmarks/cordic-shared-before-x86_64.txt)
+and [after](benchmarks/cordic-shared-after-x86_64.txt).
+
+Representative median ns/call:
+
+| Storage / F | Working width | Operation | Before | Shared engine |
+| --- | ---: | --- | ---: | ---: |
+| i32 / 16 | 64 | bounded sin_cos | 57.94 | 57.89 |
+| i32 / 16 | 128 | bounded sin_cos | 252.79 | 252.25 |
+| i32 / 16 | 64 | acos | 91.97 | 91.74 |
+| i32 / 16 | 128 | acos | 376.81 | 377.76 |
+| i64 / 48 | 64 | bounded sin_cos | 100.73 | 101.52 |
+| i64 / 48 | 128 | bounded sin_cos | 253.26 | 252.40 |
+
+Median changes across all 56 timing rows range from -4.2% to +2.0%; this paired
+host run shows no material performance regression. All 56 precision summary
+rows are byte-identical, including maximum/RMS errors, counts, range decisions
+and worst-input fields. Existing Decimal and exhaustive i16 checks also pass.
+The internal typed iterative references additionally preserve every output
+guard bit on their Q96 grid and all 47 supported i64 fractional scales.
+
+Code generation checks find 28 reached i64 chunks with no i128 arithmetic, and
+exactly fourteen shared i128 chunks reached by Q96 consumers at F=16,48,61.
+Both sets are acyclic. The shared implementation therefore retains compile-time
+word specialization, expanded schedules and Q96 sharing across formats. The
+previous tangent, sample-coverage and unmeasured-target limitations still apply.

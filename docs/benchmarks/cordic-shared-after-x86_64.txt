@@ -1,0 +1,146 @@
+Shared CORDIC engine verification, 2026-11-08 (America/Toronto)
+CPU: Intel Core Ultra 7 155H, pinned logical CPU 0
+Host: x86_64-unknown-linux-gnu
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01), LLVM 22.1.8
+Crate: rs-math3d 0.20.1, default std feature, default release profile
+Command: taskset -c 0 cargo run --release --offline --example cordic_bench -- 1000 7
+Both widths retain their previous precision policies, reduction/root/division boundaries.
+Setup and reference parsing are excluded; timings include loop/black_box overhead.
+No ARMv5 or RISC-V timings were measured.
+Implementation: 83e5c5e (after shared engine consolidation)
+
+Const-selected CORDIC; 256 inputs x 1000 batches x 7 samples
+Median [min, max]; includes loop/black_box overhead. Reduction/root/division retain wide arithmetic.
+
+Storage i32, F=8; working fraction=32 (i64), 96 (i128)
+i128 sin_cos bounded        251.38 [250.90, 255.81] ns/call
+i128 sin_cos full range     252.11 [251.71, 253.05] ns/call
+i128 acos                   374.17 [373.54, 375.52] ns/call
+i128 tan bounded            255.35 [253.83, 259.90] ns/call
+i64 sin_cos bounded          57.57 [57.40, 59.15] ns/call
+i64 sin_cos full range       57.45 [57.25, 59.08] ns/call
+i64 acos                     92.15 [91.78, 93.66] ns/call
+i64 tan bounded              61.99 [61.94, 65.50] ns/call
+Precision in destination quanta; independent Decimal references:
+sin i128: n= 383 max=4.998176e-1 RMS=2.615142e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-798982304
+cos i128: n= 383 max=4.995212e-1 RMS=2.745735e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-2147483626
+acos i128: n= 142 max=4.994600e-1 RMS=2.760332e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=180
+tan i128: n= 383 max=4.990537e-1 RMS=2.783691e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=1061277029
+sin i 64: n= 383 max=4.998176e-1 RMS=2.615142e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-798982304
+cos i 64: n= 383 max=4.995212e-1 RMS=2.745735e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-2147483626
+acos i 64: n= 142 max=4.994600e-1 RMS=2.760332e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=180
+tan i 64: n= 383 max=3.934405e1 RMS=2.029886e0 >1q=1 rejected=0 accepted_overflow=0 different_Q96=4 worst_input_raw=402526
+
+Storage i32, F=16; working fraction=32 (i64), 96 (i128)
+i128 sin_cos bounded        252.25 [251.45, 253.83] ns/call
+i128 sin_cos full range     252.93 [252.31, 254.58] ns/call
+i128 acos                   377.76 [376.00, 379.11] ns/call
+i128 tan bounded            254.67 [254.37, 254.98] ns/call
+i64 sin_cos bounded          57.89 [57.74, 60.81] ns/call
+i64 sin_cos full range       57.66 [57.43, 59.71] ns/call
+i64 acos                     91.74 [91.20, 94.43] ns/call
+i64 tan bounded              62.16 [62.03, 63.63] ns/call
+Precision in destination quanta; independent Decimal references:
+sin i128: n= 383 max=4.991980e-1 RMS=2.812522e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-2147483644
+cos i128: n= 383 max=4.937830e-1 RMS=2.683913e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1538882670
+acos i128: n= 165 max=4.979612e-1 RMS=2.902892e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=12718
+tan i128: n= 367 max=4.978082e-1 RMS=2.944441e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-2147483633
+sin i 64: n= 383 max=4.991980e-1 RMS=2.812522e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-2147483644
+cos i 64: n= 383 max=4.937830e-1 RMS=2.683913e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1538882670
+acos i 64: n= 165 max=4.979612e-1 RMS=2.902892e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=12718
+tan i 64: n= 367 max=4.664938e4 RMS=4.197144e3 >1q=15 rejected=0 accepted_overflow=0 different_Q96=15 worst_input_raw=102946
+
+Storage i32, F=29; working fraction=45 (i64), 96 (i128)
+i128 sin_cos bounded        237.98 [237.46, 239.13] ns/call
+i128 sin_cos full range     239.18 [238.91, 240.28] ns/call
+i128 acos                   376.35 [375.95, 378.55] ns/call
+i128 tan bounded            245.24 [244.45, 246.23] ns/call
+i64 sin_cos bounded          68.85 [68.73, 69.19] ns/call
+i64 sin_cos full range       68.76 [68.69, 70.08] ns/call
+i64 acos                    128.41 [128.30, 129.97] ns/call
+i64 tan bounded              73.01 [72.96, 73.69] ns/call
+Precision in destination quanta; independent Decimal references:
+sin i128: n= 355 max=4.998391e-1 RMS=2.780538e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1413609111
+cos i128: n= 355 max=4.998527e-1 RMS=2.852572e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=291162474
+acos i128: n= 165 max=4.895270e-1 RMS=2.824816e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=156453825
+tan i128: n= 310 max=4.975708e-1 RMS=2.830886e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1953256517
+sin i 64: n= 355 max=4.998391e-1 RMS=2.780538e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1413609111
+cos i 64: n= 355 max=4.998527e-1 RMS=2.852572e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=291162474
+acos i 64: n= 165 max=4.895270e-1 RMS=2.824816e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=156453825
+tan i 64: n= 310 max=4.975708e-1 RMS=2.830886e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1953256517
+
+Storage i64, F=16; working fraction=32 (i64), 96 (i128)
+i128 sin_cos bounded        252.13 [251.61, 253.09] ns/call
+i128 sin_cos full range     252.93 [252.24, 253.78] ns/call
+i128 acos                   377.08 [376.40, 379.47] ns/call
+i128 tan bounded            254.98 [254.13, 256.52] ns/call
+i64 sin_cos bounded          57.80 [57.62, 60.26] ns/call
+i64 sin_cos full range       57.15 [57.02, 59.74] ns/call
+i64 acos                     92.84 [92.13, 94.74] ns/call
+i64 tan bounded              61.91 [61.80, 62.64] ns/call
+Precision in destination quanta; independent Decimal references:
+sin i128: n= 383 max=5.010109e-1 RMS=2.835778e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=6139525852411381521
+cos i128: n= 383 max=4.995806e-1 RMS=2.709723e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1657602379572148502
+acos i128: n= 165 max=4.973907e-1 RMS=2.902255e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=3147
+tan i128: n= 383 max=8.026224e2 RMS=4.103002e1 >1q=11 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=5576907638420306687
+sin i 64: n= 383 max=5.010109e-1 RMS=2.835778e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=6139525852411381521
+cos i 64: n= 383 max=4.995806e-1 RMS=2.709723e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1657602379572148502
+acos i 64: n= 165 max=4.973907e-1 RMS=2.902255e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=3147
+tan i 64: n= 383 max=1.790124e7 RMS=9.426519e5 >1q=39 rejected=0 accepted_overflow=0 different_Q96=29 worst_input_raw=308831
+
+Storage i64, F=32; working fraction=48 (i64), 96 (i128)
+i128 sin_cos bounded        251.36 [250.70, 251.99] ns/call
+i128 sin_cos full range     252.36 [251.14, 254.49] ns/call
+i128 acos                   376.77 [376.69, 378.55] ns/call
+i128 tan bounded            254.89 [253.68, 259.93] ns/call
+i64 sin_cos bounded          84.90 [84.31, 87.16] ns/call
+i64 sin_cos full range       85.10 [84.84, 86.65] ns/call
+i64 acos                    134.93 [133.97, 138.34] ns/call
+i64 tan bounded              89.76 [89.06, 90.96] ns/call
+Precision in destination quanta; independent Decimal references:
+sin i128: n= 383 max=5.004094e-1 RMS=2.721418e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-2540171169063667542
+cos i128: n= 383 max=5.063590e-1 RMS=2.682900e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-9223372036854775796
+acos i128: n= 165 max=4.932621e-1 RMS=2.769886e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-4294967291
+tan i128: n= 359 max=4.346087e16 RMS=4.192062e15 >1q=38 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-9223372035823481483
+sin i 64: n= 383 max=5.004094e-1 RMS=2.721418e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-2540171169063667542
+cos i 64: n= 383 max=5.063590e-1 RMS=2.682900e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-9223372036854775796
+acos i 64: n= 165 max=4.932621e-1 RMS=2.769886e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-4294967291
+tan i 64: n= 359 max=4.347160e16 RMS=4.178973e15 >1q=38 rejected=0 accepted_overflow=0 different_Q96=21 worst_input_raw=-9223372035823481483
+
+Storage i64, F=44; working fraction=60 (i64), 96 (i128)
+i128 sin_cos bounded        251.37 [250.74, 252.18] ns/call
+i128 sin_cos full range     252.71 [251.55, 253.43] ns/call
+i128 acos                   377.59 [376.73, 379.37] ns/call
+i128 tan bounded            255.29 [254.01, 256.93] ns/call
+i64 sin_cos bounded         101.80 [101.17, 103.48] ns/call
+i64 sin_cos full range      100.76 [100.36, 102.20] ns/call
+i64 acos                    165.69 [165.28, 169.35] ns/call
+i64 tan bounded             102.72 [102.35, 103.53] ns/call
+Precision in destination quanta; independent Decimal references:
+sin i128: n= 383 max=5.027935e-1 RMS=2.544891e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=2711524644227083575
+cos i128: n= 383 max=5.028811e-1 RMS=2.780464e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-6102052009901919858
+acos i128: n= 165 max=4.962501e-1 RMS=2.797716e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-5706396957099
+tan i128: n= 355 max=1.654153e3 RMS=8.782744e1 >1q=16 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-2713329442100020863
+sin i 64: n= 383 max=5.027935e-1 RMS=2.544891e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=2711524644227083575
+cos i 64: n= 383 max=5.028811e-1 RMS=2.780464e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-6102052009901919858
+acos i 64: n= 165 max=4.962501e-1 RMS=2.797716e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-5706396957099
+tan i 64: n= 355 max=1.645153e3 RMS=8.734996e1 >1q=16 rejected=0 accepted_overflow=0 different_Q96=1 worst_input_raw=-2713329442100020863
+
+Storage i64, F=48; working fraction=60 (i64), 96 (i128)
+i128 sin_cos bounded        252.40 [250.81, 253.06] ns/call
+i128 sin_cos full range     253.28 [251.55, 255.84] ns/call
+i128 acos                   376.99 [375.98, 379.84] ns/call
+i128 tan bounded            255.11 [254.31, 256.61] ns/call
+i64 sin_cos bounded         101.52 [100.95, 104.64] ns/call
+i64 sin_cos full range      100.65 [100.35, 103.03] ns/call
+i64 acos                    166.42 [165.17, 168.44] ns/call
+i64 tan bounded             102.34 [101.90, 104.81] ns/call
+Precision in destination quanta; independent Decimal references:
+sin i128: n= 383 max=4.995715e-1 RMS=2.859749e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1461524103510932443
+cos i128: n= 383 max=5.100740e-1 RMS=2.752474e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-9223372036854775785
+acos i128: n= 165 max=4.955421e-1 RMS=2.911737e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=281474976710653
+tan i128: n= 355 max=5.236812e3 RMS=2.781355e2 >1q=12 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=4958598213558536327
+sin i 64: n= 383 max=4.995715e-1 RMS=2.859749e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-1461524103510932443
+cos i 64: n= 383 max=5.100740e-1 RMS=2.752474e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=-9223372036854775785
+acos i 64: n= 165 max=4.955421e-1 RMS=2.911737e-1 >1q=0 rejected=0 accepted_overflow=0 different_Q96=0 worst_input_raw=281474976710653
+tan i 64: n= 355 max=4.972812e3 RMS=2.640927e2 >1q=13 rejected=0 accepted_overflow=0 different_Q96=11 worst_input_raw=4958598213558536327

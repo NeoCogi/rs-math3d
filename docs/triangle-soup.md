@@ -89,3 +89,82 @@ ray/tree versus flat traversal, translated teapot/bunny overlap, input ID witnes
 and separated bounds. Tests also check balanced topology and parent containment,
 empty input, duplicate centers, invalid leaf sizes, malformed packets, nonfinite
 geometry and fixed overflow at the construction boundary.
+
+## Benchmark method
+
+```sh
+cargo run --release --example mesh_bench -- 200 7
+```
+
+Arguments are positive tree batch/sample counts (defaults: 20/5). The standalone
+hosted harness measures `f32`, `Fixed<i32,16>` (S15.16) and `Fixed<i64,32>`
+(S31.32). Setup and mesh decoding are excluded. Build measurements include
+validation, partitioning and allocation; input cloning and completed-tree
+destruction occur outside the build timer. Every tree uses four-triangle leaves.
+
+Each model receives 448 exact dyadic rays: six 8x8 orthographic grids plus an
+8x8 oblique grid. Origins, directions and stored ray parameterizations are the
+same in every backend. The teapot has 71 hits and the bunny 128 on this corpus.
+Twelve relative translations test teapot/bunny surface overlap: eight hit, three
+miss the whole-soup bounds, and one has overlapping soup bounds but no surface
+intersection. This is a static translation workload, without rotation/refits.
+
+Every query is compared against flat traversal before timing, warming both
+paths. Rays require identical hit ID and represented parameter within a backend;
+mesh pairs require the same hit/miss answer and can return different witnesses.
+The report separately counts hit/ID differences and parameter differences from
+f32. Both traversals have the same whole-soup prefilter and leaf predicates.
+Query timing includes work counters, iteration, result copying and `black_box`
+overhead; it measures warm batch throughput, not isolated cold-query latency.
+
+Accelerated queries use the requested batches/samples and report median/min/max
+ns/query. Flat rays use one batch per sample. Flat mesh/mesh uses one batch and
+one sample, because a miss with overlapping soup bounds can enumerate all
+24,338,320 triangle pairs. Its printed min/median/max are therefore identical
+and provide a reference cost, not a statistical estimate. Fixed-point and f32
+classification comparisons are also sample observations, not exact predicates
+or a global precision guarantee.
+
+## Host results, 2026-11-08
+
+Intel Core Ultra 7 155H, x86_64 Linux, pinned logical CPU 0; rustc 1.98.1
+(`48a229cea`, LLVM 22.1.8), default release profile and `std` feature. No custom
+build flags, LTO or CPU selection were supplied. Command:
+`taskset -c 0 cargo run --release --offline --example mesh_bench -- 200 7`.
+The [raw output](benchmarks/triangle-soup-x86_64.txt) retains ranges, construction
+times, storage and traversal counters. ARMv5/RISC-V timings were not measured.
+
+Accelerated median query times:
+
+| Query | f32 | S15.16 / i32 | S31.32 / i64 |
+| --- | ---: | ---: | ---: |
+| Teapot nearest ray | 99.07 ns | 190.93 ns | 233.16 ns |
+| Bunny nearest ray | 204.72 ns | 336.31 ns | 407.79 ns |
+| Teapot/bunny surface pair | 1.810 us | 2.777 us | 2.787 us |
+
+The tree improves f32 ray throughput by approximately 42–46x versus the flat
+reference; S15.16 improves by 31–38x. Flat ray medians are 4.55/8.53 us for f32
+teapot/bunny, and 7.35/10.59 us for S15.16. Tree work averages 17.4/28.5 bounds
+tests per ray versus 1,496.4/1,806.2 for flat traversal after the common soup
+prefilter. Narrow-phase work is the same, averaging 1.19/1.72 triangle tests.
+
+For mesh/mesh, average bounds work falls from approximately 4.43 million tests
+per pose to 380.5. The tree averages 27.5 triangle tests versus 10.2 for flat
+traversal, because the traversal orders find different witnesses. Flat costs
+are approximately 10.38 ms/pose for f32 and 15.86 ms for S15.16 in the single
+reference sample. Those large differences depend on the mixed hit/miss corpus,
+input ordering and early exits; they are not a general mesh-collision speedup.
+
+Tree construction medians are 1.379/0.630 ms for f32 teapot/bunny and 1.024/0.533
+ms for S15.16. Their tree layouts match: 4,095/2,047 nodes, depths 12/11 and
+659,136/376,556 reserved bytes. S31.32 uses 1,136,640/656,768 bytes. These byte
+counts exclude the benchmark's separate input/reference buffers and allocator
+overhead; they describe the tree's reserved owned buffers on this host.
+
+All three backends have zero acceleration mismatches. Their 896 ray hit/miss
+answers and hit IDs match f32, and all twelve mesh-pair classifications agree.
+S15.16's maximum parameter difference from f32 is 0.001680374 for the teapot and
+0.000310898 for the bunny. S31.32 differences are approximately 4.36e-6/3.14e-6.
+These are comparisons against f32, which also rounds; they are not absolute
+errors against an exact reference. Unscaled determinants can amplify fixed
+quantization beyond one scalar quantum, especially for small/near-parallel faces.

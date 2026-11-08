@@ -1,0 +1,69 @@
+Static triangle-soup AABB tree host baseline, 2026-11-08 (America/Toronto)
+CPU: Intel Core Ultra 7 155H, pinned logical CPU 0
+Host: x86_64-unknown-linux-gnu
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01), LLVM 22.1.8
+Crate: rs-math3d 0.20.1, default std feature, default release profile
+Tree implementation and pinned fixtures: 1351cf5
+Command: taskset -c 0 cargo run --release --offline --example mesh_bench -- 200 7
+No custom RUSTFLAGS, LTO, or target-cpu option supplied.
+Both traversals have a whole-soup AABB prefilter and identical leaf predicates.
+Setup/decoding/cloning are excluded from query timers. Work counters are included.
+Flat mesh/mesh uses a single reference sample; rays and accelerated queries use seven.
+No ARMv5/RISC-V timing was performed. See docs/triangle-soup.md for limits.
+
+Static triangle-soup AABB tree; leaf_size=4; 200 tree batches x 7 samples
+Flat ray timings use 1 batch/sample; flat mesh timing uses 1 batch/1 sample. Both traversals use a soup AABB prefilter; counters are included.
+
+f32
+Utah teapot: triangles=6320 nodes=4095 depth=12 reserved=659136 bytes
+build median=1.379 [1.278, 1.611] ms
+rays=448 hits=71 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=0.000000e0
+mean work/ray: tree bounds=17.4 triangles=1.19; flat bounds=1496.4 triangles=1.19
+tree nearest ray                 99.07 [97.05, 102.01] ns/query
+flat nearest ray               4552.19 [4544.24, 4657.82] ns/query
+Stanford bunny: triangles=3851 nodes=2047 depth=11 reserved=376556 bytes
+build median=0.630 [0.624, 0.731] ms
+rays=448 hits=128 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=0.000000e0
+mean work/ray: tree bounds=28.5 triangles=1.72; flat bounds=1806.2 triangles=1.72
+tree nearest ray                204.72 [202.62, 216.11] ns/query
+flat nearest ray               8525.02 [8457.49, 8730.15] ns/query
+teapot/bunny poses=12 hits=8 root_rejections=3 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/pose: tree bounds=380.5 triangles=27.5; flat bounds=4434181.9 triangles=10.2
+tree mesh/mesh                 1809.97 [1805.56, 1884.60] ns/query
+flat mesh/mesh (1 sample)  10377970.58 [10377970.58, 10377970.58] ns/query
+
+S15.16 (i32)
+Utah teapot: triangles=6320 nodes=4095 depth=12 reserved=659136 bytes
+build median=1.024 [1.018, 1.122] ms
+rays=448 hits=71 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=1.680374e-3
+mean work/ray: tree bounds=17.4 triangles=1.19; flat bounds=1496.4 triangles=1.19
+tree nearest ray                190.93 [188.00, 194.21] ns/query
+flat nearest ray               7345.23 [7315.39, 7449.98] ns/query
+Stanford bunny: triangles=3851 nodes=2047 depth=11 reserved=376556 bytes
+build median=0.533 [0.527, 0.625] ms
+rays=448 hits=128 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=3.108978e-4
+mean work/ray: tree bounds=28.5 triangles=1.72; flat bounds=1806.2 triangles=1.72
+tree nearest ray                336.31 [333.74, 347.36] ns/query
+flat nearest ray              10586.13 [10525.12, 10927.70] ns/query
+teapot/bunny poses=12 hits=8 root_rejections=3 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/pose: tree bounds=380.5 triangles=27.5; flat bounds=4434181.9 triangles=10.2
+tree mesh/mesh                 2777.28 [2763.28, 2861.52] ns/query
+flat mesh/mesh (1 sample)  15860453.25 [15860453.25, 15860453.25] ns/query
+
+S31.32 (i64)
+Utah teapot: triangles=6320 nodes=4095 depth=12 reserved=1136640 bytes
+build median=0.975 [0.964, 1.243] ms
+rays=448 hits=71 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=4.363712e-6
+mean work/ray: tree bounds=17.4 triangles=1.19; flat bounds=1496.4 triangles=1.19
+tree nearest ray                233.16 [228.83, 238.79] ns/query
+flat nearest ray               8729.44 [8669.97, 9765.79] ns/query
+Stanford bunny: triangles=3851 nodes=2047 depth=11 reserved=656768 bytes
+build median=0.552 [0.545, 0.578] ms
+rays=448 hits=128 acceleration_mismatches=0 vs_f32: hit_changes=0 id_changes=0 max_parameter_delta=3.135996e-6
+mean work/ray: tree bounds=28.5 triangles=1.72; flat bounds=1806.2 triangles=1.72
+tree nearest ray                407.79 [402.83, 414.37] ns/query
+flat nearest ray              12350.16 [12233.50, 12389.50] ns/query
+teapot/bunny poses=12 hits=8 root_rejections=3 acceleration_mismatches=0 vs_f32_hit_changes=0
+mean work/pose: tree bounds=380.5 triangles=27.5; flat bounds=4434181.9 triangles=10.2
+tree mesh/mesh                 2786.78 [2772.78, 2861.07] ns/query
+flat mesh/mesh (1 sample)  16406258.50 [16406258.50, 16406258.50] ns/query

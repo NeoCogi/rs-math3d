@@ -91,7 +91,9 @@ All fixed-size matrix/vector kernels remain explicitly expanded. The checked
 paths contain validation branches; the ordinary paths do not add them.
 Data-dependent pivot choices and geometric miss decisions remain necessary.
 Long public slices and convergence/search/parsing algorithms retain runtime
-iteration. CORDIC retains the seven statically selected chunks of expanded steps.
+iteration. Both CORDIC widths use one generic engine with sealed precision
+backends. Q96 retains seven statically selected chunks of expanded steps; the
+opt-in i64 backend selects three or four through const expressions.
 
 ## Choosing a boundary
 

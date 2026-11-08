@@ -99,6 +99,50 @@ def assert_acyclic(name, graph):
         raise AssertionError(f"Runtime control-flow cycle in {name}")
 
 
+def bodies_and_aliases(path):
+    """Read emitted bodies and LLVM aliases for backend-aware call traversal.
+
+    Generic chunks share their source names across word widths. Reachability
+    from concrete public probes identifies each specialization without relying
+    on compiler-specific hashes or assuming every i128 chunk is still emitted
+    in the library rather than in its downstream consumer.
+    """
+    bodies, aliases = {}, {}
+    name, body = None, []
+    for line in path.read_text().splitlines():
+        if line.startswith("define "):
+            name = re.search(r'@("[^"]+"|[^\s(]+)\(', line).group(1).strip('"')
+            body = [line]
+        elif name is not None:
+            body.append(line)
+            if line == "}":
+                bodies[name] = "\n".join(body)
+                name = None
+        elif line.startswith("@") and " alias " in line:
+            symbols = re.findall(r'@("[^"]+"|[^\s(),]+)', line)
+            aliases[symbols[0].strip('"')] = symbols[-1].strip('"')
+    return bodies, aliases
+
+
+def reachable_chunks(roots, bodies, aliases):
+    """Find concrete generic step chunks reached by one working-width policy."""
+    visited, chunks = set(), set()
+    pending = list(roots)
+    while pending:
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        if name in aliases:
+            pending.append(aliases[name])
+        elif name in bodies:
+            if "cordic_rotate_chunk" in name or "cordic_vectoring_chunk" in name:
+                chunks.add(name)
+            pending.extend(symbol.strip('"') for symbol in re.findall(
+                r'\b(?:call|invoke)\b[^\n]*?@("[^"]+"|[^\s(]+)\(', bodies[name]))
+    return chunks
+
+
 def main():
     """Compile public consumer probes and inspect them plus shared CORDIC code."""
     root = Path(__file__).resolve().parents[1]
@@ -126,14 +170,25 @@ def main():
             result = f"Result<{scalar},MathError>" if checked else scalar
             source.append(f"#[no_mangle] pub fn {name}(a: &Vector4<{scalar}>, b: &Vector4<{scalar}>) -> {result} {{ Vector4::{prefix}dot(a,b) }}")
             names.append(name)
+    narrow_roots, wide_roots = [], []
     for fractional in (8, 16, 29, 32, 44, 48):
         scalar = f"Fixed<i64,{fractional}>"
         name = f"unroll_cordic64_f{fractional}"
         source.append(f"#[no_mangle] pub fn {name}(x: {scalar}) -> ({scalar},{scalar}) {{ x.sin_cos_with::<64>() }}")
         names.append(name)
+        narrow_roots.append(name)
         # acos intentionally retains a convergent integer-root loop; only its
         # emitted vectoring chunks, not this whole wrapper, must be acyclic.
         source.append(f"#[no_mangle] pub fn cordic64_acos_f{fractional}(x: {scalar}) -> {scalar} {{ x.acos_with::<64>() }}")
+        narrow_roots.append(f"cordic64_acos_f{fractional}")
+    for fractional in (16, 48, 61):
+        scalar = f"Fixed<i64,{fractional}>"
+        name = f"unroll_cordic128_f{fractional}"
+        source.append(f"#[no_mangle] pub fn {name}(x: {scalar}) -> ({scalar},{scalar}) {{ x.sin_cos_with::<128>() }}")
+        names.append(name)
+        wide_roots.append(name)
+        source.append(f"#[no_mangle] pub fn cordic128_acos_f{fractional}(x: {scalar}) -> {scalar} {{ x.acos_with::<128>() }}")
+        wide_roots.append(f"cordic128_acos_f{fractional}")
     with tempfile.TemporaryDirectory(prefix="rs-math3d-unroll-codegen-") as temporary:
         temporary = Path(temporary)
         probe = temporary / "probes.rs"
@@ -156,37 +211,36 @@ def main():
                               "inverse_rows", "inverse_reciprocal", "checked_dot", "sum_products_pair"))]
         for name, graph in numeric_helpers:
             assert_acyclic(name, graph)
-        narrow_count = 0
-        body = None
-        for line in output.read_text().splitlines():
-            if line.startswith("define ") and any(marker in line for marker in (
-                    "cordic_rotate64_chunk", "cordic_vectoring64_chunk")):
-                body = line
-            elif body is not None:
-                body += "\n" + line
-                if line == "}":
-                    if re.search(r"\b(?:add|sub|mul|ashr|shl|lshr|sdiv|udiv|srem|urem)\b[^\n]*\bi128\b", body):
-                        raise AssertionError("i128 arithmetic leaked into i64 CORDIC chunk")
-                    body = None
-                    narrow_count += 1
-        narrow_graphs = [(name, graph) for name, graph in graphs.items()
-                         if "cordic_rotate64_chunk" in name or "cordic_vectoring64_chunk" in name]
-        if narrow_count < 6 or len(narrow_graphs) != narrow_count:
+        graphs.update(functions(library_ir))
+        bodies, aliases = bodies_and_aliases(output)
+        library_bodies, library_aliases = bodies_and_aliases(library_ir)
+        bodies.update(library_bodies)
+        aliases.update(library_aliases)
+        narrow_chunks = reachable_chunks(narrow_roots, bodies, aliases)
+        wide_chunks = reachable_chunks(wide_roots, bodies, aliases)
+        if len(narrow_chunks) < 6:
             raise AssertionError("Missing const-specialized i64 CORDIC chunks")
-        for name, graph in narrow_graphs:
-            assert_acyclic(name, graph)
-        library_graphs = functions(library_ir)
-        cordic_count = 0
-        for helper in ("cordic_rotate", "cordic_vectoring"):
-            matches = [(name, graph) for name, graph in library_graphs.items() if helper in name]
-            if not matches:
-                raise AssertionError(f"Missing shared CORDIC kernel: {helper}")
-            for name, graph in matches:
-                assert_acyclic(name, graph)
-            cordic_count += len(matches)
+        if len(wide_chunks) != 14:
+            raise AssertionError("Q96 probes must share one seven-chunk schedule per operation")
+        if narrow_chunks & wide_chunks:
+            raise AssertionError("Working widths unexpectedly share a numeric step specialization")
+        # Match the instruction's operand type, not an SSA value name that can
+        # contain an unrelated '.i128' inlining suffix on an i64 operation.
+        wide_arithmetic = re.compile(
+            r"\b(?:add|sub|mul|ashr|shl|lshr|sdiv|udiv|srem|urem)"
+            r"(?:\s+(?:nuw|nsw|exact))*\s+i128\b")
+        for name in narrow_chunks:
+            assert_acyclic(name, graphs[name])
+            match = wide_arithmetic.search(bodies[name])
+            if match:
+                raise AssertionError(f"i128 arithmetic leaked into i64 chunk {name}: {match.group()}")
+        for name in wide_chunks:
+            assert_acyclic(name, graphs[name])
+            if not wide_arithmetic.search(bodies[name]):
+                raise AssertionError("Missing i128 arithmetic in a Q96 CORDIC chunk")
         print(f"Verified {len(names)} consumer probes, {len(numeric_helpers)} outlined numeric helpers "
-              f"and {cordic_count} shared CORDIC functions: no LLVM control-flow cycles. "
-              f"Also checked {narrow_count} const-specialized i64 chunks: acyclic, no i128 arithmetic.")
+              f"and {len(wide_chunks)} shared i128 chunks: no LLVM control-flow cycles. "
+              f"Also checked {len(narrow_chunks)} const-specialized i64 chunks: acyclic, no i128 arithmetic.")
 
 
 if __name__ == "__main__":

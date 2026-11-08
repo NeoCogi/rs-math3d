@@ -72,7 +72,7 @@
 mod analytic;
 mod arithmetic;
 mod constants;
-mod cordic64;
+mod cordic;
 mod parse;
 mod reciprocal;
 mod storage;

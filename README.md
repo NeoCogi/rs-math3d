@@ -49,6 +49,7 @@ the unchecked kernels, numerical limits, timing methodology and host results.
 The [const-selected CORDIC experiment](docs/cordic.md) compares
 `angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with
 compile-time guard precision, speed measurements and independent Decimal errors.
+Both widths use one generic kernel with sealed precision backends.
 Run `cargo run --release --example cordic_bench -- 1000 7` to reproduce it.
 
 Fixed-count numeric kernels use explicit expansion for matrix dimensions, vector

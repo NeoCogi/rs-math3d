@@ -41,6 +41,15 @@ tables are rescaled in const evaluation. Rotation and vectoring expand into
 up to four chunks of sixteen literal steps. Const-false steps and unused chunks
 disappear; vectoring can still exit on an exact zero residual.
 
+Both widths use one generic engine in `src/fixed/cordic.rs`. Its sealed
+`Backend` trait supplies the primitive `Word`, scale, pi, gain and angle table;
+the engine owns one typed state, one rotation step body, one vectoring step body
+and their expanded schedules. `Wide` selects i128/Q96 independently of the
+destination format, keeping one shared Q96 specialization. `Narrow<F>` supplies
+the format-derived i64 constants. Primitive operators monomorphize directly in
+the backend word, without conversions or dynamic dispatch inside the steps.
+The earlier separate i64 module and analytic-module Q96 engine were removed.
+
 Only the CORDIC state and step arithmetic become i64. Full-range range reduction
 retains Q64/i128; acos retains its Q62 coordinates and u128 integer root before
 narrowing the vectoring inputs. Output quantization and tangent division also
@@ -68,7 +77,13 @@ Run `cargo test --test cordic_precision` and repeat with
 analytic scales, check one-quantum sine/cosine/acos error, validate domains and
 checked/ordinary agreement, and cover full-range Decimal references through
 F=48. `python3 tools/check_unrolled_codegen.py` additionally inspects specialized
-i64 chunks for control-flow cycles and accidental i128 step arithmetic.
+i64 chunks for control-flow cycles and accidental i128 step arithmetic. It
+traces concrete width-selected consumer calls to the generic chunk bodies and
+requires Q96 consumers at F=16,48,61 to share exactly fourteen chunks. Internal
+regressions compare every guard bit against the original typed iterative
+schedules: Q96 on a dense 16-bit angle grid, and i64 at all 47 supported
+fractional scales. This preserves step order, partial final chunks and exact-zero
+vectoring exits independently of final destination rounding.
 
 ## Benchmark method
 

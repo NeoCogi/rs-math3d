@@ -245,6 +245,12 @@ still exits immediately when its residual becomes exactly zero; later chunks
 are skipped. The expansion is checked against iterative internal Q96 references
 before destination rounding, as well as the existing analytic references.
 
+The opt-in i64 path uses the same generic CORDIC engine with a sealed precision
+backend. Its const schedule selects three or four chunks; Q96 selects all seven
+through a format-independent backend. The backend supplies constants and word
+type, while rotation/vectoring state transitions and step ordering have one
+implementation. Guard-bit regressions also cover all 47 supported i64 scales.
+
 Public scalar slices longer than four keep a runtime fallback. Text processing,
 searches and integer-root convergence retain their input-dependent iteration.
 Tests and constant-generation tools retain iterative reference algorithms.

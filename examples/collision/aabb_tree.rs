@@ -31,10 +31,10 @@
 //! Construction validates represented geometry and allocates. Balanced median
 //! splits preserve input triangle IDs; geometry and topology remain immutable.
 //! Queries recurse without heap allocation and use ordinary unchecked arithmetic.
-//! Supply finite valid rays, representable translations and narrow-phase
-//! intermediates. Intersection means surface contact, without solid containment.
+//! Supply finite valid rays/shapes, representable translations and narrow-phase
+//! intermediates. Mesh containment is not inferred from triangle soups.
 
-use super::triangle_triangle;
+use super::{box_triangle, capsule_triangle, triangle_triangle, Capsule, Obb};
 use rs_math3d::{Box3, CrossProduct, Intersect, MathError, Ray, RealScalar, Tri3, Vector, Vector3};
 
 /// Failures at the tree's checked construction boundary.
@@ -65,7 +65,7 @@ pub struct QueryStats {
 /// Owned query outcome; H identifies the concrete geometric result.
 #[derive(Clone, Copy, Debug)]
 pub struct QueryResult<H> {
-    /// Nearest ray hit or any intersecting input triangle pair.
+    /// Nearest ray hit, intersecting shape/triangle ID, or input triangle pair.
     pub hit: Option<H>,
     /// Traversal/narrow-phase work performed for this result.
     pub stats: QueryStats,
@@ -159,6 +159,33 @@ fn overlap<T: RealScalar>(a: &Box3<T>, b: &Box3<T>) -> bool {
         && a.max.y >= b.min.y
         && a.min.z <= b.max.z
         && a.max.z >= b.min.z
+}
+
+/// Componentwise capsule envelope. Nonnegative radius and representable expanded
+/// endpoints are caller preconditions; coincident endpoints form a sphere.
+fn capsule_bounds<T: RealScalar>(capsule: &Capsule<T>) -> Box3<T> {
+    let radius = Vector3::new(capsule.radius, capsule.radius, capsule.radius);
+    Box3::new(
+        &(Vector3::min(&capsule.a, &capsule.b) - radius),
+        &(Vector3::max(&capsule.a, &capsule.b) + radius),
+    )
+}
+
+/// Projects the three signed half-axis vectors onto world axes. Absolute sums
+/// enclose represented corners without rotating the soup or assuming the OBB is
+/// axis aligned. Sizes and envelope intermediates must fit the selected scalar.
+fn obb_bounds<T: RealScalar>(obb: &Obb<T>) -> Box3<T> {
+    let half_axis = |axis: Vector3<T>, size: T| {
+        let v = axis * size;
+        Vector3::new(v.x.tabs(), v.y.tabs(), v.z.tabs())
+    };
+    let x = half_axis(obb.axes[0], obb.half.x);
+    let y = half_axis(obb.axes[1], obb.half.y);
+    let z = half_axis(obb.axes[2], obb.half.z);
+    // Match represented corner construction order. Floating addition is
+    // monotone but not associative: summing extents before adding the center
+    // can otherwise exclude a corner by one rounding unit.
+    Box3::new(&(((obb.center - x) - y) - z), &(((obb.center + x) + y) + z))
 }
 
 /// Translates a bound in the query's represented arithmetic. Callers establish
@@ -332,6 +359,117 @@ impl<T: RealScalar> AabbTree<T> {
     /// Retrieves geometry by stable input ID, including duplicate triangles.
     pub fn triangle(&self, id: usize) -> Option<&Tri3<T>> {
         self.entries.get(id).map(|e| &e.triangle)
+    }
+
+    /// Returns any triangle touching the capsule volume, using squared-distance
+    /// narrow phase. Supply finite endpoints, a nonnegative radius and sufficient
+    /// intermediate range/precision. A capsule inside a closed soup with no
+    /// triangle contact returns no hit; a zero-length centerline is supported.
+    pub fn intersects_capsule(&self, capsule: &Capsule<T>) -> QueryResult<usize> {
+        self.shape_query(&capsule_bounds(capsule), &|tri| {
+            capsule_triangle(capsule, tri)
+        })
+    }
+
+    /// Flat reference for capsule contact with the same soup/leaf bounds and
+    /// squared-distance predicate. The witness ID can differ from tree order.
+    pub fn brute_intersects_capsule(&self, capsule: &Capsule<T>) -> QueryResult<usize> {
+        self.brute_shape_query(&capsule_bounds(capsule), &|tri| {
+            capsule_triangle(capsule, tri)
+        })
+    }
+
+    /// Returns any triangle intersecting the oriented box volume using SAT.
+    /// Supply finite approximately orthonormal axes, nonnegative half sizes and
+    /// representable intermediates. The box is already in the soup's frame.
+    pub fn intersects_obb(&self, obb: &Obb<T>) -> QueryResult<usize> {
+        self.shape_query(&obb_bounds(obb), &|tri| box_triangle(obb, tri))
+    }
+
+    /// Flat reference for oriented-box contact using the same numerical bounds
+    /// and SAT predicate as the accelerated query.
+    pub fn brute_intersects_obb(&self, obb: &Obb<T>) -> QueryResult<usize> {
+        self.brute_shape_query(&obb_bounds(obb), &|tri| box_triangle(obb, tri))
+    }
+
+    /// Shared shape-query entry point. The closure is statically specialized for
+    /// each concrete shape; its AABB is prepared once and borrowed throughout.
+    fn shape_query(
+        &self,
+        bounds: &Box3<T>,
+        predicate: &impl Fn(&Tri3<T>) -> bool,
+    ) -> QueryResult<usize> {
+        let mut result = QueryResult::default();
+        if !self.nodes.is_empty() {
+            result.hit = self.visit_shape(0, bounds, predicate, &mut result.stats);
+        }
+        result
+    }
+
+    /// Input-order reference, sharing only the global rejection and per-entry
+    /// predicate. Internal hierarchy/permutation state is not traversed.
+    fn brute_shape_query(
+        &self,
+        bounds: &Box3<T>,
+        predicate: &impl Fn(&Tri3<T>) -> bool,
+    ) -> QueryResult<usize> {
+        let mut result = QueryResult::default();
+        if self.nodes.is_empty() {
+            return result;
+        }
+        result.stats.bounds_tests += 1;
+        if !overlap(&self.nodes[0].bounds, bounds) {
+            return result;
+        }
+        for id in 0..self.entries.len() {
+            if self.test_shape(id, bounds, predicate, &mut result.stats) {
+                result.hit = Some(id);
+                break;
+            }
+        }
+        result
+    }
+
+    /// The mandatory leaf filter precedes both shape narrow phases. Count a
+    /// triangle test only after its own AABB overlaps the query envelope.
+    fn test_shape(
+        &self,
+        id: usize,
+        bounds: &Box3<T>,
+        predicate: &impl Fn(&Tri3<T>) -> bool,
+        stats: &mut QueryStats,
+    ) -> bool {
+        stats.bounds_tests += 1;
+        if !overlap(&self.entries[id].bounds, bounds) {
+            return false;
+        }
+        stats.triangle_tests += 1;
+        predicate(&self.entries[id].triangle)
+    }
+
+    /// One allocation-free recursive traversal serves both shape types. The
+    /// first witness terminates both leaf scanning and sibling traversal.
+    fn visit_shape(
+        &self,
+        index: usize,
+        bounds: &Box3<T>,
+        predicate: &impl Fn(&Tri3<T>) -> bool,
+        stats: &mut QueryStats,
+    ) -> Option<usize> {
+        let node = &self.nodes[index];
+        stats.bounds_tests += 1;
+        if !overlap(&node.bounds, bounds) {
+            return None;
+        }
+        match node.kind {
+            Kind::Leaf { start } => self.order[start..start + node.count]
+                .iter()
+                .copied()
+                .find(|&id| self.test_shape(id, bounds, predicate, stats)),
+            Kind::Branch { left, right } => self
+                .visit_shape(left, bounds, predicate, stats)
+                .or_else(|| self.visit_shape(right, bounds, predicate, stats)),
+        }
     }
 
     /// Finds the nearest two-sided forward-ray hit; exact t ties choose the

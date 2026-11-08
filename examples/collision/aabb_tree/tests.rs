@@ -33,6 +33,8 @@ use core::convert::TryInto;
 use rs_math3d::{Fixed, TryCastFrom};
 #[path = "../fixtures.rs"]
 mod fixtures;
+#[path = "../shape_cases.rs"]
+mod shape_cases;
 
 /// Exact fixture conversion outside the algorithms under test.
 fn n<T: TryCastFrom<f64>>(x: f64) -> T {
@@ -175,6 +177,18 @@ fn analytic<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
     )
     .unwrap();
     assert!(outer.intersects(&inner, p(0.0, 0.0, 0.0)).hit.is_none());
+    let capsule = Capsule {
+        a: p(0.5, 0.5, 0.5),
+        b: p(0.5, 0.5, 0.5),
+        radius: n(0.125),
+    };
+    assert!(outer.intersects_capsule(&capsule).hit.is_none());
+    let obb = Obb {
+        center: p(0.5, 0.5, 0.5),
+        axes: [p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, 0.0, 1.0)],
+        half: p(0.125, 0.125, 0.125),
+    };
+    assert!(outer.intersects_obb(&obb).hit.is_none());
     let bad = Tri3::new([p::<T>(0.0, 0.0, 0.0), p(1.0, 1.0, 1.0), p(2.0, 2.0, 2.0)]);
     assert!(matches!(
         AabbTree::new(vec![bad], 4),
@@ -235,6 +249,203 @@ fn real_meshes<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
     ));
     assert!(teapot.intersects(&bunny, p(64.0, 0.0, 0.0)).hit.is_none());
 }
+
+/// Known shape/triangle contacts, misses, degenerate centerlines, tilted boxes
+/// and envelope false positives. Each witness refers to original input geometry.
+fn shape_contacts<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
+    let tree = AabbTree::new(vec![triangle::<T>(0.0)], 1).unwrap();
+    let empty = AabbTree::<T>::new(Vec::new(), 4).unwrap();
+    for (z, expected) in [(0.0, true), (0.25, true), (0.5, false)] {
+        let capsule = Capsule {
+            a: p(-0.5, 0.0, z),
+            b: p(0.5, 0.0, z),
+            radius: n(0.25),
+        };
+        assert_eq!(
+            tree.intersects_capsule(&capsule).hit,
+            if expected { Some(0) } else { None }
+        );
+        assert_eq!(
+            tree.brute_intersects_capsule(&capsule).hit,
+            tree.intersects_capsule(&capsule).hit
+        );
+        assert!(empty.intersects_capsule(&capsule).hit.is_none());
+        let obb = Obb {
+            center: p(0.0, 0.0, z),
+            axes: [p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, 0.0, 1.0)],
+            half: p(0.5, 0.25, 0.25),
+        };
+        assert_eq!(
+            tree.intersects_obb(&obb).hit,
+            if expected { Some(0) } else { None }
+        );
+        assert_eq!(
+            tree.brute_intersects_obb(&obb).hit,
+            tree.intersects_obb(&obb).hit
+        );
+        assert!(empty.intersects_obb(&obb).hit.is_none());
+    }
+    let piercing = Capsule {
+        a: p(0.0, 0.0, -1.0),
+        b: p(0.0, 0.0, 1.0),
+        radius: n(0.0),
+    };
+    assert_eq!(tree.intersects_capsule(&piercing).hit, Some(0));
+    let sphere = Capsule {
+        a: p(-1.0, -1.0, 0.25),
+        b: p(-1.0, -1.0, 0.25),
+        radius: n(0.25),
+    };
+    assert_eq!(tree.intersects_capsule(&sphere).hit, Some(0));
+    let corner = Capsule {
+        a: p(1.25, 1.25, 0.0),
+        b: p(1.25, 1.25, 0.0),
+        radius: n(0.25),
+    };
+    assert!(overlap(&capsule_bounds(&corner), &tree.nodes[0].bounds));
+    assert!(tree.intersects_capsule(&corner).hit.is_none());
+    let rotated = Obb {
+        center: p(1.0, 1.0, 0.0),
+        axes: [p(0.6, -0.8, 0.0), p(0.8, 0.6, 0.0), p(0.0, 0.0, 1.0)],
+        half: p(1.0, 0.125, 0.125),
+    };
+    assert!(overlap(&obb_bounds(&rotated), &tree.nodes[0].bounds));
+    assert!(tree.intersects_obb(&rotated).hit.is_none());
+    let tilted = Obb {
+        center: p(0.0, 0.0, 0.0),
+        axes: [p(1.0, 0.0, 0.0), p(0.0, 0.6, 0.8), p(0.0, -0.8, 0.6)],
+        half: p(0.5, 0.25, 0.25),
+    };
+    assert_eq!(tree.intersects_obb(&tilted).hit, Some(0));
+    let contained_triangle = Obb {
+        half: p(2.0, 2.0, 2.0),
+        ..tilted
+    };
+    assert_eq!(tree.intersects_obb(&contained_triangle).hit, Some(0));
+    let zero_size = Obb {
+        axes: [p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, 0.0, 1.0)],
+        half: p(0.0, 0.0, 0.0),
+        ..tilted
+    };
+    assert_eq!(tree.intersects_obb(&zero_size).hit, Some(0));
+    assert!(tree
+        .intersects_obb(&Obb {
+            center: p(0.75, 0.75, 0.0),
+            ..zero_size
+        })
+        .hit
+        .is_none());
+    let envelope = obb_bounds(&tilted);
+    for sx in [-T::one(), T::one()] {
+        for sy in [-T::one(), T::one()] {
+            for sz in [-T::one(), T::one()] {
+                let point = tilted.center
+                    + tilted.axes[0] * (tilted.half.x * sx)
+                    + tilted.axes[1] * (tilted.half.y * sy)
+                    + tilted.axes[2] * (tilted.half.z * sz);
+                assert!(point.x >= envelope.min.x && point.x <= envelope.max.x);
+                assert!(point.y >= envelope.min.y && point.y <= envelope.max.y);
+                assert!(point.z >= envelope.min.z && point.z <= envelope.max.z);
+            }
+        }
+    }
+}
+
+/// A soup with one-cell Q8 triangles must support capsule distances without
+/// dividing by a Gram determinant erased by fixed-point product quantization.
+#[test]
+fn capsule_handles_tiny_triangle_projection() {
+    type F = Fixed<i32, 16>;
+    let tree = AabbTree::new(
+        vec![Tri3::new([
+            p::<F>(0.0, 0.0, 0.0),
+            p(1.0 / 256.0, 0.0, 0.0),
+            p(0.0, 1.0 / 256.0, 0.0),
+        ])],
+        1,
+    )
+    .unwrap();
+    let capsule = Capsule {
+        a: p(1.0 / 512.0, 1.0 / 256.0, 0.0),
+        b: p(1.0 / 512.0, 1.0 / 256.0, 0.0),
+        radius: n(0.125),
+    };
+    assert_eq!(tree.intersects_capsule(&capsule).hit, Some(0));
+}
+
+/// Summing half extents before adding a negative center can round a positive
+/// corner outside the envelope. Interval accumulation must contain that corner.
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+#[test]
+fn obb_envelope_contains_rounded_corner() {
+    let obb = Obb::<f32> {
+        center: p(-0.75, 0.0, 0.0),
+        axes: [p(0.6, 0.8, 0.0), p(-0.8, 0.6, 0.0), p(0.0, 0.0, 1.0)],
+        half: p(1.0, 0.5, 0.25),
+    };
+    let corner =
+        obb.center + obb.axes[0] * obb.half.x - obb.axes[1] * obb.half.y + obb.axes[2] * obb.half.z;
+    assert!(corner.x > 0.25);
+    assert!(corner.x <= obb_bounds(&obb).max.x);
+}
+
+/// Both real fixtures use the exact same query corpus as the benchmark. Verify
+/// acceleration, witness validity and a mix of hits/misses in each scalar.
+fn model_shapes<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>()
+where
+    f64: TryCastFrom<T>,
+{
+    for data in [fixtures::TEAPOT, fixtures::BUNNY] {
+        let tree = AabbTree::<T>::new(fixtures::decode(data).unwrap(), 4).unwrap();
+        let cases = shape_cases::model_cases(&tree);
+        let (mut caps, mut boxes) = (0, 0);
+        for (i, capsule) in cases.capsules.iter().enumerate() {
+            let actual = tree.intersects_capsule(capsule);
+            let expected = tree.brute_intersects_capsule(capsule);
+            assert_eq!(
+                actual.hit.is_some(),
+                expected.hit.is_some(),
+                "capsule pose {}",
+                i
+            );
+            if let Some(id) = actual.hit {
+                caps += 1;
+                assert!(capsule_triangle(capsule, tree.triangle(id).unwrap()));
+            }
+        }
+        for (i, obb) in cases.obbs.iter().enumerate() {
+            let actual = tree.intersects_obb(obb);
+            let expected = tree.brute_intersects_obb(obb);
+            assert_eq!(
+                actual.hit.is_some(),
+                expected.hit.is_some(),
+                "OBB pose {}",
+                i
+            );
+            if let Some(id) = actual.hit {
+                boxes += 1;
+                assert!(box_triangle(obb, tree.triangle(id).unwrap()));
+            }
+        }
+        assert!(caps > 0 && caps < cases.capsules.len());
+        assert!(boxes > 0 && boxes < cases.obbs.len());
+    }
+}
+
+/// Shape suites retain fixed-only coverage; f32 runs when its backend is enabled.
+macro_rules! shapes {
+    ($name:ident,$t:ty) => {
+        #[test]
+        fn $name() {
+            shape_contacts::<$t>();
+            model_shapes::<$t>();
+        }
+    };
+}
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+shapes!(f32_capsule_obb_tree, f32);
+shapes!(s15_16_capsule_obb_tree,Fixed<i32,16>);
+shapes!(s31_32_capsule_obb_tree,Fixed<i64,32>);
 
 /// The same analytic and real-mesh regressions run in fixed-only builds.
 macro_rules! backend {

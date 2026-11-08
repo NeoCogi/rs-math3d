@@ -149,6 +149,20 @@ fn contacts<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
     assert!(!capsule_box(&diagonal, &b));
 
     let tri = triangle::<T>();
+    let tilted = Tri3::new([v::<T>(0.0, 0.0, 0.0), v(1.0, 0.0, 1.0), v(0.0, 1.0, 1.0)]);
+    for (point, expected) in [
+        (v(0.0, 0.0, 0.75), 0.1875),
+        (v(0.5, 0.5, 0.25), 0.1875),
+        (v(0.75, 0.75, 1.5), 0.375),
+        (v(-0.5, -0.5, -1.0), 1.5),
+    ] {
+        assert_eq!(point_triangle_squared(point, &tilted), n(expected));
+        let vertices = tilted.vertices();
+        assert_eq!(
+            point_triangle_squared(point, &Tri3::new([vertices[2], vertices[1], vertices[0]])),
+            n(expected)
+        );
+    }
     for (p, expected) in [
         ((-0.5, -0.5, 0.0), 0.5), // vertex a
         ((2.5, 0.0, 0.0), 0.25),  // vertex b

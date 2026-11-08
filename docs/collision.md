@@ -5,8 +5,8 @@ discrete narrow phase, generic over `RealScalar`. It reuses `Sphere3` and `Tri3`
 and adds local `Obb` and `Capsule` types. It is a starting point for measuring a
 small physics engine; it does not add a supported collision API to the crate.
 
-The [static triangle-soup AABB tree](triangle-soup.md) adds accelerated nearest-ray
-and mesh/mesh surface-intersection queries using offline teapot/bunny fixtures.
+The [static triangle-soup AABB tree](triangle-soup.md) adds accelerated nearest-ray,
+capsule/OBB and mesh/mesh intersection queries using offline teapot/bunny fixtures.
 
 All ten unordered shape pairings return a boolean. Boundary contact counts as
 overlap in exact arithmetic. There are no contact points, normals, penetration
@@ -19,7 +19,7 @@ function with its documented shape order.
 | Sphere / sphere | Squared center distance |
 | Sphere / capsule | Squared point-segment distance |
 | Sphere / box | Clamp the box-local center to the box |
-| Sphere / triangle | Closest point in triangle Voronoi regions |
+| Sphere / triangle | Scaled plane projection or closest edge |
 | Capsule / capsule | Closest points on two closed segments |
 | Capsule / box | Minimize piecewise quadratic segment-box distance |
 | Capsule / triangle | Face piercing, endpoint-face and edge-edge distances |
@@ -52,8 +52,15 @@ scales. Rounding can move a contact decision either way. No tolerance or hidden
 collision margin is added. A bounded coordinate domain and explicit contact
 margin would be necessary before turning this into a production physics API.
 Choosing a format only by the range of the input coordinates is insufficient:
-some region tests use fourth-order intermediates. Larger worlds need local
+segment/segment distance still uses products of squared lengths. Larger worlds need local
 coordinates, rescaling or wider storage.
+
+Point/triangle distance now scales the face normal before plane projection and
+uses closest edges outside the face. Capsule endpoint and piercing tests reuse
+that normal. This supersedes the Gram-product Voronoi solve whose denominator
+could round to zero on a valid one-cell Q8 triangle in S15.16. Geometry smaller
+than the selected format can still collapse numerically; no global exactness
+or one-quantum distance guarantee is implied.
 
 Run the regressions with `cargo test --test collision_examples`, and repeat with
 `--no-default-features` for the fixed-only path. They cover all ten pairings,
@@ -100,6 +107,11 @@ and replace the hosted timer and input setup with the target's counter/harness.
 No ARM or RISC-V Rust target runtime was installed for this measurement.
 
 ## Host baseline, 2026-11-08
+
+This initial primitive baseline predates the scaled-plane distance update.
+The current capsule/OBB tree measurements are in the
+[triangle-soup guide](triangle-soup.md); this historical table is retained with
+its original raw output.
 
 Intel Core Ultra 7 155H, x86_64 Linux, pinned to logical CPU 0; rustc 1.98.1
 (`48a229cea`, LLVM 22.1.8), default release profile and default `std` feature.

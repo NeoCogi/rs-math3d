@@ -146,45 +146,50 @@ fn segment_segment_squared<T: RealScalar>(
     squared((p + d * s) - (a + e * t))
 }
 
-/// Squared distance to a nondegenerate triangle using its vertex, edge and
-/// face Voronoi regions. Division occurs only in the selected edge/face region.
-fn point_triangle_squared<T: RealScalar>(p: Vector3<T>, triangle: &Tri3<T>) -> T {
+/// Scales the represented face normal by its largest component. A nonzero
+/// component becomes exactly +/-1, so subsequent squared-normal division cannot
+/// lose its denominator to tiny-area quantization. No square root is required.
+fn scaled_triangle_normal<T: RealScalar>(triangle: &Tri3<T>) -> Option<Vector3<T>> {
     let [a, b, c] = *triangle.vertices();
-    let ab = b - a;
-    let ac = c - a;
-    let ap = p - a;
-    let d1 = dot(ab, ap);
-    let d2 = dot(ac, ap);
-    if d1 <= T::zero() && d2 <= T::zero() {
-        return squared(ap);
+    let normal = Vector3::cross(&(b - a), &(c - a));
+    let scale = T::max(normal.x.tabs(), T::max(normal.y.tabs(), normal.z.tabs()));
+    if scale == T::zero() {
+        None
+    } else {
+        Some(normal / scale)
     }
-    let bp = p - b;
-    let d3 = dot(ab, bp);
-    let d4 = dot(ac, bp);
-    if d3 >= T::zero() && d4 <= d3 {
-        return squared(bp);
+}
+
+/// Squared distance to a triangle using a scaled-plane projection and its edges.
+/// Unlike products of Gram terms, the face denominator stays at least one even
+/// for small represented faces. A collapsed normal falls back to edge distances.
+fn point_triangle_squared<T: RealScalar>(p: Vector3<T>, triangle: &Tri3<T>) -> T {
+    point_triangle_with_normal(p, triangle, scaled_triangle_normal(triangle))
+}
+
+/// Reuses a prepared face for both capsule endpoints. An interior orthogonal
+/// projection is closest on the face; otherwise the closest point is on one
+/// of its three closed edges. Rounding can still alter boundary classifications.
+fn point_triangle_with_normal<T: RealScalar>(
+    p: Vector3<T>,
+    triangle: &Tri3<T>,
+    normal: Option<Vector3<T>>,
+) -> T {
+    let [a, b, c] = *triangle.vertices();
+    if let Some(normal) = normal {
+        let height = dot(p - a, normal) / squared(normal);
+        let projected = p - normal * height;
+        if inside_triangle(projected, triangle, normal) {
+            return squared(p - projected);
+        }
     }
-    let vc = d1 * d4 - d3 * d2;
-    if vc <= T::zero() && d1 >= T::zero() && d3 <= T::zero() {
-        return squared(p - (a + ab * (d1 / (d1 - d3))));
-    }
-    let cp = p - c;
-    let d5 = dot(ab, cp);
-    let d6 = dot(ac, cp);
-    if d6 >= T::zero() && d5 <= d6 {
-        return squared(cp);
-    }
-    let vb = d5 * d2 - d1 * d6;
-    if vb <= T::zero() && d2 >= T::zero() && d6 <= T::zero() {
-        return squared(p - (a + ac * (d2 / (d2 - d6))));
-    }
-    let va = d3 * d6 - d5 * d4;
-    if va <= T::zero() && d4 >= d3 && d5 >= d6 {
-        let t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        return squared(p - (b + (c - b) * t));
-    }
-    let denominator = va + vb + vc;
-    squared(p - (a + ab * (vb / denominator) + ac * (vc / denominator)))
+    T::min(
+        point_segment_squared(p, a, b),
+        T::min(
+            point_segment_squared(p, b, c),
+            point_segment_squared(p, c, a),
+        ),
+    )
 }
 
 /// Tests the three oriented edge half-planes for a point on the triangle plane.
@@ -199,18 +204,22 @@ fn inside_triangle<T: RealScalar>(p: Vector3<T>, tri: &Tri3<T>, normal: Vector3<
 /// endpoint-to-face and edge-to-edge distances alone miss interior crossings.
 fn segment_triangle_squared<T: RealScalar>(a: Vector3<T>, b: Vector3<T>, tri: &Tri3<T>) -> T {
     let [u, v, w] = *tri.vertices();
-    let normal = Vector3::cross(&(v - u), &(w - u));
-    let da = dot(normal, a - u);
-    let db = dot(normal, b - u);
-    if ((da <= T::zero() && db >= T::zero()) || (db <= T::zero() && da >= T::zero())) && da != db {
-        let t = clamp(da / (da - db), T::zero(), T::one());
-        if inside_triangle(a + (b - a) * t, tri, normal) {
-            return T::zero();
+    let normal = scaled_triangle_normal(tri);
+    if let Some(normal) = normal {
+        let da = dot(normal, a - u);
+        let db = dot(normal, b - u);
+        if ((da <= T::zero() && db >= T::zero()) || (db <= T::zero() && da >= T::zero()))
+            && da != db
+        {
+            let t = clamp(da / (da - db), T::zero(), T::one());
+            if inside_triangle(a + (b - a) * t, tri, normal) {
+                return T::zero();
+            }
         }
     }
     let mut result = T::min(
-        point_triangle_squared(a, tri),
-        point_triangle_squared(b, tri),
+        point_triangle_with_normal(a, tri, normal),
+        point_triangle_with_normal(b, tri, normal),
     );
     for (p, q) in [(u, v), (v, w), (w, u)] {
         result = T::min(result, segment_segment_squared(a, b, p, q));

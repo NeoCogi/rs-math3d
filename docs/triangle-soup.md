@@ -21,7 +21,7 @@ full coordinate span that cannot fit the scalar. Empty input is valid. Allocatio
 failure follows standard `Vec` behavior. Bounds and partition centers use the
 represented coordinates, with no hidden expansion or float-only builder path.
 
-Two query families are available:
+Four query families are available:
 
 - `raycast(&ray)` returns the nearest two-sided forward-ray hit, its parameter,
   represented point and input triangle ID. Exact parameter ties choose the
@@ -31,6 +31,31 @@ Two query families are available:
   The other soup is translated into this soup's coordinate frame. Rotations
   require building from transformed triangles; there is no refit/update path.
   Enclosed disjoint surfaces are not considered intersecting solids.
+- `intersects_capsule(&capsule)` returns any triangle touching the capsule volume.
+  A zero-length centerline is a sphere; zero radius tests a segment. Endpoints
+  are in the soup's frame and radius must be nonnegative.
+- `intersects_obb(&obb)` returns any triangle intersecting the oriented-box
+  volume. Supply finite approximately orthonormal axes and nonnegative half
+  extents in the soup's frame. Zero extents are supported within quantization
+  limits. A box can contain an entire triangle and still report contact.
+
+Capsule and OBB methods share one statically specialized shape traversal. Their
+envelope is prepared once per query, then closed AABB overlap rejects nodes and
+leaf triangles before the existing squared-distance or SAT narrow phase. They
+return `QueryResult<usize>` containing any original triangle ID. Their
+`brute_intersects_capsule` / `brute_intersects_obb` references use the same soup
+and leaf filters in input order; witness IDs can differ. No query allocates.
+Shapes fully inside a closed soup without touching a triangle return no hit.
+
+Capsule bounds expand endpoint minima/maxima by radius. OBB bounds accumulate
+absolute half-axis intervals in represented corner-construction order. This
+avoids excluding a rounded corner when floating addition of the center and a
+pre-summed extent associates differently. Capsule closest-point arithmetic uses
+a max-component-scaled face normal, an interior plane projection or closest
+edge, and a shared prepared normal for endpoint/piercing tests. Its nonzero face
+denominator stays at least one: valid small Q8 faces no longer divide by a
+quartic Gram denominator that rounds to zero in S15.16. A represented collapsed
+normal falls back to edges. These paths still use no square root or CORDIC.
 
 `QueryResult` includes bounding and narrow-phase work counts. Timings include
 these counters. `info()` reports triangle/node counts, depth and reserved heap
@@ -89,6 +114,13 @@ ray/tree versus flat traversal, translated teapot/bunny overlap, input ID witnes
 and separated bounds. Tests also check balanced topology and parent containment,
 empty input, duplicate centers, invalid leaf sizes, malformed packets, nonfinite
 geometry and fixed overflow at the construction boundary.
+
+Capsule/OBB coverage additionally includes face/vertex touches, centerline face
+piercing, degenerate centerlines, tilted boxes, zero-sized boxes, envelope-only
+false positives, contained triangles, and shapes enclosed without mesh contact.
+Regressions pin the small-triangle capsule division failure and the rounded
+OBB corner. Both real models use 264 poses per shape across f32 and both fixed
+formats, checking hierarchy classification and returned triangle witnesses.
 
 ## Benchmark method
 

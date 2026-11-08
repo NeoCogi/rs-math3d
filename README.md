@@ -46,6 +46,11 @@ pairings of oriented boxes, spheres, capsules and triangles using `f32`, `f64`,
 S23.8, S15.16 and S47.16. The [collision experiment](docs/collision.md) documents
 the unchecked kernels, numerical limits, timing methodology and host results.
 
+The [const-selected CORDIC experiment](docs/cordic.md) compares
+`angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with
+compile-time guard precision, speed measurements and independent Decimal errors.
+Run `cargo run --release --example cordic_bench -- 1000 7` to reproduce it.
+
 Fixed-count numeric kernels use explicit expansion for matrix dimensions, vector
 reductions, geometry queries and CORDIC steps. Run
 `python3 tools/check_unrolled_codegen.py` to check optimized host control flow;

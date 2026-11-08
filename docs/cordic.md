@@ -69,3 +69,90 @@ analytic scales, check one-quantum sine/cosine/acos error, validate domains and
 checked/ordinary agreement, and cover full-range Decimal references through
 F=48. `python3 tools/check_unrolled_codegen.py` additionally inspects specialized
 i64 chunks for control-flow cycles and accidental i128 step arithmetic.
+
+## Benchmark method
+
+```sh
+cargo run --release --example cordic_bench -- 1000 7
+```
+
+Arguments are positive batch and sample counts, defaulting to 1,000 and 7. Each
+timing row measures 256 inputs per batch. Input creation, conversions, allocation,
+reference parsing and error analysis occur outside timing. The harness warms
+each operation, black-boxes inputs/results, and reports median/min/max sample
+throughput including loop overhead. An even sample count uses the upper median.
+Both widths use the same ordinary API paths and inputs. Bounded sine/cosine and
+tangent inputs span [-1,1); full-range sine/cosine uses deterministic raw storage
+values. Acos spans [-1,1). Tangent timing avoids poles; its precision samples
+include pole neighborhoods. Timings include retained reduction/root/division
+costs and are not just measurements of isolated CORDIC steps.
+
+The precision section evaluates 9,091 independently generated Decimal references
+over seven storage/scale combinations: 2,653 each for sine, cosine and tangent,
+plus 1,132 for acos. It reports absolute maximum and RMS error in *destination
+quanta*, counts beyond one quantum, rejected representable references, accepted
+reference overflows, differences from Q96, and worst-case raw inputs. The Q96
+path is measured against the same oracle, rather than treated as exact truth.
+Results outside destination range are counted separately from numerical error.
+
+## Host results, 2026-11-08
+
+Intel Core Ultra 7 155H, x86_64 Linux, pinned logical CPU 0, rustc 1.98.1
+(`48a229cea`, LLVM 22.1.8), default release profile and `std` feature, without
+custom build flags, LTO or CPU selection. Command:
+`taskset -c 0 cargo run --release --offline --example cordic_bench -- 1000 7`.
+Each sample contains 256,000 calls. See the [full output and error ranges](benchmarks/cordic-x86_64.txt).
+
+Median ns/call; sine/cosine columns use the bounded workload:
+
+| Storage / F | i64 working precision | Q96 sin_cos | i64 sin_cos | Speedup | Q96 acos | i64 acos |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| i32 / 8 | Q32, 33 steps | 254.73 | 57.71 | 4.41x | 375.81 | 91.62 |
+| i32 / 16 | Q32, 33 steps | 253.06 | 57.87 | 4.37x | 377.34 | 91.62 |
+| i32 / 29 | Q45, 46 steps | 239.73 | 68.59 | 3.50x | 378.40 | 128.18 |
+| i64 / 16 | Q32, 33 steps | 253.88 | 57.38 | 4.42x | 376.42 | 94.06 |
+| i64 / 32 | Q48, 49 steps | 252.73 | 84.63 | 2.99x | 378.02 | 135.69 |
+| i64 / 44 | Q60, 61 steps | 252.76 | 100.96 | 2.50x | 376.95 | 165.52 |
+| i64 / 48 | Q60, 61 steps | 252.89 | 100.37 | 2.52x | 376.51 | 165.56 |
+
+Full-range i64-core sine/cosine takes 56.88–101.04 ns across these formats,
+versus 241.45–255.39 ns for Q96. The improvement therefore survives the shared
+full-range reduction boundary on this machine. Acos improves by approximately
+2.3–4.1x while retaining the same guarded root. These changes do not accelerate
+the collision overlap queries, which contain no CORDIC calls.
+
+Maximum absolute Decimal-reference error for the i64 candidate, in destination
+quanta (1 quantum = `2^-F`):
+
+| Storage / F | max(sine error, cosine error) | Acos error | Differences from Q96, these three operations |
+| --- | ---: | ---: | ---: |
+| i32 / 8 | 0.499818 | 0.499460 | 0 |
+| i32 / 16 | 0.499198 | 0.497961 | 0 |
+| i32 / 29 | 0.499853 | 0.489527 | 0 |
+| i64 / 16 | 0.501011 | 0.497391 | 0 |
+| i64 / 32 | 0.506359 | 0.493262 | 0 |
+| i64 / 44 | 0.502881 | 0.496250 | 0 |
+| i64 / 48 | 0.510074 | 0.495542 | 0 |
+
+All 6,438 sine/cosine/acos Decimal samples round identically to Q96, with no
+one-quantum violations. Their RMS errors range from approximately 0.25 to 0.29
+quanta. The exhaustive i16 suite separately passes 1,572,864 sine/cosine component
+checks and 32,772 acos checks across all twelve scales. These measurements
+support the candidate's precision target; they do not prove every i32/i64 input
+or guarantee bit-identical results beyond the sampled cases.
+
+Tangent needs a separate decision. S15.16 Q96's maximum sampled error is 0.498
+quanta; the i64/Q32 candidate reaches 46,649 quanta, about 0.712 in scalar units,
+with 15 of 367 representable samples exceeding one quantum. The worst raw input
+is 102946, or 1.570831298828125 radians, close to pi/2. Even though sine and cosine
+quantize identically in the destination, their *guarded* components differ, and
+the quotient amplifies that difference. Wider-storage full-range tangent also
+exposes substantial existing Q96 range-reduction sensitivity near poles; full
+statistics for both paths are retained rather than attributing it all to i64.
+No checked success/overflow classification differences occurred in this fixture.
+
+The evidence supports incorporating the i64 sine/cosine/acos path as an explicit
+option for F<=48. Keep tangent and current automatic format selection on Q96.
+Changing defaults warrants target measurements and stronger analysis across
+the remaining wide formats. ARMv5/RISC-V timings were not measured, and this
+implementation still requires wide arithmetic outside the CORDIC step core.

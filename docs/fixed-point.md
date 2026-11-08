@@ -314,7 +314,7 @@ or output ranges, which checked arithmetic reports rather than wrapping.
 
 ## Analytic implementation and accuracy
 
-Square root uses an integer root and is correctly rounded. Sine/cosine use
+Square root uses an integer root and is correctly rounded. Default sine/cosine use
 Q96 CORDIC with guarded range reduction; arc cosine uses guarded integer square
 root and vectoring. Sine, cosine and arc cosine target an absolute error within
 one destination quantum. Regression coverage includes exhaustive 16-bit
@@ -336,7 +336,7 @@ tooling only; fixed runtime calculations do not depend on floats or `libm`.
 
 ### Working width and embedded performance
 
-`Fixed<R, F>` is generic over storage and scale; its analytic implementation is
+`Fixed<R, F>` is generic over storage and scale; its default analytic implementation is
 currently shared Q96 CORDIC in `i128`, with 97 rotation steps. That width preserves
 guard bits for the highest-precision `i64` formats and the documented accuracy
 checks. It is not a claim that the processor has a native 128-bit integer ALU.
@@ -344,15 +344,15 @@ LLVM can split unsupported integer operations into smaller operations; see its
 [type legalization documentation](https://llvm.org/docs/CodeGenerator.html#selectiondag-legalizetypes-phase).
 Depending on the operation and target, software support can dominate the cost.
 
-A smaller CORDIC working type and a shorter iteration schedule are reasonable
-future optimizations for lower-precision formats. The type, fractional working
-precision, iteration count, gain, angle table and error bounds must be selected
-together. Making only the integer type generic would permit invalid combinations
-and would not automatically preserve the accuracy contract. An internal
-associated working type selected by format would keep those choices coherent.
-This experiment does not change that contract or add a working-type parameter.
+The [const-selected CORDIC experiment](cordic.md) now adds opt-in
+`sin_cos_with::<64>()`, `tan_with::<64>()`, `acos_with::<64>()` and checked
+counterparts. Inline const assertions accept working widths 64/128 and require
+F<=48 for i64. A format-derived const expression selects Q32 through Q60 and
+33–61 steps together. Width 128 and all existing methods keep the Q96 baseline.
+The i64 tangent variant can lose substantial accuracy near poles; this opt-in
+experiment does not change the default analytic accuracy contract.
 
-Full-range angle reduction is separate from rotation: the current reduction
+Full-range angle reduction is separate from rotation: both paths' reduction
 shifts the input to Q64 in `i128` before taking the remainder. Simply substituting
 `i64` would overflow. Tangent and arc cosine also have their own guarded division
 and square-root requirements. Beyond analytics, ordinary scalar division and

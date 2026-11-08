@@ -26,12 +26,12 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Integer-only analytic functions. Rotation/vectoring use Q96 guard precision;
-//! full-range input reduction uses Q64 to fit every signed storage magnitude.
+//! Integer-only analytics with default Q96/i128 and opt-in const-selected i64
+//! CORDIC. Both use Q64/i128 full-range reduction and guarded u128 acos roots.
 
 use super::{
     arithmetic::{integer_sqrt, round_div},
-    constants, Fixed, RealFormat, ScalarFormat,
+    constants, cordic64, Fixed, RealFormat, ScalarFormat,
 };
 use crate::{MathError, RealScalar, Scalar};
 
@@ -149,7 +149,31 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     }
     /// Computes sine and cosine without destination range validation.
     pub fn sin_cos(self) -> (Self, Self) {
-        let (sin, cos) = self.sin_cos_wide();
+        self.sin_cos_with::<128>()
+    }
+    /// Selects CORDIC's working integer width at compile time: 128 retains the
+    /// default Q96 path; experimental 64 uses clamp(F+16,32,60) working fraction
+    /// bits and requires F<=48. Both round once to the destination format.
+    /// Full-range angle reduction still uses i128. This is an opt-in experiment;
+    /// ordinary operators and RealScalar methods continue using the default.
+    ///
+    /// ```
+    /// use rs_math3d::Fixed;
+    /// let angle = Fixed::<i32, 16>::try_from_ratio(1, 4).unwrap();
+    /// let (sine, cosine) = angle.sin_cos_with::<64>();
+    /// assert!(sine > Fixed::ZERO && cosine > sine);
+    /// ```
+    /// Unsupported widths and insufficient guard precision fail at compilation:
+    /// ```compile_fail
+    /// use rs_math3d::Fixed;
+    /// let _ = Fixed::<i32, 16>::ZERO.sin_cos_with::<32>();
+    /// ```
+    /// ```compile_fail
+    /// use rs_math3d::Fixed;
+    /// let _ = Fixed::<i64, 61>::ZERO.sin_cos_with::<64>();
+    /// ```
+    pub fn sin_cos_with<const WORK_BITS: u32>(self) -> (Self, Self) {
+        let (sin, cos) = self.sin_cos_wide_with::<WORK_BITS>();
         (
             Self::wrapping_raw(div(sin, 1i128 << (96 - F))),
             Self::wrapping_raw(div(cos, 1i128 << (96 - F))),
@@ -165,7 +189,13 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     }
     /// Integer-only tangent without range or pole validation.
     pub fn tan(self) -> Self {
-        let (sin, cos) = self.sin_cos_wide();
+        self.tan_with::<128>()
+    }
+    /// Const-selected tangent; width restrictions match [`Self::sin_cos_with`].
+    /// The experimental i64 guard precision can substantially magnify absolute
+    /// error near poles. Division still uses i128, and a zero divisor can panic.
+    pub fn tan_with<const WORK_BITS: u32>(self) -> Self {
+        let (sin, cos) = self.sin_cos_wide_with::<WORK_BITS>();
         Self::wrapping_raw(div(
             div(sin, 1i128 << 32) * Self::scale(),
             div(cos, 1i128 << 32),
@@ -173,18 +203,13 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     }
     /// Arc cosine without domain validation. Supply a value in [-1, 1].
     pub fn acos(self) -> Self {
-        let raw = self.bits.widen();
-        let x = raw.abs() << (62 - F);
-        let y = integer_sqrt((1u128 << 124).wrapping_sub((x * x) as u128)) as i128;
-        let angle = cordic_vectoring(x << 34, y << 34);
-        Self::wrapping_raw(div(
-            if raw < 0 {
-                constants::PI - angle
-            } else {
-                angle
-            },
-            1i128 << (96 - F),
-        ))
+        self.acos_with::<128>()
+    }
+    /// Const-selected arc cosine; width restrictions match [`Self::sin_cos_with`].
+    /// Supply [-1,1]. The guarded unit-circle root still uses u128 before i64
+    /// vectoring; narrowing a squared input in the destination format is avoided.
+    pub fn acos_with<const WORK_BITS: u32>(self) -> Self {
+        Self::wrapping_raw(div(self.acos_wide_with::<WORK_BITS>(), 1i128 << (96 - F)))
     }
     /// Computes a correctly rounded fixed square root without a float backend.
     pub fn checked_sqrt(self) -> Result<Self, MathError> {
@@ -198,7 +223,13 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     /// Computes sine/cosine together, retaining Q96 precision until narrowing.
     /// Range reduction's error is bounded relative to this format's quantum.
     pub fn checked_sin_cos(self) -> Result<(Self, Self), MathError> {
-        let (sin, cos) = self.sin_cos_wide();
+        self.checked_sin_cos_with::<128>()
+    }
+
+    /// Const-selected sine/cosine with destination range validation. The i64
+    /// restrictions and experimental accuracy policy match [`Self::sin_cos_with`].
+    pub fn checked_sin_cos_with<const WORK_BITS: u32>(self) -> Result<(Self, Self), MathError> {
+        let (sin, cos) = self.sin_cos_wide_with::<WORK_BITS>();
         Ok((Self::from_q96(sin)?, Self::from_q96(cos)?))
     }
 
@@ -207,8 +238,23 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
         Self::raw(round_div(value, 1i128 << (96 - F))?)
     }
 
-    /// Rotates the gain-corrected CORDIC seed into the reduced angle.
-    fn sin_cos_wide(self) -> (i128, i128) {
+    /// Rejects unsupported const policies during monomorphization. Inline const
+    /// expressions avoid a runtime policy check and unstable generic const bounds.
+    const fn validate_cordic<const WORK_BITS: u32>() {
+        assert!(
+            WORK_BITS == 64 || WORK_BITS == 128,
+            "CORDIC working width must be 64 or 128"
+        );
+        assert!(
+            WORK_BITS != 64 || F <= 48,
+            "i64 CORDIC requires at most 48 fractional bits"
+        );
+    }
+
+    /// Rotates a reduced angle and returns Q96 components for shared output
+    /// quantization. The i64 core widens only after its final rotation step.
+    fn sin_cos_wide_with<const WORK_BITS: u32>(self) -> (i128, i128) {
+        const { Self::validate_cordic::<WORK_BITS>() };
         if self.bits.widen() == 0 {
             return (0, 1i128 << 96);
         }
@@ -221,6 +267,24 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
         } else {
             reduced
         };
+        if WORK_BITS == 64 {
+            let frac = cordic64::Precision::<F>::FRAC;
+            let pi = cordic64::Precision::<F>::PI;
+            let mut angle = div(reduced, 1i128 << (64 - frac)) as i64;
+            let mut cosine_sign = 1;
+            if angle > pi / 2 {
+                angle = pi - angle;
+                cosine_sign = -1;
+            } else if angle < -pi / 2 {
+                angle = -pi - angle;
+                cosine_sign = -1;
+            }
+            let (sin, cos) = cordic64::rotate::<F>(angle);
+            return (
+                (sin as i128) << (96 - frac),
+                ((cos * cosine_sign) as i128) << (96 - frac),
+            );
+        }
         let mut angle = reduced << 32;
         let mut cosine_sign = 1;
         if angle > constants::PI / 2 {
@@ -234,6 +298,34 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
         (sin, cos * cosine_sign)
     }
 
+    /// Guarded acos in Q96, using compile-time-selected vectoring. The common
+    /// Q62 square root retains endpoint resolution before working-state rounding.
+    fn acos_wide_with<const WORK_BITS: u32>(self) -> i128 {
+        const { Self::validate_cordic::<WORK_BITS>() };
+        let raw = self.bits.widen();
+        let x = raw.abs() << (62 - F);
+        let y = integer_sqrt((1u128 << 124).wrapping_sub((x * x) as u128)) as i128;
+        if WORK_BITS == 64 {
+            let frac = cordic64::Precision::<F>::FRAC;
+            let x = div(x, 1i128 << (62 - frac)) as i64;
+            let y = div(y, 1i128 << (62 - frac)) as i64;
+            let angle = cordic64::vectoring::<F>(x, y);
+            let angle = if raw < 0 {
+                cordic64::Precision::<F>::PI - angle
+            } else {
+                angle
+            };
+            (angle as i128) << (96 - frac)
+        } else {
+            let angle = cordic_vectoring(x << 34, y << 34);
+            if raw < 0 {
+                constants::PI - angle
+            } else {
+                angle
+            }
+        }
+    }
+
     /// Integer-only sine, rounded to this format's quantum.
     pub fn checked_sin(self) -> Result<Self, MathError> {
         self.checked_sin_cos().map(|pair| pair.0)
@@ -245,7 +337,13 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     /// Divides guarded sine/cosine before output quantization. A cosine rounded
     /// to zero in the destination format therefore does not create a fake pole.
     pub fn checked_tan(self) -> Result<Self, MathError> {
-        let (sin, cos) = self.sin_cos_wide();
+        self.checked_tan_with::<128>()
+    }
+    /// Const-selected tangent with destination range checking. Checks reject
+    /// overflow and zero divisors; they do not recover lost guard precision or
+    /// bound near-pole error. Width restrictions match [`Self::sin_cos_with`].
+    pub fn checked_tan_with<const WORK_BITS: u32>(self) -> Result<Self, MathError> {
+        let (sin, cos) = self.sin_cos_wide_with::<WORK_BITS>();
         // Both components fit Q96; first reduce to Q64 so scaling the quotient
         // cannot exceed i128 even for the largest supported fractional width.
         let sin = round_div(sin, 1i128 << 32)?;
@@ -256,6 +354,12 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
     /// Arc cosine on [-1, 1]. Guarded `sqrt(1-x*x)` and CORDIC vectoring avoid
     /// the endpoint precision loss caused by squaring directly in this format.
     pub fn checked_acos(self) -> Result<Self, MathError> {
+        self.checked_acos_with::<128>()
+    }
+    /// Const-selected arc cosine with domain and destination range validation.
+    /// The experimental i64 precision policy matches [`Self::sin_cos_with`].
+    pub fn checked_acos_with<const WORK_BITS: u32>(self) -> Result<Self, MathError> {
+        const { Self::validate_cordic::<WORK_BITS>() };
         let raw = self.bits.widen();
         if raw.abs() > Self::scale() {
             return Err(MathError::Domain);
@@ -266,14 +370,7 @@ impl<R: RealFormat<F>, const F: u32> Fixed<R, F> {
         if raw == -Self::scale() {
             return Self::from_q96(constants::PI);
         }
-        let x = raw.abs() << (62 - F);
-        let y = integer_sqrt((1u128 << 124) - (x * x) as u128) as i128;
-        let angle = cordic_vectoring(x << 34, y << 34);
-        Self::from_q96(if raw < 0 {
-            constants::PI - angle
-        } else {
-            angle
-        })
+        Self::from_q96(self.acos_wide_with::<WORK_BITS>())
     }
 }
 

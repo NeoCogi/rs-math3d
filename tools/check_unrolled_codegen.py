@@ -126,6 +126,14 @@ def main():
             result = f"Result<{scalar},MathError>" if checked else scalar
             source.append(f"#[no_mangle] pub fn {name}(a: &Vector4<{scalar}>, b: &Vector4<{scalar}>) -> {result} {{ Vector4::{prefix}dot(a,b) }}")
             names.append(name)
+    for fractional in (8, 16, 29, 32, 44, 48):
+        scalar = f"Fixed<i64,{fractional}>"
+        name = f"unroll_cordic64_f{fractional}"
+        source.append(f"#[no_mangle] pub fn {name}(x: {scalar}) -> ({scalar},{scalar}) {{ x.sin_cos_with::<64>() }}")
+        names.append(name)
+        # acos intentionally retains a convergent integer-root loop; only its
+        # emitted vectoring chunks, not this whole wrapper, must be acyclic.
+        source.append(f"#[no_mangle] pub fn cordic64_acos_f{fractional}(x: {scalar}) -> {scalar} {{ x.acos_with::<64>() }}")
     with tempfile.TemporaryDirectory(prefix="rs-math3d-unroll-codegen-") as temporary:
         temporary = Path(temporary)
         probe = temporary / "probes.rs"
@@ -148,6 +156,25 @@ def main():
                               "inverse_rows", "inverse_reciprocal", "checked_dot", "sum_products_pair"))]
         for name, graph in numeric_helpers:
             assert_acyclic(name, graph)
+        narrow_count = 0
+        body = None
+        for line in output.read_text().splitlines():
+            if line.startswith("define ") and any(marker in line for marker in (
+                    "cordic_rotate64_chunk", "cordic_vectoring64_chunk")):
+                body = line
+            elif body is not None:
+                body += "\n" + line
+                if line == "}":
+                    if re.search(r"\b(?:add|sub|mul|ashr|shl|lshr|sdiv|udiv|srem|urem)\b[^\n]*\bi128\b", body):
+                        raise AssertionError("i128 arithmetic leaked into i64 CORDIC chunk")
+                    body = None
+                    narrow_count += 1
+        narrow_graphs = [(name, graph) for name, graph in graphs.items()
+                         if "cordic_rotate64_chunk" in name or "cordic_vectoring64_chunk" in name]
+        if narrow_count < 6 or len(narrow_graphs) != narrow_count:
+            raise AssertionError("Missing const-specialized i64 CORDIC chunks")
+        for name, graph in narrow_graphs:
+            assert_acyclic(name, graph)
         library_graphs = functions(library_ir)
         cordic_count = 0
         for helper in ("cordic_rotate", "cordic_vectoring"):
@@ -158,7 +185,8 @@ def main():
                 assert_acyclic(name, graph)
             cordic_count += len(matches)
         print(f"Verified {len(names)} consumer probes, {len(numeric_helpers)} outlined numeric helpers "
-              f"and {cordic_count} shared CORDIC functions: no LLVM control-flow cycles.")
+              f"and {cordic_count} shared CORDIC functions: no LLVM control-flow cycles. "
+              f"Also checked {narrow_count} const-specialized i64 chunks: acyclic, no i128 arithmetic.")
 
 
 if __name__ == "__main__":

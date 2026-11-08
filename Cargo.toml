@@ -17,6 +17,8 @@ exclude = [".agents/**"]
 [dependencies]
 num-traits = { version = "0.2", default-features = false }
 libm = { version = "0.2", optional = true }
+glow = { version = "0.18", optional = true }
+sdl2 = { version = "0.38", features = ["use-pkgconfig"], optional = true }
 
 [lib]
 
@@ -40,6 +42,10 @@ required-features = ["std"]
 name = "physics_headless"
 required-features = ["std"]
 
+[[example]]
+name = "physics_demo"
+required-features = ["physics-demo"]
+
 [features]
 # Hosted applications, including `#![no_std]` crates that can explicitly link
 # Rust's standard library, use its floating-point operations by default.
@@ -51,3 +57,5 @@ libm = ["dep:libm"]
 # The system C math backend is selected only when std/libm are disabled and is
 # accepted only on Unix targets; source-level cfgs enforce that target policy.
 system-libm = []
+# Hosted visualization only; headless physics and no_std users do not enable GL/SDL.
+physics-demo = ["std", "dep:glow", "dep:sdl2"]

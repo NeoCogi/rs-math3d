@@ -21,6 +21,53 @@ The floor uses four-unit tiles so the existing segment/triangle kernels' quartic
 intermediates remain bounded for S15.16. Mesh construction/setup allocates once;
 tick scratch vectors retain their capacities.
 
+## SDL2 + glow GLES3 demo
+
+```sh
+cargo run --release --features physics-demo --example physics_demo -- --scalar fixed32
+```
+
+Choose `f32`, `fixed32` (S15.16) or `fixed64` (S31.32) at launch. The optional
+`physics-demo` feature enables glow 0.18 and SDL2 0.38, using the system SDL2
+development package through pkg-config. A GLES3-capable driver is required.
+SDL explicitly requests the OpenGL ES profile, version 3.0; the renderer checks
+the actual context and compiles GLSL ES 3.00 shaders. Headless physics and normal
+library/no_std builds do not require SDL2 or GL.
+
+![Fixed-point scene with spheres, oriented boxes and capsules above the teapot and bunny](images/physics-demo.png)
+
+The renderer derives primitive dimensions and transforms directly from each
+body and uploads the same immutable triangles used by its collision trees.
+Static meshes are shaded, the floor has a procedural grid, and a built-in bitmap
+HUD shows the scalar backend, motion counts, contacts and broad-phase pairs.
+GPU resources have explicit ownership and are destroyed before SDL's context.
+
+| Input | Action |
+| --- | --- |
+| Left drag / right drag | Orbit / pan camera |
+| Mouse wheel | Zoom |
+| Space / N | Pause/resume / advance one tick |
+| R | Reset the scene |
+| 1 / 2 / 3 | Launch a sphere / box / capsule toward the scene |
+| B / C | Toggle body AABBs / contact normals |
+| Escape | Exit |
+
+Interactive rendering accumulates elapsed time for fixed 120 Hz simulation,
+with at most eight catch-up ticks per frame. A finite run advances exactly two
+ticks per frame and disables vsync, allowing reproducible driver smoke tests:
+
+```sh
+cargo build --release --features physics-demo --example physics_demo
+SDL_VIDEODRIVER=offscreen target/release/examples/physics_demo \
+  --scalar fixed32 --frames 120 --hidden --capture /tmp/physics.ppm
+```
+
+The offscreen driver depends on the local SDL/EGL installation. Capture reads
+the final back buffer before swapping, using GLES' supported RGBA byte format,
+checks GL errors, and writes a top-down RGB PPM file. `--capture` applies when
+the `--frames` limit is reached. The committed screenshot is from this real
+fixed-point render path, converted from PPM to PNG with FFmpeg.
+
 ## Tick and ownership contracts
 
 `World::step()` advances one represented 1/120-second tick:
@@ -78,3 +125,11 @@ all-candidate traversal, sweep versus
 an exhaustive pair oracle, floor settling on all three backends, restitution
 and momentum, friction, angular impulses, stacked boxes, sleeping/waking,
 terminal disabled bodies, construction/capacity and repeated fixed ticks.
+
+Implementation validation also ran offline all-target tests with `physics-demo`,
+fixed-only tests, libm all-target checks, formatting and documentation with
+warnings denied. Each backend completed 1,200 headless ticks with finite pose
+and velocity checks. On SDL2 2.32.10 / Mesa 26.0.8, each backend rendered 120
+offscreen frames in an actual OpenGL ES 3.2 context without a GL error; fixed32
+also exercised screenshot readback. These runs validate this bounded scene,
+not arbitrary scales or identical trajectories across scalar backends.

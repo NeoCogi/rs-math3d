@@ -89,7 +89,7 @@ import it explicitly (for example, Linux or Windows applications):
 
 ```toml
 [dependencies]
-rs-math3d = "0.20.1"
+rs-math3d = "0.21.0"
 ```
 
 For example, a hosted crate may keep its own `#![no_std]` attribute while
@@ -119,14 +119,14 @@ pure-Rust `libm` backend:
 
 ```toml
 [dependencies]
-rs-math3d = { version = "0.20.1", default-features = false, features = ["libm"] }
+rs-math3d = { version = "0.21.0", default-features = false, features = ["libm"] }
 ```
 
 Fixed-only applications disable default features without selecting a backend:
 
 ```toml
 [dependencies]
-rs-math3d = { version = "0.20.1", default-features = false }
+rs-math3d = { version = "0.21.0", default-features = false }
 ```
 
 Unix applications that intentionally want the target's C math library may
@@ -134,7 +134,7 @@ select `system-libm` instead:
 
 ```toml
 [dependencies]
-rs-math3d = { version = "0.20.1", default-features = false, features = ["system-libm"] }
+rs-math3d = { version = "0.21.0", default-features = false, features = ["system-libm"] }
 ```
 
 `system-libm` is supported only on Unix targets and links the native `m`

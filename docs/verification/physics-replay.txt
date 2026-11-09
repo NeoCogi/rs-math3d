@@ -1,0 +1,75 @@
+Raw fixed-point physics replay verification
+Date: 2026-11-08
+Wire/solver reference: M3RPLY01, native fixed arithmetic, canonical constraints
+
+Host: x86_64 Linux, Intel Core Ultra 7 155H
+rustc 1.98.1 (48a229cea 2026-09-01), LLVM 22.1.8
+QEMU user: 10.2.1 (Ubuntu 1:10.2.1+ds-1ubuntu3.3)
+Cargo: --offline --release --example physics_replay, no custom native RUSTFLAGS
+
+Executed targets:
+  x86_64-unknown-linux-gnu: native process
+  armv5te-unknown-linux-musleabi: QEMU qemu-arm -cpu arm926, static rust-lld build
+    readelf attributes confirm CPU_name 5TE / CPU_arch v5TE
+  riscv64gc-unknown-linux-musl: QEMU qemu-riscv64, static rust-lld build
+    target RUSTFLAGS: -C target-feature=+crt-static -C link-self-contained=yes
+    readelf confirms ELF64 RISC-V, RVC and double-float ABI
+
+Each target consumed the same checked-in seed and compared every expected frame
+using `physics_replay check SEED TRACE`. Seeds have 26 dynamic bodies, the shared
+tiled floor/bunny/teapot triangles, raw constructor inputs/configuration, and five
+ordered commands. Reference duration is 1440 steps plus initial state (1441
+hashes). The decoder prepares state with fixed arithmetic; it does not regenerate
+the scene from hosted floating-point setup.
+
+                       fixed32 final       fixed64 final       states checked
+  x86_64 native        391128de5b3e471f     1157865a0cbea7c2    1441 per format
+  ARMv5TE / ARM926     391128de5b3e471f     1157865a0cbea7c2    1441 per format
+  RISC-V64 GC          391128de5b3e471f     1157865a0cbea7c2    1441 per format
+
+Each fixed32 invocation returned:
+  verified 1441 states; final 391128de5b3e471f
+Each fixed64 invocation returned:
+  verified 1441 states; final 1157865a0cbea7c2
+All six processes exited successfully, with no mismatching frame.
+
+Golden tick-zero hashes:
+  fixed32: 85a1e5c3261c0f60
+  fixed64: ff77fd633507a204
+
+SHA256 input/reference identities:
+3210efc404ab676177178c63da4f3970839da6853fca19a2f824e59740081713  tests/fixtures/physics-fixed32.bin
+93b61e2f920054bb802c76eaee538b92c0b6ae880421fe39024009b4a06071cb  tests/fixtures/physics-fixed32.hashes
+efa2c10110ccb7c5dffcf6d329136559ad412e2d70205157d66c6d786a49bfd3  tests/fixtures/physics-fixed64.bin
+2d323d606b5ac6b92cf48097b1b2aea5d423adbf04a9fd7b08ec538330a24f51  tests/fixtures/physics-fixed64.hashes
+
+Fresh validation:
+  cargo test --offline --features physics-demo --all-targets: passed
+  cargo test --offline --no-default-features: passed
+  final focused cargo test --offline --test physics_examples: 44 passed
+  final fixed-only physics_examples: 35 passed
+  cargo check --offline --all-targets --no-default-features --features libm: passed
+  RUSTDOCFLAGS=-Dwarnings cargo doc --offline --no-deps --lib --examples --features physics-demo: passed
+  cargo fmt --all -- --check: passed
+
+New regressions check partition permutations, candidate visitation permutations,
+different leaf sizes, every reference tick, observed quiet/sleep/disabled states,
+both impulse buffers, hidden-state hash sensitivity, malformed seeds including
+signed-minimum words, same-tick command order and terminal runtime input failure.
+
+CLI negative control:
+  Changed only tick 1's expected fixed32 hash to zero in a temporary trace.
+  The checker exited with failure at tick 1 (actual decimal hash
+  6027733598610031138), without regenerating the expected file.
+
+Target-selection diagnostic:
+  The generic arm-unknown-linux-musleabi build advertised ARMv6 and faulted in
+  libc memset on ARM926. Switched to the explicit armv5te target; its ELF
+  attributes and successful ARM926 runs establish the ARMv5TE result above.
+  All final runs use that explicit target.
+
+Scope: diagnostic noncryptographic fingerprints, a bounded versioned scenario,
+and the measured compiler/targets. No physical ARM/RISC-V board, RISC-V32 or
+big-endian target was executed. Emulation is not a hardware performance result.
+No claim of arbitrary-input physical stability or proof against hash collisions.
+No Python was used.

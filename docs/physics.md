@@ -122,6 +122,13 @@ body's represented pose and velocity for nonfinite values. Deterministic ticks
 repeat within one backend; different scalar quantization produces different
 trajectories and contact decisions.
 
+The [raw replay and determinism contract](physics-determinism.md) fixes starting
+inputs and tick-indexed commands and checks full state fingerprints, including
+sleep counters and both impulse buffers. Both fixed formats match all 1,441
+reference states on native x86-64, emulated ARMv5TE and emulated RISC-V64.
+Interactive camera/frame timing is outside that contract; applications must
+quantize and schedule external inputs identically to obtain matching ticks.
+
 This example uses discrete contacts and two-sided triangle surfaces. It does
 not provide CCD, joints, deformables, dynamic concave meshes, exact predicates,
 solid containment tests, or production-grade arbitrary-scale stability.

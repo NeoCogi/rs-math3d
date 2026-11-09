@@ -29,7 +29,7 @@ Neither fixture lost a triangle under the current preparation settings.
 Regenerate from the pinned online sources:
 
 ```sh
-python3 tools/prepare_collision_meshes.py --download
+cargo run --release --manifest-path tools/Cargo.toml --bin prepare-collision-meshes -- --download
 ```
 
 Or provide previously downloaded source files with `--bunny-archive PATH` and

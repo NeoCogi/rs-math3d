@@ -60,6 +60,8 @@ rigid-body impulses, friction and resting contacts. Run its teapot/bunny scene
 with `cargo run --release --example physics_headless -- fixed32 1200`.
 For the interactive SDL2/glow GLES3 demo, run
 `cargo run --release --features physics-demo --example physics_demo -- --scalar fixed32`.
+The [fixed-point replay checks](docs/physics-determinism.md) compare every tick,
+including sleeping and cached impulses, across x86-64, ARMv5TE and RISC-V64.
 
 The [const-selected CORDIC experiment](docs/cordic.md) compares
 `angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with

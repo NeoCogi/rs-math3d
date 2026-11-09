@@ -118,27 +118,15 @@
 //! The epsilon accepted by 3D line/ray-to-plane, shortest-line, triangle, and
 //! plane-normal routines is a finite, dimensionless angular tolerance in
 //! `0..=1`. Parallel tests use `|sin(theta)| <= epsilon`, and perpendicular
-//! tests use `|cos(theta)| <= epsilon`. The implementations normalize temporary
-//! vectors with max-component scaling, so rescaling a finite, nonzero direction
-//! stored in an already represented primitive does not decide whether an
-//! intersection exists, within the scalar representation and quantization limits.
+//! tests use `|cos(theta)| <= epsilon`. Checked queries prepare directions with
+//! max-component scaling and reuse them for classification and solving, subject
+//! to the scalar's representation and quantization limits.
 //!
-//! Internal angular classifiers represent within-tolerance, outside-tolerance,
-//! and invalid states explicitly. A shared checked-query gate proceeds only for
-//! a valid outside-tolerance classification; within-tolerance and invalid
-//! classifications both map to `None` without being conflated internally.
-//!
-//! A query prepares each required direction once and reuses that representation
-//! for its angular tests and result calculation. The ordinary parallel path
-//! compares scalar-specific stable norms: float norms use max-component scaling,
-//! and fixed norms compare widened integer squares before quantization.
-//!
-//! Intersection points retain their geometric meaning under direction
-//! rescaling. Returned line parameters retain the original equation
-//! `point + direction * t`, so scaling `direction` scales `t` inversely. A
-//! query returns `None` if that original-direction parameter would overflow or
-//! if exponent-boundary rounding cannot produce a parameter consistent with
-//! the separately calculated intersection point.
+//! Returned line parameters retain the original equation
+//! `point + direction * t`, so scaling `direction` scales `t` inversely.
+//! Handling of invalid inputs, unrepresentable results and valid geometric misses
+//! follows the [arithmetic contracts](#arithmetic-contracts) below, including the
+//! distinct preconditions of ordinary and checked operations.
 //!
 //! ## Modules
 //!

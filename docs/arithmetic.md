@@ -150,6 +150,27 @@ finite in `0..=1`. Unchecked APIs assume a valid epsilon when one is supplied.
 An exact zero quaternion has no unit direction: ordinary normalization follows
 native arithmetic, and checked normalization reports `Degenerate`.
 
+This fixed-only example distinguishes a valid parallel miss from an invalid
+angular tolerance:
+
+```rust
+use rs_math3d::{Fixed, MathError, Plane, Ray, Vector3};
+# fn main() -> Result<(), MathError> {
+type F = Fixed<i32, 16>;
+let origin = Vector3::new(F::ZERO, F::ZERO, F::ZERO);
+let up = Vector3::new(F::ZERO, F::ONE, F::ZERO);
+let right = Vector3::new(F::ONE, F::ZERO, F::ZERO);
+let plane = Plane::checked_new(&up, &origin, F::ZERO)?;
+let ray = Ray::checked_new(&up, &right, F::ZERO)?;
+assert!(ray.checked_intersect_plane(&plane, F::ZERO)?.is_none());
+assert!(matches!(
+    ray.checked_intersect_plane(&plane, -F::DELTA),
+    Err(MathError::InvalidTolerance)
+));
+# Ok(())
+# }
+```
+
 Checked closest-point line/segment tuples enforce the same stored-parameter rule
 as checked intersections: nonzero physical travel that becomes a zero parameter
 is `Overflow`. Exact zero travel and clamped segment endpoints remain valid.

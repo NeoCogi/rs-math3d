@@ -104,11 +104,27 @@ immutable world-space triangles, shared by collision and rendering consumers.
 No global state, runtime numeric-policy switch or untyped collider payload exists.
 
 Construction validates dimensions, material, mass, finite pose and normalized
-orientation. Checked mass/inertia preparation uses the same native quantization
-as ordinary arithmetic. During stepping, callers must keep every intermediate
-representable. Supported scene dimensions are 0.1–4 units, capsule centerline
-half-length 0–4, mass 0.1–10, and centers within ±24. Other geometry/scales need
-their own range analysis; finite input alone does not prove every product fits.
+orientation. Mass reciprocals and inverse-inertia divisions are checked and use
+the same native quantization as ordinary arithmetic. Shape-inertia intermediates
+and stepping still require the caller to keep every intermediate representable.
+
+The current example constructor enforces dimensions 0.1–4 units, capsule
+centerline half-length 0–4, and mass 0.1–10; the example world bounds centers to
+±24. These are heuristic scene limits chosen for the initial S15.16 workload,
+not fundamental physics limits or a derived overflow guarantee. They also apply
+to f32/f64 even though those backends have different working ranges.
+
+Small masses/radii produce large inverse inertia: a sphere has
+`I^-1 = 5 / (2 * mass * radius^2)`. Large dimensions/coordinates increase collision
+intermediates, and tiny features can be poorly resolved by S15.16's 1/65,536
+quantum. An accepted input can still overflow a later product; finite values and
+these thresholds do not prove safety for every contact configuration.
+
+For a reusable general engine, body construction should validate positive finite
+physical inputs and use checked, representable mass/inertia preparation. Scene
+size limits and escape boundaries belong in demo configuration. That separation
+is the intended generalization; the current example still enforces the limits
+above. Other geometry/scales require their own range analysis.
 
 `Awake` accumulates quiet ticks only with immutable mesh support whose normal
 opposes gravity (any static contact at zero gravity) and **no body/body contact**;

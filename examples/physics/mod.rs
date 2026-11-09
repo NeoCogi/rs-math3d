@@ -174,9 +174,14 @@ fn rotate<T: RealScalar>(q: Quat<T>, angle: Vector3<T>) -> Quat<T> {
     Quat::normalize(&Quat::add(&q, &(derivative * T::half())))
 }
 impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
-    /// Validates bounded dimensions/mass and prepares shape-specific inertia.
+    /// Validates example-policy bounds and prepares shape-specific inertia.
     /// Dimensions are in [0.1,4], centerline half-length in [0,4], mass in [0.1,10].
-    /// Positions must remain within the world's domain and intermediates must fit T.
+    /// These heuristic demo limits apply to floats too; they are neither physical
+    /// requirements nor a proof that all intermediates fit. Small masses/radii
+    /// increase inverse inertia, and large geometry increases collision products.
+    /// Positions must remain within the example world's domain and all setup/step
+    /// intermediates must fit T. A general engine should separate scene policy
+    /// from positive/finite input validation and checked derived inertia.
     pub fn new(
         shape: Shape<T>,
         pose: Pose<T>,

@@ -237,6 +237,9 @@ fn build<T: RealScalar>(
         kind: Kind::Leaf { start },
     });
     if ids.len() <= leaf_size {
+        // Selection only specifies partition membership. Canonicalize each leaf
+        // independently of std's partition implementation and pointer width.
+        ids.sort_unstable();
         return (index, 1);
     }
     let extent = bounds.max - bounds.min;
@@ -360,8 +363,10 @@ impl<T: RealScalar> AabbTree<T> {
         self.entries.get(id).map(|e| &e.triangle)
     }
 
-    /// Visits every triangle whose represented bounds touch `bounds`, in stable
-    /// tree order. The callback owns narrow phase; no candidate is dropped after
+    /// Visits every triangle whose represented bounds touch `bounds`, left tree
+    /// first and ascending input ID within each leaf. Split ties use input ID,
+    /// so this order is independent of the partition algorithm. The callback
+    /// owns narrow phase; no candidate is dropped after
     /// a first hit. Traversal allocates no scratch and cannot mutate the tree.
     /// `triangle_tests` counts leaf candidates delivered to the callback.
     pub fn for_each_candidate(

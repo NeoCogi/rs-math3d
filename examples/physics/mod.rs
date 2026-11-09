@@ -415,7 +415,7 @@ pub struct StaticMesh<T: RealScalar> {
 }
 /// Explicit collision ownership. Static triangle identity is used in candidates;
 /// constraints group one mesh's contacts for seam reduction and warm starting.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Other {
     /// Another append-only body ID.
     Body(usize),
@@ -423,7 +423,7 @@ enum Other {
     Mesh(usize),
 }
 /// Broad-phase identities: body pairs cannot carry a meaningless triangle ID.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Candidate {
     /// Two stable dynamic IDs in ascending order.
     Bodies { a: usize, b: usize },
@@ -868,6 +868,10 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
     /// Phase two: only broad-phase candidates invoke the shared collision/contact
     /// module. Static triangle witnesses retain original tree IDs.
     fn narrow_phase(&mut self) {
+        // Contact merging, warm matching and the eight-point reduction are
+        // order sensitive. Consume stable identities, never traversal order.
+        // Unique candidates have a total key: variant, body, other, triangle.
+        self.candidates.sort_unstable();
         std::mem::swap(&mut self.contacts, &mut self.previous);
         self.contacts.clear();
         for i in 0..self.candidates.len() {
@@ -894,6 +898,48 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                 self.add_contact(a, other, point);
             }
         }
+        // Give the sequential solver a total geometric order after reduction.
+        // Every component is finite under the example's numeric preconditions.
+        self.contacts.sort_unstable_by(|a, b| {
+            a.a.cmp(&b.a).then(a.other.cmp(&b.other)).then_with(|| {
+                let values = |c: &Constraint<T>| {
+                    [
+                        c.anchor_a.x,
+                        c.anchor_a.y,
+                        c.anchor_a.z,
+                        c.anchor_b.x,
+                        c.anchor_b.y,
+                        c.anchor_b.z,
+                        c.normal.x,
+                        c.normal.y,
+                        c.normal.z,
+                        c.tangent[0].x,
+                        c.tangent[0].y,
+                        c.tangent[0].z,
+                        c.tangent[1].x,
+                        c.tangent[1].y,
+                        c.tangent[1].z,
+                        c.depth,
+                        c.mass[0],
+                        c.mass[1],
+                        c.mass[2],
+                        c.bounce,
+                        c.friction,
+                        c.impulse[0],
+                        c.impulse[1],
+                        c.impulse[2],
+                    ]
+                };
+                values(a)
+                    .iter()
+                    .zip(values(b))
+                    .find_map(|(x, y)| {
+                        let order = x.partial_cmp(&y).expect("finite contact components");
+                        (!order.is_eq()).then_some(order)
+                    })
+                    .unwrap_or(core::cmp::Ordering::Equal)
+            })
+        });
         self.stats.contacts = self.contacts.len();
     }
     /// Applies equal/opposite impulses without aliasing mutable body references.

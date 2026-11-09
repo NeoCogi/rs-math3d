@@ -88,6 +88,15 @@ fixed-point render path, converted from PPM to PNG with FFmpeg.
    velocity. Seam points merge, and each body/object pair retains at most eight
    deepest constraints. Damping and supported quiet ticks drive sleeping.
 
+Tree splits break equal center keys by original triangle ID, and each leaf
+visits IDs in ascending order. Before contact reduction, candidates sort by
+variant and stable body/mesh/triangle IDs. Reduced constraints sort by owner and
+their full represented geometric/solver values before sequential impulses.
+These total orders remove dependence on standard-library partition layout,
+broad-phase visitation order and tree leaf size. Triangle input order remains
+part of the scene's identity. This changes trajectories from the initial demo,
+whose solver inherited traversal order; it preserves the collision contracts.
+
 Bodies own immutable dimensions, mass/inertia and controlled pose/velocity state.
 Their world-local IDs are append-only and remain stable until reset. There is
 no per-body removal/reuse and the demo limits capacity to 128. Static trees own
@@ -125,6 +134,9 @@ all-candidate traversal, sweep versus
 an exhaustive pair oracle, floor settling on all three backends, restitution
 and momentum, friction, angular impulses, stacked boxes, sleeping/waking,
 terminal disabled bodies, construction/capacity and repeated fixed ticks.
+Partition-permutation tests cover coincident split keys and five leaf sizes;
+a dense six-box test reverses/rotates candidate visitation for 180 ticks and
+compares raw poses, velocities and warm impulses against the normal pipeline.
 
 Implementation validation also ran offline all-target tests with `physics-demo`,
 fixed-only tests, libm all-target checks, formatting and documentation with

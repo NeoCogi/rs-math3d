@@ -49,6 +49,36 @@ fn triangle<T: RealScalar + TryCastFrom<f64>>(z: f64) -> Tri3<T> {
     Tri3::new([p(-1.0, -1.0, z), p(1.0, -1.0, z), p(0.0, 1.0, z)])
 }
 
+/// Selection may permute each partition arbitrarily. Feed the same stable IDs
+/// through different initial permutations, including coincident split keys.
+#[test]
+fn leaf_visitation_is_independent_of_partition_permutation() {
+    type T = Fixed<i32, 16>;
+    for leaf_size in [1, 2, 4, 13, 64] {
+        let tree = AabbTree::new(
+            (0..33)
+                .map(|i| triangle::<T>((i % 7) as f64 * 0.5))
+                .collect(),
+            leaf_size,
+        )
+        .unwrap();
+        for shift in 0..33 {
+            let mut ids: Vec<_> = (0..33).rev().collect();
+            ids.rotate_left(shift);
+            let mut nodes = Vec::new();
+            build(&tree.entries, &mut ids, &mut nodes, 0, leaf_size);
+            assert_eq!(ids, tree.order, "leaf size {leaf_size}, rotation {shift}");
+            for node in nodes {
+                if let Kind::Leaf { start } = node.kind {
+                    assert!(ids[start..start + node.count]
+                        .windows(2)
+                        .all(|w| w[0] < w[1]));
+                }
+            }
+        }
+    }
+}
+
 /// Independently verifies leaf coverage, stable IDs, parent containment and
 /// root-first topology on both coincident and spatially varied real geometry.
 fn structure<T: RealScalar>(tree: &AabbTree<T>, leaf_size: usize) {

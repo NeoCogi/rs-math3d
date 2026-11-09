@@ -288,6 +288,74 @@ fn fixed_ticks_repeat_bit_for_bit() {
     );
 }
 
+/// Reversing/shuffling broad-phase output must not affect seam reduction or
+/// sequential impulses. Dense overlapping bodies exercise both candidate kinds.
+#[test]
+fn solver_is_independent_of_candidate_visitation_order() {
+    type T = Fixed<i32, 16>;
+    let build = || {
+        let mut w = World::<T>::new();
+        floor(&mut w);
+        for i in 0..6 {
+            w.add_body(
+                Body::new(
+                    Shape::Box {
+                        half: v(0.45, 0.4, 0.45),
+                    },
+                    Pose::at(v((i % 3) as f64 * 0.75, 0.35 + (i / 3) as f64 * 0.7, 0.)),
+                    scalar(1.),
+                    material(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        w
+    };
+    let mut a = build();
+    let mut b = build();
+    for tick in 0..180 {
+        a.step();
+        b.stats = Stats::default();
+        b.integrate();
+        b.broad_phase();
+        b.candidates.reverse();
+        if !b.candidates.is_empty() {
+            let offset = tick % b.candidates.len();
+            b.candidates.rotate_left(offset);
+        }
+        b.narrow_phase();
+        b.solve_velocity();
+        b.solve_position();
+        b.sleep();
+        assert_eq!(a.contacts.len(), b.contacts.len());
+        for (a, b) in a.bodies.iter().zip(&b.bodies) {
+            let values = |b: &Body<T>| {
+                [
+                    b.pose.position.x,
+                    b.pose.position.y,
+                    b.pose.position.z,
+                    b.pose.orientation.x,
+                    b.pose.orientation.y,
+                    b.pose.orientation.z,
+                    b.pose.orientation.w,
+                    b.velocity.x,
+                    b.velocity.y,
+                    b.velocity.z,
+                    b.angular.x,
+                    b.angular.y,
+                    b.angular.z,
+                ]
+                .map(|x| x.to_bits())
+            };
+            assert_eq!(values(a), values(b), "tick {tick}");
+        }
+        for (a, b) in a.contacts.iter().zip(&b.contacts) {
+            assert_eq!(a.impulse, b.impulse, "warm cache at tick {tick}");
+        }
+    }
+}
+
 /// An independent exhaustive AABB-pair oracle checks sweep pruning and stable
 /// insertion order after bodies exchange X positions, without using narrow phase.
 #[test]

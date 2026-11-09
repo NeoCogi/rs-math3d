@@ -37,13 +37,9 @@ use rs_math3d::Tri3;
 /// Default friction/restitution for dynamic shapes and static triangle surfaces.
 pub fn material<T: RealScalar + TryCastFrom<f64>>() -> Material<T> {
     Material {
-        friction: scalar(0.65),
-        restitution: scalar(0.15),
+        friction: T::cast_from(0.65),
+        restitution: T::cast_from(0.15),
     }
-}
-/// Converts one setup vector from finite bounded source coordinates.
-pub fn vector<T: RealScalar + TryCastFrom<f64>>(p: [f64; 3]) -> Vector3<T> {
-    Vector3::new(scalar(p[0]), scalar(p[1]), scalar(p[2]))
 }
 /// Creates a sphere, capsule or box with a tilted initial orientation. Dimensions
 /// are shared with rendering through Shape; no separate visible collider exists.
@@ -54,26 +50,26 @@ pub fn body<T: RealScalar + TryCastFrom<f64>>(
 ) -> Result<Body<T>, Error> {
     let shape = match kind % 3 {
         0 => Shape::Sphere {
-            radius: scalar(0.42),
+            radius: T::cast_from(0.42),
         },
         1 => Shape::Box {
-            half: vector([0.45, 0.35, 0.4]),
+            half: Vector3::from_array([0.45, 0.35, 0.4]).map(T::cast_from),
         },
         _ => Shape::Capsule {
-            half_height: scalar(0.45),
-            radius: scalar(0.27),
+            half_height: T::cast_from(0.45),
+            radius: T::cast_from(0.27),
         },
     };
-    let angle = scalar::<T>((seed % 7) as f64 * 0.11);
-    let axis = contact::unit(vector([0.7, 0.3, 1.0])).unwrap();
+    let angle = <T>::cast_from((seed % 7) as f64 * 0.11);
+    let axis = contact::unit(Vector3::from_array([0.7, 0.3, 1.0]).map(T::cast_from)).unwrap();
     let orientation = Quat::of_axis_angle(&axis, angle);
     Body::new(
         shape,
         Pose {
-            position: vector(position),
+            position: Vector3::from_array(position).map(T::cast_from),
             orientation,
         },
-        scalar(1.0),
+        T::cast_from(1.0),
         material(),
     )
 }
@@ -86,10 +82,10 @@ pub fn demo<T: RealScalar + TryCastFrom<f64>>() -> Result<World<T>, String> {
         for z in 0..8 {
             let x = -16.0 + x as f64 * 4.0;
             let z = -16.0 + z as f64 * 4.0;
-            let a = vector([x, 0.0, z]);
-            let b = vector([x + 4.0, 0.0, z]);
-            let c = vector([x + 4.0, 0.0, z + 4.0]);
-            let d = vector([x, 0.0, z + 4.0]);
+            let a = Vector3::from_array([x, 0.0, z]).map(T::cast_from);
+            let b = Vector3::from_array([x + 4.0, 0.0, z]).map(T::cast_from);
+            let c = Vector3::from_array([x + 4.0, 0.0, z + 4.0]).map(T::cast_from);
+            let d = Vector3::from_array([x, 0.0, z + 4.0]).map(T::cast_from);
             ground.push(Tri3::new([a, c, b]));
             ground.push(Tri3::new([a, d, c]));
         }
@@ -109,10 +105,10 @@ pub fn demo<T: RealScalar + TryCastFrom<f64>>() -> Result<World<T>, String> {
         let triangles = source
             .iter()
             .map(|t| {
-                Tri3::new(
-                    t.vertices()
-                        .map(|p| vector([p.x * 0.25 + x, p.y * 0.25 - min_y, p.z * 0.25])),
-                )
+                Tri3::new(t.vertices().map(|p| {
+                    Vector3::from_array([p.x * 0.25 + x, p.y * 0.25 - min_y, p.z * 0.25])
+                        .map(T::cast_from)
+                }))
             })
             .collect();
         world
@@ -129,8 +125,8 @@ pub fn demo<T: RealScalar + TryCastFrom<f64>>() -> Result<World<T>, String> {
         let mut body =
             body(i, [x, 10.0 + (i % 8) as f64 * 0.8, z], i).map_err(|e| format!("body: {e:?}"))?;
         body.set_velocity(
-            vector([if i % 2 == 0 { 0.4 } else { -0.4 }, 0.0, 0.2]),
-            vector([0.0, 0.2, 0.0]),
+            Vector3::from_array([if i % 2 == 0 { 0.4 } else { -0.4 }, 0.0, 0.2]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.2, 0.0]).map(T::cast_from),
         )
         .map_err(|e| format!("velocity: {e:?}"))?;
         world.add_body(body).map_err(|e| format!("spawn: {e:?}"))?;

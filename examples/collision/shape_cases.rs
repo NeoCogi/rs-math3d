@@ -31,7 +31,7 @@
 //! common binary grids so f32 and both fixed formats start from identical values.
 
 use crate::collision::{aabb_tree::AabbTree, Capsule, Obb};
-use rs_math3d::{RealScalar, TryCastFrom, Vector3};
+use rs_math3d::{CrossProduct, RealScalar, TryCastFrom, Vector, Vector3};
 
 /// Shared query corpus, with varied orientation, size and surface-normal offset.
 pub struct ShapeCases<T: RealScalar> {
@@ -46,18 +46,9 @@ fn snap(x: f64, scale: f64) -> f64 {
     (x * scale).round_ties_even() / scale
 }
 
-/// Copies prepared scalar data after the common-grid setup is complete.
-fn scalar<T: TryCastFrom<f64>>(x: f64) -> T {
-    T::try_cast_from(x).ok().expect("shape fixture fits scalar")
-}
-
 /// Encodes an exactly shared vector, using Q8 coordinates or Q16 unit axes.
-fn vector<T: RealScalar + TryCastFrom<f64>>(v: [f64; 3], scale: f64) -> Vector3<T> {
-    Vector3::new(
-        scalar(snap(v[0], scale)),
-        scalar(snap(v[1], scale)),
-        scalar(snap(v[2], scale)),
-    )
+fn snapped_vector<T: RealScalar + TryCastFrom<f64>>(v: [f64; 3], scale: f64) -> Vector3<T> {
+    Vector3::from_array(v).map(|x| T::cast_from(snap(x, scale)))
 }
 
 /// Builds 256 surface-neighborhood poses and eight remote poses per shape.
@@ -75,67 +66,58 @@ where
     }
     for sample in 0..64 {
         let vertices = tree.triangle(sample * count / 64).unwrap().vertices();
-        let points: [[f64; 3]; 3] = core::array::from_fn(|i| {
-            let p = vertices[i];
-            [p.x, p.y, p.z].map(|x| f64::try_cast_from(x).ok().unwrap())
-        });
-        let a = core::array::from_fn::<_, 3, _>(|i| points[1][i] - points[0][i]);
-        let b = core::array::from_fn::<_, 3, _>(|i| points[2][i] - points[0][i]);
-        let normal = [
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0],
-        ];
-        let normal_length = normal.iter().map(|x| x * x).sum::<f64>().sqrt();
-        let tangent_length = a.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let points = vertices.map(|p| p.map(f64::cast_from));
+        let a = points[1] - points[0];
+        let b = points[2] - points[0];
+        let normal = Vector3::cross(&a, &b);
+        // Retain the setup's sum-of-squares rounding before grid snapping.
+        let normal_length = Vector3::dot(&normal, &normal).sqrt();
+        let tangent_length = Vector3::dot(&a, &a).sqrt();
         assert!(normal_length > 0.0 && tangent_length > 0.0);
-        let normal = normal.map(|x| x / normal_length);
-        let tangent = a.map(|x| x / tangent_length);
-        let center =
-            core::array::from_fn::<_, 3, _>(|i| (points[0][i] + points[1][i] + points[2][i]) / 3.0);
+        let normal = normal / normal_length;
+        let tangent = a / tangent_length;
+        let center = (points[0] + points[1] + points[2]) / 3.0;
         let angle = (sample as f64 - 31.5) / 32.0;
         let (s, c) = angle.sin_cos();
         let (sy, cy) = (angle * 0.625).sin_cos();
         let axes = [
-            vector([c * cy, s * cy, -sy], 65536.0),
-            vector([-s, c, 0.0], 65536.0),
-            vector([c * sy, s * sy, cy], 65536.0),
+            snapped_vector([c * cy, s * cy, -sy], 65536.0),
+            snapped_vector([-s, c, 0.0], 65536.0),
+            snapped_vector([c * sy, s * sy, cy], 65536.0),
         ];
         for offset in [-1.5, -0.25, 0.25, 1.5] {
-            let center = core::array::from_fn::<_, 3, _>(|i| center[i] + normal[i] * offset);
+            let center = center + normal * offset;
             capsules.push(Capsule {
-                a: vector(
-                    core::array::from_fn(|i| center[i] - tangent[i] * 0.75 - normal[i] * 0.125),
-                    256.0,
-                ),
-                b: vector(
-                    core::array::from_fn(|i| center[i] + tangent[i] * 0.75 + normal[i] * 0.125),
-                    256.0,
-                ),
-                radius: scalar(if sample % 2 == 0 { 0.375 } else { 0.5 }),
+                a: snapped_vector((center - tangent * 0.75 - normal * 0.125).to_array(), 256.0),
+                b: snapped_vector((center + tangent * 0.75 + normal * 0.125).to_array(), 256.0),
+                radius: T::cast_from(if sample % 2 == 0 { 0.375 } else { 0.5 }),
             });
             obbs.push(Obb {
-                center: vector(center, 256.0),
+                center: snapped_vector(center.to_array(), 256.0),
                 axes,
-                half: Vector3::new(scalar(1.0), scalar(0.5), scalar(0.25)),
+                half: Vector3::new(T::cast_from(1.0), T::cast_from(0.5), T::cast_from(0.25)),
             });
         }
     }
     for i in 0..8 {
-        let center = Vector3::new(scalar::<T>(40.0 + i as f64), scalar(40.0), scalar(40.0));
+        let center = Vector3::new(
+            <T>::cast_from(40.0 + i as f64),
+            T::cast_from(40.0),
+            T::cast_from(40.0),
+        );
         capsules.push(Capsule {
             a: center,
             b: center,
-            radius: scalar(0.5),
+            radius: T::cast_from(0.5),
         });
         obbs.push(Obb {
             center,
             axes: [
-                vector([1.0, 0.0, 0.0], 65536.0),
-                vector([0.0, 1.0, 0.0], 65536.0),
-                vector([0.0, 0.0, 1.0], 65536.0),
+                snapped_vector([1.0, 0.0, 0.0], 65536.0),
+                snapped_vector([0.0, 1.0, 0.0], 65536.0),
+                snapped_vector([0.0, 0.0, 1.0], 65536.0),
             ],
-            half: Vector3::new(scalar(1.0), scalar(0.5), scalar(0.25)),
+            half: Vector3::new(T::cast_from(1.0), T::cast_from(0.5), T::cast_from(0.25)),
         });
     }
     ShapeCases { capsules, obbs }

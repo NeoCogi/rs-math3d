@@ -64,19 +64,14 @@ struct Reference {
     obbs: [Vec<bool>; 2],
 }
 
-/// Exact setup conversion for this bounded fixture grid.
-fn n<T: TryCastFrom<f64>>(x: f64) -> T {
-    T::try_cast_from(x).ok().unwrap()
-}
-/// Typed point/vector conversion outside timers.
-fn point<T: RealScalar + TryCastFrom<f64>>(a: [f64; 3]) -> Vector3<T> {
-    Vector3::new(n(a[0]), n(a[1]), n(a[2]))
-}
 /// Builds a ray with the original, common stored direction. Public Ray fields
 /// support this parameterization, and both box/triangle solvers retain it.
 fn ray<T: RealScalar + TryCastFrom<f64>>(spec: &RaySpec) -> Ray<T, Vector3<T>> {
-    let mut ray = Ray::new(&point(spec.origin), &point([0.0, 0.0, 1.0]));
-    ray.direction = point(spec.direction);
+    let mut ray = Ray::new(
+        &Vector3::from_array(spec.origin).map(T::cast_from),
+        &Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+    );
+    ray.direction = Vector3::from_array(spec.direction).map(T::cast_from);
     ray
 }
 
@@ -140,7 +135,12 @@ fn reference() -> Reference {
     ];
     let pairs = offsets
         .iter()
-        .map(|&o| meshes[0].intersects(&meshes[1], point(o)).hit.is_some())
+        .map(|&o| {
+            meshes[0]
+                .intersects(&meshes[1], Vector3::from_array(o).map(f32::cast_from))
+                .hit
+                .is_some()
+        })
         .collect();
     let shape_cases: [_; 2] = core::array::from_fn(|i| shape_cases::model_cases(&meshes[i]));
     let capsules = core::array::from_fn(|i| {
@@ -325,7 +325,7 @@ fn backend<T: RealScalar + TryCastFrom<f64> + Debug>(
             classification += (actual.hit.is_some() != baseline.is_some()) as usize;
             if let (Some(a), Some(b)) = (actual.hit, baseline) {
                 ids += (a.triangle != b.triangle) as usize;
-                let t = f64::try_cast_from(a.parameter).ok().unwrap();
+                let t = f64::cast_from(a.parameter);
                 max_parameter = max_parameter.max((t - b.parameter as f64).abs());
             }
             accumulate(&mut tree_work, actual.stats);
@@ -370,7 +370,12 @@ fn backend<T: RealScalar + TryCastFrom<f64> + Debug>(
             collision::box_triangle,
         );
     }
-    let offsets: Vec<_> = reference.offsets.iter().copied().map(point::<T>).collect();
+    let offsets: Vec<_> = reference
+        .offsets
+        .iter()
+        .copied()
+        .map(|p| Vector3::from_array(p).map(T::cast_from))
+        .collect();
     let (mut hits, mut changes, mut root_rejections) = (0, 0, 0);
     let (mut tree_work, mut flat_work) = (QueryStats::default(), QueryStats::default());
     for (i, &offset) in offsets.iter().enumerate() {

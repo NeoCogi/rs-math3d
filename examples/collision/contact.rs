@@ -119,12 +119,10 @@ impl<T: RealScalar> Manifold<T> {
     }
 }
 
-/// Closed AABB predicate shared by physics broad-phase references.
-pub fn overlaps<T: RealScalar>(a: &Box3<T>, b: &Box3<T>) -> bool {
-    super::aabb_tree::overlap(a, b)
-}
 /// Normalizes via the largest component so fixed small axes retain a denominator.
 /// A represented zero direction has no unique normal and returns None.
+/// The fused squared-length quantization is part of this collision experiment's
+/// contact policy and can differ from the core norm-based normalizers.
 pub fn unit<T: RealScalar>(v: Vector3<T>) -> Option<Vector3<T>> {
     let scale = v.max_abs_component();
     if scale == T::zero() {
@@ -159,16 +157,12 @@ fn swept_normal<T: RealScalar>(a: Vector3<T>, b: Vector3<T>) -> Vector3<T> {
 fn world<T: RealScalar>(b: &Obb<T>, p: Vector3<T>) -> Vector3<T> {
     b.center + b.axes[0] * p.x + b.axes[1] * p.y + b.axes[2] * p.z
 }
-/// Component projection without requiring Index on the vector type.
-fn component<T: RealScalar>(v: Vector3<T>, i: usize) -> T {
-    [v.x, v.y, v.z][i]
-}
 /// Closest point on a closed segment, including collapsed centerlines.
 fn segment_point<T: RealScalar>(p: Vector3<T>, a: Vector3<T>, b: Vector3<T>) -> Vector3<T> {
     let d = b - a;
     let length = d.length_squared();
     a + d * if length > T::zero() {
-        clamp(Vector3::dot(&(p - a), &d) / length, T::zero(), T::one())
+        (Vector3::dot(&(p - a), &d) / length).clamp(T::zero(), T::one())
     } else {
         T::zero()
     }
@@ -197,17 +191,17 @@ fn segments<T: RealScalar>(
     let er = Vector3::dot(&e, &r);
     let denom = dd * ee - de * de;
     let mut s = if denom > T::zero() {
-        clamp((de * er - dr * ee) / denom, T::zero(), T::one())
+        ((de * er - dr * ee) / denom).clamp(T::zero(), T::one())
     } else {
         T::zero()
     };
     let mut t = (de * s + er) / ee;
     if t < T::zero() {
         t = T::zero();
-        s = clamp(-dr / dd, T::zero(), T::one());
+        s = (-dr / dd).clamp(T::zero(), T::one());
     } else if t > T::one() {
         t = T::one();
-        s = clamp((de - dr) / dd, T::zero(), T::one());
+        s = ((de - dr) / dd).clamp(T::zero(), T::one());
     }
     (p + d * s, a + e * t)
 }
@@ -241,7 +235,7 @@ fn segment_triangle<T: RealScalar>(
         if ((da <= T::zero() && db >= T::zero()) || (db <= T::zero() && da >= T::zero()))
             && da != db
         {
-            let p = a + (b - a) * clamp(da / (da - db), T::zero(), T::one());
+            let p = a + (b - a) * (da / (da - db)).clamp(T::zero(), T::one());
             if inside_triangle(p, tri, normal) {
                 return (p, p);
             }
@@ -287,9 +281,9 @@ fn rounded<T: RealScalar>(
 fn sphere_box_contact<T: RealScalar>(s: &Sphere3<T>, b: &Obb<T>) -> Manifold<T> {
     let p = local(b, s.center);
     let q = Vector3::new(
-        clamp(p.x, -b.half.x, b.half.x),
-        clamp(p.y, -b.half.y, b.half.y),
-        clamp(p.z, -b.half.z, b.half.z),
+        p.x.clamp(-b.half.x, b.half.x),
+        p.y.clamp(-b.half.y, b.half.y),
+        p.z.clamp(-b.half.z, b.half.z),
     );
     if (p - q).length_squared() > T::zero() {
         return rounded(s.center, s.radius, world(b, q), T::zero(), up());
@@ -297,14 +291,14 @@ fn sphere_box_contact<T: RealScalar>(s: &Sphere3<T>, b: &Obb<T>) -> Manifold<T> 
     let mut axis = 0;
     let mut distance = b.half.x - p.x.tabs();
     for i in 1..3 {
-        let d = component(b.half, i) - component(p, i).tabs();
+        let d = b.half.to_array()[i] - p.to_array()[i].tabs();
         if d < distance {
             axis = i;
             distance = d;
         }
     }
     let normal = b.axes[axis]
-        * if component(p, axis) >= T::zero() {
+        * if p.to_array()[axis] >= T::zero() {
             T::one()
         } else {
             -T::one()
@@ -329,13 +323,13 @@ fn segment_box<T: RealScalar>(
     breaks[1] = T::one();
     let mut count = 2;
     for i in 0..3 {
-        let direction = component(d, i);
+        let direction = d.to_array()[i];
         if direction != T::zero() {
-            for bound in [-component(half, i), component(half, i)] {
-                if bound > T::min(component(a, i), component(b, i))
-                    && bound < T::max(component(a, i), component(b, i))
+            for bound in [-half.to_array()[i], half.to_array()[i]] {
+                if bound > T::min(a.to_array()[i], b.to_array()[i])
+                    && bound < T::max(a.to_array()[i], b.to_array()[i])
                 {
-                    let t = (bound - component(a, i)) / direction;
+                    let t = (bound - a.to_array()[i]) / direction;
                     let mut j = count;
                     while j > 0 && breaks[j - 1] > t {
                         breaks[j] = breaks[j - 1];
@@ -349,9 +343,9 @@ fn segment_box<T: RealScalar>(
     }
     let closest = |p: Vector3<T>| {
         Vector3::new(
-            clamp(p.x, -half.x, half.x),
-            clamp(p.y, -half.y, half.y),
-            clamp(p.z, -half.z, half.z),
+            p.x.clamp(-half.x, half.x),
+            p.y.clamp(-half.y, half.y),
+            p.z.clamp(-half.z, half.z),
         )
     };
     let mut best = (a, closest(a));
@@ -368,18 +362,18 @@ fn segment_box<T: RealScalar>(
         let mut slope = [T::zero(); 3];
         let mut offset = slope;
         for i in 0..3 {
-            let p = component(a, i) + component(d, i) * mid;
-            let h = component(half, i);
+            let p = a.to_array()[i] + d.to_array()[i] * mid;
+            let h = half.to_array()[i];
             if p < -h || p > h {
-                slope[i] = component(d, i);
-                offset[i] = component(a, i) - clamp(p, -h, h);
+                slope[i] = d.to_array()[i];
+                offset[i] = a.to_array()[i] - p.clamp(-h, h);
             }
         }
         let slope = Vector3::new(slope[0], slope[1], slope[2]);
         let offset = Vector3::new(offset[0], offset[1], offset[2]);
         let length = slope.length_squared();
         let t = if length > T::zero() {
-            clamp(-Vector3::dot(&slope, &offset) / length, lo, hi)
+            (-Vector3::dot(&slope, &offset) / length).clamp(lo, hi)
         } else {
             lo
         };
@@ -513,9 +507,9 @@ fn clip_segment<T: RealScalar>(
     let d = q - p;
     let (mut lo, mut hi) = (T::zero(), T::one());
     for i in 0..3 {
-        let o = component(p, i);
-        let v = component(d, i);
-        let h = component(box_.half, i);
+        let o = p.to_array()[i];
+        let v = d.to_array()[i];
+        let h = box_.half.to_array()[i];
         if v == T::zero() {
             if o < -h || o > h {
                 return None;
@@ -765,13 +759,13 @@ fn box_triangle_contact<T: RealScalar>(b: &Obb<T>, tri: &Tri3<T>) -> Manifold<T>
             }
             let mut previous = polygon[count - 1];
             let mut pd = Vector3::dot(&(previous - b.center), &b.axes[axis]) * sign
-                - component(b.half, axis);
+                - b.half.to_array()[axis];
             for &current in &polygon[..count] {
                 let cd = Vector3::dot(&(current - b.center), &b.axes[axis]) * sign
-                    - component(b.half, axis);
+                    - b.half.to_array()[axis];
                 if (pd <= T::zero()) != (cd <= T::zero()) {
                     let p = previous
-                        + (current - previous) * clamp(pd / (pd - cd), T::zero(), T::one());
+                        + (current - previous) * (pd / (pd - cd)).clamp(T::zero(), T::one());
                     if used < 16 {
                         out[used] = p;
                         used += 1;

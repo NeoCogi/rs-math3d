@@ -669,9 +669,9 @@ pub fn record_demo<T: ReplayScalar>() -> Result<Vec<u8>, String> {
         .add_body(
             Body::new(
                 Shape::Sphere {
-                    radius: scalar(0.42),
+                    radius: T::cast_from(0.42),
                 },
-                Pose::at(scene::vector([12., 0.42, 12.])),
+                Pose::at(Vector3::from_array([12., 0.42, 12.]).map(T::cast_from)),
                 T::one(),
                 scene::material(),
             )
@@ -680,48 +680,51 @@ pub fn record_demo<T: ReplayScalar>() -> Result<Vec<u8>, String> {
         .map_err(|e| format!("{e:?}"))?;
     let mut exit = Body::new(
         Shape::Sphere {
-            radius: scalar(0.2),
+            radius: T::cast_from(0.2),
         },
-        Pose::at(scene::vector([23.95, 4., 0.])),
+        Pose::at(Vector3::from_array([23.95, 4., 0.]).map(T::cast_from)),
         T::one(),
         scene::material(),
     )
     .map_err(|e| format!("{e:?}"))?;
-    exit.set_velocity(scene::vector([15., 0., 0.]), Vector3::zero())
-        .map_err(|e| format!("{e:?}"))?;
+    exit.set_velocity(
+        Vector3::from_array([15., 0., 0.]).map(T::cast_from),
+        Vector3::zero(),
+    )
+    .map_err(|e| format!("{e:?}"))?;
     world.add_body(exit).map_err(|e| format!("{e:?}"))?;
     let inputs: [Scheduled<T>; 5] = [
         Scheduled {
             tick: 320,
             input: Input::Impulse {
                 body: sleeper,
-                point: scene::vector([12., 0.42, 12.]),
-                impulse: scene::vector([-1., 2., 0.5]),
+                point: Vector3::from_array([12., 0.42, 12.]).map(T::cast_from),
+                impulse: Vector3::from_array([-1., 2., 0.5]).map(T::cast_from),
             },
         },
         Scheduled {
             tick: 640,
             input: Input::Velocity {
                 body: sleeper,
-                linear: scene::vector([1., 0.5, -1.]),
-                angular: scene::vector([0., 0.5, 0.]),
+                linear: Vector3::from_array([1., 0.5, -1.]).map(T::cast_from),
+                angular: Vector3::from_array([0., 0.5, 0.]).map(T::cast_from),
             },
         },
         Scheduled {
             tick: 640,
             input: Input::Impulse {
                 body: BodyId(1),
-                point: scene::vector([-5., 1., 0.]),
-                impulse: scene::vector([0.1, 1., 0.]),
+                point: Vector3::from_array([-5., 1., 0.]).map(T::cast_from),
+                impulse: Vector3::from_array([0.1, 1., 0.]).map(T::cast_from),
             },
         },
         Scheduled {
             tick: 900,
-            input: Input::Gravity(scene::vector([0., 6., 0.])),
+            input: Input::Gravity(Vector3::from_array([0., 6., 0.]).map(T::cast_from)),
         },
         Scheduled {
             tick: 1100,
-            input: Input::Gravity(scene::vector([0., -9.81, 0.])),
+            input: Input::Gravity(Vector3::from_array([0., -9.81, 0.]).map(T::cast_from)),
         },
     ];
     let mut w = Writer(MAGIC.to_vec());

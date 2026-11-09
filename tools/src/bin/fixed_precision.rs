@@ -99,15 +99,6 @@ impl Error {
     }
 }
 
-/// Numeric setup is shared by every policy; conversions retain nearest-even.
-fn n<T: TryCastFrom<f64>>(x: f64) -> T {
-    T::try_cast_from(x).ok().expect("bounded probe input")
-}
-/// Constructs a vector outside any measured operation.
-fn v<T: RealScalar + TryCastFrom<f64>>(a: [f64; 3]) -> Vector3<T> {
-    Vector3::new(n(a[0]), n(a[1]), n(a[2]))
-}
-
 /// Samples full fractional resolution in [-4,4), keeping every multiplication,
 /// dot/cross and division (|denominator| >= 0.5) well within the output range.
 fn arithmetic<R: RealFormat<F>, const F: u32>(backend: &str) {
@@ -194,21 +185,29 @@ fn boundaries<R: RealFormat<F>, const F: u32>(backend: &str)
 where
     Fixed<R, F>: TryCastFrom<f64>,
 {
-    let tri = Tri3::new([v([0.0, 0.0, 0.0]), v([4.0, 0.0, 0.0]), v([0.0, 4.0, 0.0])]);
+    let tri = Tri3::new([
+        Vector3::from_array([0.0, 0.0, 0.0]).map(Fixed::<R, F>::cast_from),
+        Vector3::from_array([4.0, 0.0, 0.0]).map(Fixed::<R, F>::cast_from),
+        Vector3::from_array([0.0, 4.0, 0.0]).map(Fixed::<R, F>::cast_from),
+    ]);
     let q = 1.0 / (1u64 << F) as f64;
     for radius in [0.125, 0.375, 1.0] {
         for sign in [-1.0, 1.0] {
             for k in -8..=8 {
                 let z = sign * (radius + k as f64 * q);
                 let capsule = collision::Capsule::<Fixed<R, F>> {
-                    a: v([0.5, 0.5, z]),
-                    b: v([1.0, 0.5, z]),
-                    radius: n(radius),
+                    a: Vector3::from_array([0.5, 0.5, z]).map(Fixed::<R, F>::cast_from),
+                    b: Vector3::from_array([1.0, 0.5, z]).map(Fixed::<R, F>::cast_from),
+                    radius: Fixed::<R, F>::cast_from(radius),
                 };
                 let obb = collision::Obb {
-                    center: v([0.75, 0.75, z]),
-                    axes: [v([1.0, 0.0, 0.0]), v([0.0, 1.0, 0.0]), v([0.0, 0.0, 1.0])],
-                    half: v([0.25, 0.25, radius]),
+                    center: Vector3::from_array([0.75, 0.75, z]).map(Fixed::<R, F>::cast_from),
+                    axes: [
+                        Vector3::from_array([1.0, 0.0, 0.0]).map(Fixed::<R, F>::cast_from),
+                        Vector3::from_array([0.0, 1.0, 0.0]).map(Fixed::<R, F>::cast_from),
+                        Vector3::from_array([0.0, 0.0, 1.0]).map(Fixed::<R, F>::cast_from),
+                    ],
+                    half: Vector3::from_array([0.25, 0.25, radius]).map(Fixed::<R, F>::cast_from),
                 };
                 for (shape, hit) in [
                     ("capsule", collision::capsule_triangle(&capsule, &tri)),
@@ -257,8 +256,11 @@ fn rays<T: RealScalar + TryCastFrom<f64>>() -> Vec<Ray<T, Vector3<T>>> {
     specs
         .into_iter()
         .map(|(origin, direction)| {
-            let mut ray = Ray::new(&v(origin), &v([0.0, 0.0, 1.0]));
-            ray.direction = v(direction);
+            let mut ray = Ray::new(
+                &Vector3::from_array(origin).map(T::cast_from),
+                &Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+            );
+            ray.direction = Vector3::from_array(direction).map(T::cast_from);
             ray
         })
         .collect()
@@ -280,7 +282,7 @@ where
                     == flat.map(|h| (h.triangle, h.parameter))
             );
             if let Some(hit) = actual {
-                let t = f64::try_cast_from(hit.parameter).ok().unwrap();
+                let t = f64::cast_from(hit.parameter);
                 println!("query,{backend},{model},ray,{i},{},{t:.17e}", hit.triangle);
             } else {
                 println!("query,{backend},{model},ray,{i},miss,");

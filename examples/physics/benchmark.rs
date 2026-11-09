@@ -51,10 +51,6 @@ fn dequantize(value: F) -> f32 {
     );
     result
 }
-/// Component mapping preserves stored state without normalization/repreparation.
-fn vector<T: RealScalar, U: RealScalar>(v: Vector3<T>, cast: impl Fn(T) -> U + Copy) -> Vector3<U> {
-    Vector3::new(cast(v.x), cast(v.y), cast(v.z))
-}
 /// Maps local collider dimensions, retaining the exact primitive variant.
 fn shape<T: RealScalar, U: RealScalar>(s: Shape<T>, cast: impl Fn(T) -> U + Copy) -> Shape<U> {
     match s {
@@ -69,7 +65,7 @@ fn shape<T: RealScalar, U: RealScalar>(s: Shape<T>, cast: impl Fn(T) -> U + Copy
             radius: cast(radius),
         },
         Shape::Box { half } => Shape::Box {
-            half: vector(half, cast),
+            half: half.map(cast),
         },
     }
 }
@@ -89,7 +85,7 @@ fn body<T: RealScalar, U: RealScalar>(b: &Body<T>, cast: impl Fn(T) -> U + Copy)
     Body {
         shape: shape(b.shape, cast),
         pose: Pose {
-            position: vector(b.pose.position, cast),
+            position: b.pose.position.map(cast),
             orientation: Quat::new(
                 cast(b.pose.orientation.x),
                 cast(b.pose.orientation.y),
@@ -97,11 +93,11 @@ fn body<T: RealScalar, U: RealScalar>(b: &Body<T>, cast: impl Fn(T) -> U + Copy)
                 cast(b.pose.orientation.w),
             ),
         },
-        axes: b.axes.map(|v| vector(v, cast)),
-        velocity: vector(b.velocity, cast),
-        angular: vector(b.angular, cast),
+        axes: b.axes.map(|v| v.map(cast)),
+        velocity: b.velocity.map(cast),
+        angular: b.angular.map(cast),
         inverse_mass: cast(b.inverse_mass),
-        inverse_inertia: vector(b.inverse_inertia, cast),
+        inverse_inertia: b.inverse_inertia.map(cast),
         material: material(b.material, cast),
         motion: b.motion,
     }
@@ -110,7 +106,7 @@ fn body<T: RealScalar, U: RealScalar>(b: &Body<T>, cast: impl Fn(T) -> U + Copy)
 fn config<T: RealScalar, U: RealScalar>(c: &Config<T>, f: impl Fn(T) -> U + Copy) -> Config<U> {
     Config {
         dt: f(c.dt),
-        gravity: vector(c.gravity, f),
+        gravity: c.gravity.map(f),
         slop: f(c.slop),
         position_rate: f(c.position_rate),
         max_correction: f(c.max_correction),
@@ -136,10 +132,10 @@ fn constraint<T: RealScalar, U: RealScalar>(
     Constraint {
         a: c.a,
         other: c.other,
-        normal: vector(c.normal, f),
-        tangent: c.tangent.map(|v| vector(v, f)),
-        anchor_a: vector(c.anchor_a, f),
-        anchor_b: vector(c.anchor_b, f),
+        normal: c.normal.map(f),
+        tangent: c.tangent.map(|v| v.map(f)),
+        anchor_a: c.anchor_a.map(f),
+        anchor_b: c.anchor_b.map(f),
         depth: f(c.depth),
         mass: c.mass.map(f),
         bounce: f(c.bounce),
@@ -206,7 +202,7 @@ fn mapped_world<S: RealScalar + TryCastFrom<f64>, T: RealScalar + TryCastFrom<f6
                         .triangle(i)
                         .unwrap()
                         .vertices()
-                        .map(|p| vector(p, cast)),
+                        .map(|p| p.map(cast)),
                 )
             })
             .collect();

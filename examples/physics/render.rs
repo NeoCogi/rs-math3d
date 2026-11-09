@@ -433,34 +433,6 @@ fn box_mesh() -> Vec<f32> {
     }
     out
 }
-/// Converts one physics scalar at the rendering boundary.
-fn f<T>(x: T) -> f32
-where
-    f32: TryCastFrom<T>,
-{
-    f32::try_cast_from(x)
-        .ok()
-        .expect("render coordinate fits f32")
-}
-/// Converts a vector without routing simulation data back through floats.
-fn vf<T: RealScalar>(p: Vector3<T>) -> [f32; 3]
-where
-    f32: TryCastFrom<T>,
-{
-    [f(p.x), f(p.y), f(p.z)]
-}
-/// Column-major flattening of the library's matrix representation.
-fn matrix(m: Matrix4<f32>) -> [f32; 16] {
-    let mut result = [0.; 16];
-    for (i, c) in m.col.iter().enumerate() {
-        result[i * 4..i * 4 + 4].copy_from_slice(&[c.x, c.y, c.z, c.w]);
-    }
-    result
-}
-/// Identity transform used for baked world geometry and screen overlays.
-fn identity() -> [f32; 16] {
-    matrix(Matrix4::identity())
-}
 
 /// GPU resources for static soups, reusable primitive geometry and debug/UI draws.
 struct Renderer {
@@ -499,7 +471,12 @@ impl Renderer {
         for mesh in world.meshes() {
             let mut data = Vec::new();
             for i in 0..mesh.tree.info().triangles {
-                let p = mesh.tree.triangle(i).unwrap().vertices().map(vf);
+                let p = mesh
+                    .tree
+                    .triangle(i)
+                    .unwrap()
+                    .vertices()
+                    .map(|p| p.map(f32::cast_from).to_array());
                 let a = Vector3::new(p[0][0], p[0][1], p[0][2]);
                 let b = Vector3::new(p[1][0], p[1][1], p[1][2]);
                 let c = Vector3::new(p[2][0], p[2][1], p[2][2]);
@@ -546,10 +523,9 @@ impl Renderer {
             return Ok(());
         }
         let eye = camera.eye();
-        let vp = matrix(
-            transforms::perspective(50f32.to_radians(), w as f32 / h as f32, 0.1, 120.)
-                * transforms::lookat(&eye, &camera.target, &Vector3::new(0., 1., 0.)),
-        );
+        let vp = (transforms::perspective(50f32.to_radians(), w as f32 / h as f32, 0.1, 120.)
+            * transforms::lookat(&eye, &camera.target, &Vector3::new(0., 1., 0.)))
+        .to_cols_array();
         // SAFETY: context current; viewport matches drawable size. Every draw
         // binds its owned VAO, initialized buffers, linked program and uniforms.
         unsafe {
@@ -566,8 +542,15 @@ impl Renderer {
                 1 => [0.64, 0.29, 0.12],
                 _ => [0.69, 0.74, 0.68],
             };
-            self.program
-                .bind(&vp, &identity(), [1.; 3], 0., color, i == 0, false);
+            self.program.bind(
+                &vp,
+                &Matrix4::<f32>::identity().to_cols_array(),
+                [1.; 3],
+                0.,
+                color,
+                i == 0,
+                false,
+            );
             mesh.draw(glow::TRIANGLES);
         }
         for (_, body) in world.bodies() {
@@ -575,20 +558,33 @@ impl Renderer {
                 continue;
             }
             let pose = body.pose();
-            let axes = pose.orientation.mat3().col.map(vf);
-            let position = vf(pose.position);
-            let mut model = identity();
+            let axes = pose
+                .orientation
+                .mat3()
+                .col
+                .map(|p| p.map(f32::cast_from).to_array());
+            let position = pose.position.map(f32::cast_from).to_array();
+            let mut model = Matrix4::<f32>::identity().to_cols_array();
             for i in 0..3 {
                 model[i * 4..i * 4 + 3].copy_from_slice(&axes[i]);
             }
             model[12..15].copy_from_slice(&position);
             let (index, dimensions, half, color) = match body.shape() {
-                Shape::Sphere { radius } => (0, [f(radius); 3], 0., [0.12, 0.52, 0.95]),
-                Shape::Box { half } => (1, vf(half), 0., [0.8, 0.18, 0.4]),
+                Shape::Sphere { radius } => {
+                    (0, [f32::cast_from(radius); 3], 0., [0.12, 0.52, 0.95])
+                }
+                Shape::Box { half } => {
+                    (1, half.map(f32::cast_from).to_array(), 0., [0.8, 0.18, 0.4])
+                }
                 Shape::Capsule {
                     half_height,
                     radius,
-                } => (2, [f(radius); 3], f(half_height), [0.95, 0.62, 0.1]),
+                } => (
+                    2,
+                    [f32::cast_from(radius); 3],
+                    f32::cast_from(half_height),
+                    [0.95, 0.62, 0.1],
+                ),
             };
             let color = if body.sleeping() {
                 color.map(|x| x * 0.65)
@@ -606,8 +602,8 @@ impl Renderer {
                     continue;
                 }
                 let b = body.bounds();
-                let lo = vf(b.min);
-                let hi = vf(b.max);
+                let lo = b.min.map(f32::cast_from).to_array();
+                let hi = b.max.map(f32::cast_from).to_array();
                 let points: [[f32; 3]; 8] = core::array::from_fn(|i| {
                     core::array::from_fn(|j| if i & (1 << j) == 0 { lo[j] } else { hi[j] })
                 });
@@ -623,8 +619,8 @@ impl Renderer {
         }
         if debug.1 {
             for (p, n) in world.contacts() {
-                let p = vf(p);
-                let n = vf(n);
+                let p = p.map(f32::cast_from).to_array();
+                let n = n.map(f32::cast_from).to_array();
                 vertex(&mut lines, p, [0.; 3], 0.);
                 vertex(
                     &mut lines,
@@ -635,8 +631,15 @@ impl Renderer {
             }
         }
         self.lines.set(&lines);
-        self.program
-            .bind(&vp, &identity(), [1.; 3], 0., [0.2, 1., 0.55], false, true);
+        self.program.bind(
+            &vp,
+            &Matrix4::<f32>::identity().to_cols_array(),
+            [1.; 3],
+            0.,
+            [0.2, 1., 0.55],
+            false,
+            true,
+        );
         self.lines.draw(glow::LINES);
         let stats = world.stats();
         let status = if paused { "PAUSED" } else { "RUNNING" };
@@ -662,8 +665,8 @@ impl Renderer {
             self.gl.disable(glow::DEPTH_TEST);
         }
         self.program.bind(
-            &identity(),
-            &identity(),
+            &Matrix4::<f32>::identity().to_cols_array(),
+            &Matrix4::<f32>::identity().to_cols_array(),
             [1.; 3],
             0.,
             [0.025, 0.035, 0.055],
@@ -672,8 +675,8 @@ impl Renderer {
         );
         self.panel.draw(glow::TRIANGLES);
         self.program.bind(
-            &identity(),
-            &identity(),
+            &Matrix4::<f32>::identity().to_cols_array(),
+            &Matrix4::<f32>::identity().to_cols_array(),
             [1.; 3],
             0.,
             [0.83, 0.9, 1.],
@@ -926,12 +929,13 @@ where
                         let mut body = scene::body::<T>(kind, position, world.bodies().count())
                             .map_err(|e| format!("spawn: {e:?}"))?;
                         body.set_velocity(
-                            scene::vector([
+                            Vector3::from_array([
                                 direction.x as f64 * 8.,
                                 direction.y as f64 * 8.,
                                 direction.z as f64 * 8.,
-                            ]),
-                            scene::vector([0.1, 0.3, 0.2]),
+                            ])
+                            .map(T::cast_from),
+                            Vector3::from_array([0.1, 0.3, 0.2]).map(T::cast_from),
                         )
                         .map_err(|e| format!("launch: {e:?}"))?;
                         let _ = world.add_body(body);

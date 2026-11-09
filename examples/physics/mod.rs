@@ -151,12 +151,6 @@ pub struct Body<T: RealScalar> {
     motion: Motion,
 }
 
-/// Exact setup conversion; all constants are bounded by the example's formats.
-pub fn scalar<T: TryCastFrom<f64>>(x: f64) -> T {
-    T::try_cast_from(x)
-        .ok()
-        .expect("physics constant fits scalar")
-}
 /// First-order world-angular quaternion update followed by normalization.
 fn rotate<T: RealScalar>(q: Quat<T>, angle: Vector3<T>) -> Quat<T> {
     let derivative = Quat::new(angle.x, angle.y, angle.z, T::zero()) * q;
@@ -177,9 +171,8 @@ impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
         mass: T,
         material: Material<T>,
     ) -> Result<Self, Error> {
-        let n = scalar::<T>;
-        let positive = |x: T| x.is_finite() && x >= n(0.1) && x <= n(4.0);
-        if !mass.is_finite() || mass < n(0.1) || mass > n(10.0) {
+        let positive = |x: T| x.is_finite() && x >= T::cast_from(0.1) && x <= T::cast_from(4.0);
+        if !mass.is_finite() || mass < T::cast_from(0.1) || mass > T::cast_from(10.0) {
             return Err(Error::InvalidBody);
         }
         if !pose.position.is_finite()
@@ -211,30 +204,35 @@ impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
                 if !positive(r) {
                     return Err(Error::InvalidBody);
                 }
-                Vector3::new(n(0.4) * r * r, n(0.4) * r * r, n(0.4) * r * r)
+                Vector3::new(
+                    T::cast_from(0.4) * r * r,
+                    T::cast_from(0.4) * r * r,
+                    T::cast_from(0.4) * r * r,
+                )
             }
             Shape::Box { half: h } => {
                 if !positive(h.x) || !positive(h.y) || !positive(h.z) {
                     return Err(Error::InvalidBody);
                 }
                 Vector3::new(
-                    (h.y * h.y + h.z * h.z) / n(3.0),
-                    (h.x * h.x + h.z * h.z) / n(3.0),
-                    (h.x * h.x + h.y * h.y) / n(3.0),
+                    (h.y * h.y + h.z * h.z) / T::cast_from(3.0),
+                    (h.x * h.x + h.z * h.z) / T::cast_from(3.0),
+                    (h.x * h.x + h.y * h.y) / T::cast_from(3.0),
                 )
             }
             Shape::Capsule {
                 half_height: h,
                 radius: r,
             } => {
-                if !positive(r) || !h.is_finite() || h < T::zero() || h > n(4.0) {
+                if !positive(r) || !h.is_finite() || h < T::zero() || h > T::cast_from(4.0) {
                     return Err(Error::InvalidBody);
                 }
-                let cylinder = (n(2.0) * h) / (n(2.0) * h + n(4.0 / 3.0) * r);
+                let cylinder =
+                    (T::cast_from(2.0) * h) / (T::cast_from(2.0) * h + T::cast_from(4.0 / 3.0) * r);
                 let caps = T::one() - cylinder;
-                let y = cylinder * r * r * T::half() + caps * n(0.4) * r * r;
-                let x = cylinder * (r * r * n(0.25) + h * h / n(3.0))
-                    + caps * (n(0.4) * r * r + h * h + n(0.75) * h * r);
+                let y = cylinder * r * r * T::half() + caps * T::cast_from(0.4) * r * r;
+                let x = cylinder * (r * r * T::cast_from(0.25) + h * h / T::cast_from(3.0))
+                    + caps * (T::cast_from(0.4) * r * r + h * h + T::cast_from(0.75) * h * r);
                 Vector3::new(x, y, x)
             }
         };
@@ -542,7 +540,6 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
     /// Creates a 120 Hz world. Use bounded positions/dimensions and static mesh
     /// edges (the supplied scene tiles its floor to preserve S15.16 intermediates).
     pub fn new() -> Self {
-        let n = scalar::<T>;
         Self {
             bodies: Vec::new(),
             meshes: Vec::new(),
@@ -554,23 +551,23 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
             previous: Vec::new(),
             stats: Stats::default(),
             config: Config {
-                dt: n(1.0 / 120.0),
-                gravity: Vector3::new(n(0.0), n(-9.81), n(0.0)),
-                slop: n(0.004),
-                position_rate: n(0.25),
-                max_correction: n(0.15),
-                match_distance: n(0.06),
-                merge_distance: n(0.015),
-                linear_damping: n(0.9998),
-                angular_damping: n(0.997),
-                speed_limit: n(15.0),
-                spin_limit: n(15.0),
-                domain: n(24.0),
-                sleep_linear: n(0.06),
-                sleep_angular: n(0.1),
-                warm: n(0.8),
-                normal_merge: n(0.98),
-                normal_match: n(0.95),
+                dt: T::cast_from(1.0 / 120.0),
+                gravity: Vector3::new(T::cast_from(0.0), T::cast_from(-9.81), T::cast_from(0.0)),
+                slop: T::cast_from(0.004),
+                position_rate: T::cast_from(0.25),
+                max_correction: T::cast_from(0.15),
+                match_distance: T::cast_from(0.06),
+                merge_distance: T::cast_from(0.015),
+                linear_damping: T::cast_from(0.9998),
+                angular_damping: T::cast_from(0.997),
+                speed_limit: T::cast_from(15.0),
+                spin_limit: T::cast_from(15.0),
+                domain: T::cast_from(24.0),
+                sleep_linear: T::cast_from(0.06),
+                sleep_angular: T::cast_from(0.1),
+                warm: T::cast_from(0.8),
+                normal_merge: T::cast_from(0.98),
+                normal_match: T::cast_from(0.95),
             },
         }
     }
@@ -714,7 +711,7 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                 if self.bodies[a].sleeping() && self.bodies[b].sleeping() {
                     continue;
                 }
-                if contact::overlaps(&self.bounds[a], &self.bounds[b]) {
+                if self.bounds[a].overlap(&self.bounds[b]) {
                     let (a, b) = (a.min(b), a.max(b));
                     self.candidates.push(Candidate::Bodies { a, b });
                     self.stats.body_pairs += 1;

@@ -156,15 +156,10 @@ impl RealScalar for Unchecked {
     }
 }
 
-/// Constructs an unchecked vector without invoking conversion or validation.
-fn v(x: f64, y: f64, z: f64) -> Vector3<Unchecked> {
-    Vector3::new(Unchecked(x), Unchecked(y), Unchecked(z))
-}
-
 #[test]
 fn ordinary_vectors_matrices_and_quaternions_never_validate() {
-    let a = v(1.0, 2.0, 3.0);
-    let b = v(3.0, 1.0, 2.0);
+    let a = Vector3::from_array([1.0, 2.0, 3.0]).map(Unchecked);
+    let b = Vector3::from_array([3.0, 1.0, 2.0]).map(Unchecked);
     let _ = (
         a + b,
         a - b,
@@ -241,18 +236,21 @@ fn ordinary_vectors_matrices_and_quaternions_never_validate() {
 
 #[test]
 fn ordinary_transforms_and_queries_never_validate() {
-    let zero = v(0.0, 0.0, 0.0);
-    let x = v(1.0, 0.0, 0.0);
-    let y = v(0.0, 1.0, 0.0);
-    let z = v(0.0, 0.0, 1.0);
-    let m = transforms::translate(v(1.0, 2.0, 3.0));
+    let zero = Vector3::from_array([0.0, 0.0, 0.0]).map(Unchecked);
+    let x = Vector3::from_array([1.0, 0.0, 0.0]).map(Unchecked);
+    let y = Vector3::from_array([0.0, 1.0, 0.0]).map(Unchecked);
+    let z = Vector3::from_array([0.0, 0.0, 1.0]).map(Unchecked);
+    let m = transforms::translate(Vector3::from_array([1.0, 2.0, 3.0]).map(Unchecked));
     let p = transforms::perspective(
         Unchecked(0.8),
         Unchecked(1.5),
         Unchecked(1.0),
         Unchecked(10.0),
     );
-    let _ = transforms::frustum(&v(-1.0, -1.0, 1.0), &v(1.0, 1.0, 10.0));
+    let _ = transforms::frustum(
+        &Vector3::from_array([-1.0, -1.0, 1.0]).map(Unchecked),
+        &Vector3::from_array([1.0, 1.0, 10.0]).map(Unchecked),
+    );
     let _ = transforms::ortho4(
         Unchecked(-1.0),
         Unchecked(1.0),
@@ -270,7 +268,7 @@ fn ordinary_transforms_and_queries_never_validate() {
     let _ = transforms::unproject3(&m, &p, &lb, &rt, &screen);
     let _ = (transforms::decompose_affine(&m), transforms::decompose(&m));
     let line = Line::new(&z, &(-z));
-    let ray = Ray::new(&v(0.2, 0.2, 1.0), &(-z));
+    let ray = Ray::new(&Vector3::from_array([0.2, 0.2, 1.0]).map(Unchecked), &(-z));
     let segment = Segment::new(&zero, &x);
     let plane = Plane::new(&z, &zero);
     let _ = (
@@ -290,7 +288,10 @@ fn ordinary_transforms_and_queries_never_validate() {
     assert!(tri.intersection(&ray).is_some());
     assert!(line.intersection(&tri).is_some());
     assert!(tri.intersection(&line).is_some());
-    let sphere = Sphere3::new(v(0.25, 0.25, 0.25), Unchecked(0.5));
+    let sphere = Sphere3::new(
+        Vector3::from_array([0.25, 0.25, 0.25]).map(Unchecked),
+        Unchecked(0.5),
+    );
     assert!(sphere.intersect(&tri));
     let box3 = Box3::new(&(-x - y - z), &(x + y + z));
     assert!(box3.intersect(&sphere));

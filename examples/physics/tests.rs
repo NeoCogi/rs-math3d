@@ -30,13 +30,10 @@
 use super::*;
 use rs_math3d::{Fixed, Scalar, Tri3};
 
-fn v<T: RealScalar + TryCastFrom<f64>>(x: f64, y: f64, z: f64) -> Vector3<T> {
-    Vector3::new(scalar(x), scalar(y), scalar(z))
-}
 fn material<T: RealScalar + TryCastFrom<f64>>() -> Material<T> {
     Material {
-        friction: scalar(0.6),
-        restitution: scalar(0.0),
+        friction: T::cast_from(0.6),
+        restitution: T::cast_from(0.0),
     }
 }
 fn floor<T: RealScalar + TryCastFrom<f64>>(world: &mut World<T>) {
@@ -45,10 +42,10 @@ fn floor<T: RealScalar + TryCastFrom<f64>>(world: &mut World<T>) {
         for z in -2..2 {
             let (x, z) = (x as f64 * 2.0, z as f64 * 2.0);
             let (a, b, c, d) = (
-                v(x, 0.0, z),
-                v(x + 2.0, 0.0, z),
-                v(x + 2.0, 0.0, z + 2.0),
-                v(x, 0.0, z + 2.0),
+                Vector3::from_array([x, 0.0, z]).map(T::cast_from),
+                Vector3::from_array([x + 2.0, 0.0, z]).map(T::cast_from),
+                Vector3::from_array([x + 2.0, 0.0, z + 2.0]).map(T::cast_from),
+                Vector3::from_array([x, 0.0, z + 2.0]).map(T::cast_from),
             );
             triangles.push(Tri3::new([a, c, b]));
             triangles.push(Tri3::new([a, d, c]));
@@ -64,32 +61,49 @@ fn floor<T: RealScalar + TryCastFrom<f64>>(world: &mut World<T>) {
 fn contacts<T: RealScalar + TryCastFrom<f64>>() {
     let shapes: [Shape<T>; 3] = [
         Shape::Sphere {
-            radius: scalar(0.5),
+            radius: T::cast_from(0.5),
         },
         Shape::Capsule {
-            half_height: scalar(0.5),
-            radius: scalar(0.5),
+            half_height: T::cast_from(0.5),
+            radius: T::cast_from(0.5),
         },
         Shape::Box {
-            half: v(0.5, 0.5, 0.5),
+            half: Vector3::from_array([0.5, 0.5, 0.5]).map(T::cast_from),
         },
     ];
     for a in shapes {
         for b in shapes {
-            let a = Body::new(a, Pose::at(v(0.0, 0.0, 0.0)), scalar(1.0), material()).unwrap();
-            let b = Body::new(b, Pose::at(v(0.75, 0.0, 0.0)), scalar(1.0), material()).unwrap();
+            let a = Body::new(
+                a,
+                Pose::at(Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from)),
+                T::cast_from(1.0),
+                material(),
+            )
+            .unwrap();
+            let b = Body::new(
+                b,
+                Pose::at(Vector3::from_array([0.75, 0.0, 0.0]).map(T::cast_from)),
+                T::cast_from(1.0),
+                material(),
+            )
+            .unwrap();
             let manifold = contact::convex(&a.convex(), &b.convex());
             assert!(!manifold.points().is_empty());
             for c in manifold.points() {
-                assert!(c.normal.x < scalar(-0.8));
+                assert!(c.normal.x < T::cast_from(-0.8));
                 assert!(c.depth >= T::zero());
                 assert!(c.point.is_finite());
             }
             let reverse = contact::convex(&b.convex(), &a.convex());
             assert!(!reverse.points().is_empty());
-            assert!(reverse.points()[0].normal.x > scalar(0.8));
-            let far =
-                Body::new(b.shape, Pose::at(v(3.0, 0.0, 0.0)), scalar(1.0), material()).unwrap();
+            assert!(reverse.points()[0].normal.x > T::cast_from(0.8));
+            let far = Body::new(
+                b.shape,
+                Pose::at(Vector3::from_array([3.0, 0.0, 0.0]).map(T::cast_from)),
+                T::cast_from(1.0),
+                material(),
+            )
+            .unwrap();
             assert!(contact::convex(&a.convex(), &far.convex())
                 .points()
                 .is_empty());
@@ -101,23 +115,26 @@ fn contacts<T: RealScalar + TryCastFrom<f64>>() {
 fn coincident_capsule_centerlines_escape_perpendicularly() {
     type T = Fixed<i32, 16>;
     let capsule = Convex::Capsule(collision::Capsule {
-        a: v::<T>(0., -1., 0.),
-        b: v(0., 1., 0.),
-        radius: scalar(0.5),
+        a: Vector3::from_array([0., -1., 0.]).map(<T>::cast_from),
+        b: Vector3::from_array([0., 1., 0.]).map(T::cast_from),
+        radius: T::cast_from(0.5),
     });
     for a in [
-        Convex::Sphere(Sphere3::new(v(0., 0., 0.), scalar(0.25))),
+        Convex::Sphere(Sphere3::new(
+            Vector3::from_array([0., 0., 0.]).map(T::cast_from),
+            T::cast_from(0.25),
+        )),
         Convex::Capsule(collision::Capsule {
-            a: v(0., -0.5, 0.),
-            b: v(0., 0.5, 0.),
-            radius: scalar(0.25),
+            a: Vector3::from_array([0., -0.5, 0.]).map(T::cast_from),
+            b: Vector3::from_array([0., 0.5, 0.]).map(T::cast_from),
+            radius: T::cast_from(0.25),
         }),
     ] {
         let manifold = contact::convex(&a, &capsule);
         let c = manifold.points()[0];
-        assert!(c.normal.y.tabs() < scalar(0.001));
-        assert!((c.depth - scalar::<T>(0.75)).tabs() < scalar(0.001));
-        let offset = c.normal * (c.depth + scalar(0.01));
+        assert!(c.normal.y.tabs() < T::cast_from(0.001));
+        assert!((c.depth - <T>::cast_from(0.75)).tabs() < T::cast_from(0.001));
+        let offset = c.normal * (c.depth + T::cast_from(0.01));
         let moved = match a {
             Convex::Sphere(s) => Convex::Sphere(Sphere3::new(s.center + offset, s.radius)),
             Convex::Capsule(s) => Convex::Capsule(collision::Capsule {
@@ -134,9 +151,18 @@ fn coincident_capsule_centerlines_escape_perpendicularly() {
 #[test]
 fn tree_visitor_returns_all_closed_candidates() {
     type T = Fixed<i32, 16>;
-    let tri = |x: f64| Tri3::new([v::<T>(x, 0., 0.), v(x + 1., 0., 0.), v(x, 0., 1.)]);
+    let tri = |x: f64| {
+        Tri3::new([
+            Vector3::from_array([x, 0., 0.]).map(<T>::cast_from),
+            Vector3::from_array([x + 1., 0., 0.]).map(T::cast_from),
+            Vector3::from_array([x, 0., 1.]).map(T::cast_from),
+        ])
+    };
     let tree = AabbTree::new(vec![tri(0.), tri(1.), tri(4.)], 1).unwrap();
-    let bounds = Box3::new(&v(0.5, -1., 0.2), &v(1., 1., 0.8));
+    let bounds = Box3::new(
+        &Vector3::from_array([0.5, -1., 0.2]).map(T::cast_from),
+        &Vector3::from_array([1., 1., 0.8]).map(T::cast_from),
+    );
     let mut ids = Vec::new();
     let stats = tree.for_each_candidate(&bounds, |id, _| ids.push(id));
     ids.sort_unstable();
@@ -155,17 +181,29 @@ fn tree_visitor_returns_all_closed_candidates() {
 fn box_face_manifold_has_spread_and_depth() {
     type T = Fixed<i32, 16>;
     let shape = Shape::Box {
-        half: v::<T>(0.5, 0.5, 0.5),
+        half: Vector3::from_array([0.5, 0.5, 0.5]).map(<T>::cast_from),
     };
-    let a = Body::new(shape, Pose::at(v(0., 0., 0.)), scalar(1.), material()).unwrap();
-    let b = Body::new(shape, Pose::at(v(0., -0.75, 0.)), scalar(1.), material()).unwrap();
+    let a = Body::new(
+        shape,
+        Pose::at(Vector3::from_array([0., 0., 0.]).map(T::cast_from)),
+        T::cast_from(1.),
+        material(),
+    )
+    .unwrap();
+    let b = Body::new(
+        shape,
+        Pose::at(Vector3::from_array([0., -0.75, 0.]).map(T::cast_from)),
+        T::cast_from(1.),
+        material(),
+    )
+    .unwrap();
     let m = contact::convex(&a.convex(), &b.convex());
     assert_eq!(m.points().len(), 4);
     for p in m.points() {
-        assert!((p.depth - scalar::<T>(0.25)).tabs() < scalar(0.001));
-        assert!(p.normal.y > scalar(0.99));
+        assert!((p.depth - <T>::cast_from(0.25)).tabs() < T::cast_from(0.001));
+        assert!(p.normal.y > T::cast_from(0.99));
     }
-    assert!((m.points()[0].point - m.points()[1].point).max_abs_component() > scalar(0.5));
+    assert!((m.points()[0].point - m.points()[1].point).max_abs_component() > T::cast_from(0.5));
 }
 
 #[test]
@@ -177,10 +215,10 @@ fn sleeping_body_wakes_on_external_impulse() {
         .add_body(
             Body::new(
                 Shape::Sphere {
-                    radius: scalar(0.4),
+                    radius: T::cast_from(0.4),
                 },
-                Pose::at(v(0., 0.4, 0.)),
-                scalar(1.),
+                Pose::at(Vector3::from_array([0., 0.4, 0.]).map(T::cast_from)),
+                T::cast_from(1.),
                 material(),
             )
             .unwrap(),
@@ -193,11 +231,11 @@ fn sleeping_body_wakes_on_external_impulse() {
     let p = w.body(b).unwrap().pose.position;
     w.body_mut(b)
         .unwrap()
-        .apply_impulse(p, v(0., 2., 0.))
+        .apply_impulse(p, Vector3::from_array([0., 2., 0.]).map(T::cast_from))
         .unwrap();
     assert!(!w.body(b).unwrap().sleeping());
     w.step();
-    assert!(w.body(b).unwrap().velocity.y > scalar(1.8));
+    assert!(w.body(b).unwrap().velocity.y > T::cast_from(1.8));
 }
 
 #[test]
@@ -207,20 +245,24 @@ fn friction_slows_a_sliding_box() {
     floor(&mut w);
     let mut body = Body::new(
         Shape::Box {
-            half: v(0.5, 0.5, 0.5),
+            half: Vector3::from_array([0.5, 0.5, 0.5]).map(T::cast_from),
         },
-        Pose::at(v(-2., 0.5, 0.)),
-        scalar(1.),
+        Pose::at(Vector3::from_array([-2., 0.5, 0.]).map(T::cast_from)),
+        T::cast_from(1.),
         material(),
     )
     .unwrap();
-    body.set_velocity(v(2., 0., 0.), Vector3::zero()).unwrap();
+    body.set_velocity(
+        Vector3::from_array([2., 0., 0.]).map(T::cast_from),
+        Vector3::zero(),
+    )
+    .unwrap();
     let b = w.add_body(body).unwrap();
     for _ in 0..240 {
         w.step();
     }
-    assert!(w.body(b).unwrap().velocity.x.tabs() < scalar(0.2));
-    assert!(w.body(b).unwrap().pose.position.y > scalar(0.45));
+    assert!(w.body(b).unwrap().velocity.x.tabs() < T::cast_from(0.2));
+    assert!(w.body(b).unwrap().pose.position.y > T::cast_from(0.45));
 }
 
 #[test]
@@ -228,15 +270,19 @@ fn off_center_impulse_changes_spin() {
     type T = Fixed<i64, 32>;
     let mut body = Body::new(
         Shape::Sphere {
-            radius: scalar::<T>(1.),
+            radius: <T>::cast_from(1.),
         },
         Pose::at(Vector3::zero()),
-        scalar(1.),
+        T::cast_from(1.),
         material(),
     )
     .unwrap();
-    body.apply_impulse(v(0., 1., 0.), v(1., 0., 0.)).unwrap();
-    assert!((body.angular.z - scalar::<T>(-2.5)).tabs() < scalar(0.0001));
+    body.apply_impulse(
+        Vector3::from_array([0., 1., 0.]).map(T::cast_from),
+        Vector3::from_array([1., 0., 0.]).map(T::cast_from),
+    )
+    .unwrap();
+    assert!((body.angular.z - <T>::cast_from(-2.5)).tabs() < T::cast_from(0.0001));
     assert_eq!(body.velocity.x, T::ONE);
 }
 
@@ -249,10 +295,10 @@ fn fixed_ticks_repeat_bit_for_bit() {
         w.add_body(
             Body::new(
                 Shape::Box {
-                    half: v(0.4, 0.4, 0.4),
+                    half: Vector3::from_array([0.4, 0.4, 0.4]).map(T::cast_from),
                 },
-                Pose::at(v(0., 2., 0.)),
-                scalar(1.),
+                Pose::at(Vector3::from_array([0., 2., 0.]).map(T::cast_from)),
+                T::cast_from(1.),
                 material(),
             )
             .unwrap(),
@@ -300,10 +346,17 @@ fn solver_is_independent_of_candidate_visitation_order() {
             w.add_body(
                 Body::new(
                     Shape::Box {
-                        half: v(0.45, 0.4, 0.45),
+                        half: Vector3::from_array([0.45, 0.4, 0.45]).map(T::cast_from),
                     },
-                    Pose::at(v((i % 3) as f64 * 0.75, 0.35 + (i / 3) as f64 * 0.7, 0.)),
-                    scalar(1.),
+                    Pose::at(
+                        Vector3::from_array([
+                            (i % 3) as f64 * 0.75,
+                            0.35 + (i / 3) as f64 * 0.7,
+                            0.,
+                        ])
+                        .map(T::cast_from),
+                    ),
+                    T::cast_from(1.),
                     material(),
                 )
                 .unwrap(),
@@ -367,10 +420,13 @@ fn sweep_matches_flat_pairs_after_reordering() {
             .add_body(
                 Body::new(
                     Shape::Box {
-                        half: v(0.5, 0.5, 0.5),
+                        half: Vector3::from_array([0.5, 0.5, 0.5]).map(T::cast_from),
                     },
-                    Pose::at(v((i % 4) as f64 * 0.8, (i / 4) as f64 * 0.8, 0.)),
-                    scalar(1.),
+                    Pose::at(
+                        Vector3::from_array([(i % 4) as f64 * 0.8, (i / 4) as f64 * 0.8, 0.])
+                            .map(T::cast_from),
+                    ),
+                    T::cast_from(1.),
                     material(),
                 )
                 .unwrap(),
@@ -391,14 +447,14 @@ fn sweep_matches_flat_pairs_after_reordering() {
         let mut expected = Vec::new();
         for a in 0..world.bodies.len() {
             for b in a + 1..world.bodies.len() {
-                if contact::overlaps(&world.bodies[a].bounds(), &world.bodies[b].bounds()) {
+                if world.bodies[a].bounds().overlap(&world.bodies[b].bounds()) {
                     expected.push((a, b));
                 }
             }
         }
         assert_eq!(actual, expected);
         for (i, body) in world.bodies.iter_mut().enumerate() {
-            body.pose.position.x = scalar((11 - i) as f64 * 0.3);
+            body.pose.position.x = T::cast_from((11 - i) as f64 * 0.3);
         }
     }
 }
@@ -410,19 +466,24 @@ fn escaped_body_has_a_terminal_motion_state() {
     w.set_gravity(Vector3::zero()).unwrap();
     let mut body = Body::new(
         Shape::Sphere {
-            radius: scalar(0.4),
+            radius: T::cast_from(0.4),
         },
-        Pose::at(v(23.95, 2., 0.)),
-        scalar(1.),
+        Pose::at(Vector3::from_array([23.95, 2., 0.]).map(T::cast_from)),
+        T::cast_from(1.),
         material(),
     )
     .unwrap();
-    body.set_velocity(v(15., 0., 0.), Vector3::zero()).unwrap();
+    body.set_velocity(
+        Vector3::from_array([15., 0., 0.]).map(T::cast_from),
+        Vector3::zero(),
+    )
+    .unwrap();
     let id = w.add_body(body).unwrap();
     w.step();
     assert!(!w.body(id).unwrap().enabled());
     assert_eq!(w.stats().disabled, 1);
-    w.set_gravity(v(0., 9.81, 0.)).unwrap();
+    w.set_gravity(Vector3::from_array([0., 9.81, 0.]).map(T::cast_from))
+        .unwrap();
     assert!(!w.body(id).unwrap().enabled());
     assert_eq!(
         w.body_mut(id)
@@ -431,9 +492,10 @@ fn escaped_body_has_a_terminal_motion_state() {
         Err(Error::InactiveBody)
     );
     assert_eq!(
-        w.body_mut(id)
-            .unwrap()
-            .apply_impulse(Vector3::zero(), v(1., 0., 0.)),
+        w.body_mut(id).unwrap().apply_impulse(
+            Vector3::zero(),
+            Vector3::from_array([1., 0., 0.]).map(T::cast_from)
+        ),
         Err(Error::InactiveBody)
     );
 }
@@ -442,14 +504,14 @@ fn settling<T: RealScalar + TryCastFrom<f64>>() {
     floor(&mut w);
     let shapes = [
         Shape::Sphere {
-            radius: scalar(0.4),
+            radius: T::cast_from(0.4),
         },
         Shape::Capsule {
-            half_height: scalar(0.4),
-            radius: scalar(0.3),
+            half_height: T::cast_from(0.4),
+            radius: T::cast_from(0.3),
         },
         Shape::Box {
-            half: v(0.4, 0.4, 0.4),
+            half: Vector3::from_array([0.4, 0.4, 0.4]).map(T::cast_from),
         },
     ];
     let mut ids = Vec::new();
@@ -458,8 +520,10 @@ fn settling<T: RealScalar + TryCastFrom<f64>>() {
             w.add_body(
                 Body::new(
                     *shape,
-                    Pose::at(v(-2.0 + i as f64 * 2.0, 2.0, 0.0)),
-                    scalar(1.0),
+                    Pose::at(
+                        Vector3::from_array([-2.0 + i as f64 * 2.0, 2.0, 0.0]).map(T::cast_from),
+                    ),
+                    T::cast_from(1.0),
                     material(),
                 )
                 .unwrap(),
@@ -473,8 +537,8 @@ fn settling<T: RealScalar + TryCastFrom<f64>>() {
     for (id, height) in ids.into_iter().zip([0.4, 0.7, 0.4]) {
         let b = w.body(id).unwrap();
         assert!(b.enabled());
-        assert!((b.pose.position.y - scalar::<T>(height)).tabs() < scalar(0.1));
-        assert!(b.velocity.max_abs_component() < scalar::<T>(0.2));
+        assert!((b.pose.position.y - <T>::cast_from(height)).tabs() < T::cast_from(0.1));
+        assert!(b.velocity.max_abs_component() < <T>::cast_from(0.2));
     }
 }
 #[test]
@@ -500,10 +564,15 @@ fn construction_and_capacity() {
     type T = Fixed<i32, 16>;
     let mut w = World::<T>::new();
     let shape = Shape::Sphere {
-        radius: scalar(0.4),
+        radius: T::cast_from(0.4),
     };
     assert!(matches!(
-        Body::new(shape, Pose::at(v(0., 0., 0.)), T::ZERO, material()),
+        Body::new(
+            shape,
+            Pose::at(Vector3::from_array([0., 0., 0.]).map(T::cast_from)),
+            T::ZERO,
+            material()
+        ),
         Err(Error::InvalidBody)
     ));
     assert!(matches!(
@@ -519,11 +588,27 @@ fn construction_and_capacity() {
         Err(Error::InvalidPose)
     ));
     for _ in 0..128 {
-        w.add_body(Body::new(shape, Pose::at(v(0., 2., 0.)), scalar(1.), material()).unwrap())
-            .unwrap();
+        w.add_body(
+            Body::new(
+                shape,
+                Pose::at(Vector3::from_array([0., 2., 0.]).map(T::cast_from)),
+                T::cast_from(1.),
+                material(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     }
     assert_eq!(
-        w.add_body(Body::new(shape, Pose::at(v(0., 2., 0.)), scalar(1.), material()).unwrap()),
+        w.add_body(
+            Body::new(
+                shape,
+                Pose::at(Vector3::from_array([0., 2., 0.]).map(T::cast_from)),
+                T::cast_from(1.),
+                material()
+            )
+            .unwrap()
+        ),
         Err(Error::Capacity)
     );
 }
@@ -537,10 +622,10 @@ fn two_box_stack_remains_supported() {
         .add_body(
             Body::new(
                 Shape::Box {
-                    half: v(0.4, 0.4, 0.4),
+                    half: Vector3::from_array([0.4, 0.4, 0.4]).map(T::cast_from),
                 },
-                Pose::at(v(0., 0.4, 0.)),
-                scalar(1.),
+                Pose::at(Vector3::from_array([0., 0.4, 0.]).map(T::cast_from)),
+                T::cast_from(1.),
                 material(),
             )
             .unwrap(),
@@ -550,10 +635,10 @@ fn two_box_stack_remains_supported() {
         .add_body(
             Body::new(
                 Shape::Box {
-                    half: v(0.4, 0.4, 0.4),
+                    half: Vector3::from_array([0.4, 0.4, 0.4]).map(T::cast_from),
                 },
-                Pose::at(v(0., 1.2, 0.)),
-                scalar(1.),
+                Pose::at(Vector3::from_array([0., 1.2, 0.]).map(T::cast_from)),
+                T::cast_from(1.),
                 material(),
             )
             .unwrap(),
@@ -562,9 +647,9 @@ fn two_box_stack_remains_supported() {
     for _ in 0..600 {
         w.step();
     }
-    assert!((w.body(a).unwrap().pose.position.y - scalar::<T>(0.4)).abs() < scalar(0.08));
-    assert!((w.body(b).unwrap().pose.position.y - scalar::<T>(1.2)).abs() < scalar(0.08));
-    assert!(w.body(b).unwrap().velocity.max_abs_component() < scalar(0.2));
+    assert!((w.body(a).unwrap().pose.position.y - <T>::cast_from(0.4)).abs() < T::cast_from(0.08));
+    assert!((w.body(b).unwrap().pose.position.y - <T>::cast_from(1.2)).abs() < T::cast_from(0.08));
+    assert!(w.body(b).unwrap().velocity.max_abs_component() < T::cast_from(0.2));
 }
 
 #[test]
@@ -573,38 +658,46 @@ fn head_on_impulses_preserve_linear_momentum() {
     let mut w = World::<T>::new();
     w.set_gravity(Vector3::zero()).unwrap();
     let shape = Shape::Sphere {
-        radius: scalar(0.5),
+        radius: T::cast_from(0.5),
     };
     let mut a = Body::new(
         shape,
-        Pose::at(v(-0.49, 0., 0.)),
-        scalar(1.),
+        Pose::at(Vector3::from_array([-0.49, 0., 0.]).map(T::cast_from)),
+        T::cast_from(1.),
         Material {
             friction: T::ZERO,
             restitution: T::ONE,
         },
     )
     .unwrap();
-    a.set_velocity(v(2., 0., 0.), Vector3::zero()).unwrap();
+    a.set_velocity(
+        Vector3::from_array([2., 0., 0.]).map(T::cast_from),
+        Vector3::zero(),
+    )
+    .unwrap();
     let mut b = Body::new(
         shape,
-        Pose::at(v(0.49, 0., 0.)),
-        scalar(1.),
+        Pose::at(Vector3::from_array([0.49, 0., 0.]).map(T::cast_from)),
+        T::cast_from(1.),
         Material {
             friction: T::ZERO,
             restitution: T::ONE,
         },
     )
     .unwrap();
-    b.set_velocity(v(-2., 0., 0.), Vector3::zero()).unwrap();
+    b.set_velocity(
+        Vector3::from_array([-2., 0., 0.]).map(T::cast_from),
+        Vector3::zero(),
+    )
+    .unwrap();
     let a = w.add_body(a).unwrap();
     let b = w.add_body(b).unwrap();
     w.step();
-    assert!(w.body(a).unwrap().velocity.x < scalar(-1.9));
-    assert!(w.body(b).unwrap().velocity.x > scalar(1.9));
+    assert!(w.body(a).unwrap().velocity.x < T::cast_from(-1.9));
+    assert!(w.body(b).unwrap().velocity.x > T::cast_from(1.9));
     assert!(
         (w.body(a).unwrap().velocity + w.body(b).unwrap().velocity).max_abs_component()
-            < scalar(0.0001)
+            < T::cast_from(0.0001)
     );
 }
 
@@ -618,23 +711,42 @@ fn slow_support_loss<T: RealScalar + TryCastFrom<f64>>() {
         restitution: T::zero(),
     };
     let shape = Shape::Box {
-        half: v(0.4, 0.4, 0.4),
+        half: Vector3::from_array([0.4, 0.4, 0.4]).map(T::cast_from),
     };
     let lower = w
-        .add_body(Body::new(shape, Pose::at(v(0., 0.4, 0.)), T::one(), surface).unwrap())
+        .add_body(
+            Body::new(
+                shape,
+                Pose::at(Vector3::from_array([0., 0.4, 0.]).map(T::cast_from)),
+                T::one(),
+                surface,
+            )
+            .unwrap(),
+        )
         .unwrap();
     let upper = w
-        .add_body(Body::new(shape, Pose::at(v(0., 1.2, 0.)), T::one(), surface).unwrap())
+        .add_body(
+            Body::new(
+                shape,
+                Pose::at(Vector3::from_array([0., 1.2, 0.]).map(T::cast_from)),
+                T::one(),
+                surface,
+            )
+            .unwrap(),
+        )
         .unwrap();
     for _ in 0..600 {
         w.step();
     }
-    assert!(w.body(upper).unwrap().pose.position.y > scalar(1.1));
+    assert!(w.body(upper).unwrap().pose.position.y > T::cast_from(1.1));
     assert!(!w.body(lower).unwrap().sleeping());
     assert!(!w.body(upper).unwrap().sleeping());
     w.body_mut(lower)
         .unwrap()
-        .set_velocity(v(0.14, 0., 0.), Vector3::zero())
+        .set_velocity(
+            Vector3::from_array([0.14, 0., 0.]).map(T::cast_from),
+            Vector3::zero(),
+        )
         .unwrap();
     for _ in 0..1200 {
         w.step();
@@ -645,8 +757,8 @@ fn slow_support_loss<T: RealScalar + TryCastFrom<f64>>() {
             }
         }
     }
-    assert!(w.body(lower).unwrap().pose.position.x > scalar(0.8));
-    assert!(w.body(upper).unwrap().pose.position.y < scalar(0.6));
+    assert!(w.body(lower).unwrap().pose.position.x > T::cast_from(0.8));
+    assert!(w.body(upper).unwrap().pose.position.y < T::cast_from(0.6));
 }
 #[test]
 fn fixed64_slow_support_loss_remains_dynamic() {
@@ -665,11 +777,11 @@ fn fixed32_body_contacts_do_not_sleep() {
     type T = Fixed<i32, 16>;
     let mut w = World::<T>::new();
     w.set_gravity(Vector3::zero()).unwrap();
-    for x in [T::ZERO, scalar::<T>(0.4) * T::two()] {
+    for x in [T::ZERO, <T>::cast_from(0.4) * T::two()] {
         w.add_body(
             Body::new(
                 Shape::Sphere {
-                    radius: scalar(0.4),
+                    radius: T::cast_from(0.4),
                 },
                 Pose::at(Vector3::new(x, T::ONE, T::ZERO)),
                 T::ONE,
@@ -697,9 +809,9 @@ fn gravity_wakes<T: RealScalar + TryCastFrom<f64>>() {
         .add_body(
             Body::new(
                 Shape::Sphere {
-                    radius: scalar(0.4),
+                    radius: T::cast_from(0.4),
                 },
-                Pose::at(v(0., 0.4, 0.)),
+                Pose::at(Vector3::from_array([0., 0.4, 0.]).map(T::cast_from)),
                 T::one(),
                 material(),
             )
@@ -713,23 +825,24 @@ fn gravity_wakes<T: RealScalar + TryCastFrom<f64>>() {
     let before = w.body(id).unwrap().pose.position.y;
     w.set_gravity(w.config.gravity).unwrap();
     assert!(w.body(id).unwrap().sleeping());
-    w.set_gravity(v(0., 9.81, 0.)).unwrap();
+    w.set_gravity(Vector3::from_array([0., 9.81, 0.]).map(T::cast_from))
+        .unwrap();
     assert!(!w.body(id).unwrap().sleeping());
     w.step();
     assert!(w.body(id).unwrap().velocity.y > T::zero());
     for _ in 0..119 {
         w.step();
     }
-    assert!(w.body(id).unwrap().pose.position.y > before + scalar(1.));
+    assert!(w.body(id).unwrap().pose.position.y > before + T::cast_from(1.));
     let mut quiet = World::<T>::new();
     floor(&mut quiet);
     quiet
         .add_body(
             Body::new(
                 Shape::Sphere {
-                    radius: scalar(0.4),
+                    radius: T::cast_from(0.4),
                 },
-                Pose::at(v(0., 0.4, 0.)),
+                Pose::at(Vector3::from_array([0., 0.4, 0.]).map(T::cast_from)),
                 T::one(),
                 material(),
             )
@@ -766,12 +879,21 @@ fn float_gravity_change_wakes_sleepers() {
 /// A quiet side-wall contact cannot support gravity parallel to that wall.
 fn wall_is_not_support<T: RealScalar + TryCastFrom<f64>>() {
     let mut w = World::<T>::new();
-    w.set_gravity(v(0., -0.01, 0.)).unwrap();
+    w.set_gravity(Vector3::from_array([0., -0.01, 0.]).map(T::cast_from))
+        .unwrap();
     w.add_mesh(StaticMesh {
         tree: AabbTree::new(
             vec![
-                Tri3::new([v(0., -2., -2.), v(0., 2., -2.), v(0., 2., 2.)]),
-                Tri3::new([v(0., -2., -2.), v(0., 2., 2.), v(0., -2., 2.)]),
+                Tri3::new([
+                    Vector3::from_array([0., -2., -2.]).map(T::cast_from),
+                    Vector3::from_array([0., 2., -2.]).map(T::cast_from),
+                    Vector3::from_array([0., 2., 2.]).map(T::cast_from),
+                ]),
+                Tri3::new([
+                    Vector3::from_array([0., -2., -2.]).map(T::cast_from),
+                    Vector3::from_array([0., 2., 2.]).map(T::cast_from),
+                    Vector3::from_array([0., -2., 2.]).map(T::cast_from),
+                ]),
             ],
             4,
         )
@@ -783,9 +905,9 @@ fn wall_is_not_support<T: RealScalar + TryCastFrom<f64>>() {
         .add_body(
             Body::new(
                 Shape::Sphere {
-                    radius: scalar(0.4),
+                    radius: T::cast_from(0.4),
                 },
-                Pose::at(v(0.4, 0., 0.)),
+                Pose::at(Vector3::from_array([0.4, 0., 0.]).map(T::cast_from)),
                 T::one(),
                 material(),
             )
@@ -817,7 +939,7 @@ fn rejected_gravity_preserves_sleep_and_force() {
         .add_body(
             Body::new(
                 Shape::Sphere { radius: 0.4 },
-                Pose::at(v(0., 0.4, 0.)),
+                Pose::at(Vector3::from_array([0., 0.4, 0.]).map(f32::cast_from)),
                 1.,
                 material(),
             )

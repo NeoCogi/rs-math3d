@@ -69,11 +69,6 @@ pub struct Capsule<T: RealScalar> {
     pub radius: T,
 }
 
-/// Clamps a scalar to a closed interval.
-fn clamp<T: RealScalar>(x: T, lo: T, hi: T) -> T {
-    T::max(lo, T::min(x, hi))
-}
-
 /// Converts a world-space point to an orthonormal box's local coordinates.
 fn local<T: RealScalar>(b: &Obb<T>, p: Vector3<T>) -> Vector3<T> {
     let d = p - b.center;
@@ -87,9 +82,9 @@ fn local<T: RealScalar>(b: &Obb<T>, p: Vector3<T>) -> Vector3<T> {
 /// Squared distance from a point to an origin-centered axis-aligned box.
 fn point_box_squared<T: RealScalar>(p: Vector3<T>, half: Vector3<T>) -> T {
     Vector3::new(
-        p.x - clamp(p.x, -half.x, half.x),
-        p.y - clamp(p.y, -half.y, half.y),
-        p.z - clamp(p.z, -half.z, half.z),
+        p.x - p.x.clamp(-half.x, half.x),
+        p.y - p.y.clamp(-half.y, half.y),
+        p.z - p.z.clamp(-half.z, half.z),
     )
     .length_squared()
 }
@@ -99,7 +94,7 @@ fn point_segment_squared<T: RealScalar>(p: Vector3<T>, a: Vector3<T>, b: Vector3
     let d = b - a;
     let length = d.length_squared();
     let t = if length > T::zero() {
-        clamp(Vector3::dot(&(p - a), &d) / length, T::zero(), T::one())
+        (Vector3::dot(&(p - a), &d) / length).clamp(T::zero(), T::one())
     } else {
         T::zero()
     };
@@ -130,17 +125,17 @@ fn segment_segment_squared<T: RealScalar>(
     let er = Vector3::dot(&e, &r);
     let denominator = dd * ee - de * de;
     let mut s = if denominator > T::zero() {
-        clamp((de * er - dr * ee) / denominator, T::zero(), T::one())
+        ((de * er - dr * ee) / denominator).clamp(T::zero(), T::one())
     } else {
         T::zero()
     };
     let mut t = (de * s + er) / ee;
     if t < T::zero() {
         t = T::zero();
-        s = clamp(-dr / dd, T::zero(), T::one());
+        s = (-dr / dd).clamp(T::zero(), T::one());
     } else if t > T::one() {
         t = T::one();
-        s = clamp((de - dr) / dd, T::zero(), T::one());
+        s = ((de - dr) / dd).clamp(T::zero(), T::one());
     }
     ((p + d * s) - (a + e * t)).length_squared()
 }
@@ -210,7 +205,7 @@ fn segment_triangle_squared<T: RealScalar>(a: Vector3<T>, b: Vector3<T>, tri: &T
         if ((da <= T::zero() && db >= T::zero()) || (db <= T::zero() && da >= T::zero()))
             && da != db
         {
-            let t = clamp(da / (da - db), T::zero(), T::one());
+            let t = (da / (da - db)).clamp(T::zero(), T::one());
             if inside_triangle(a + (b - a) * t, tri, normal) {
                 return T::zero();
             }
@@ -267,14 +262,14 @@ fn segment_box_squared<T: RealScalar>(a: Vector3<T>, b: Vector3<T>, half: Vector
             let p = origin[axis] + direction[axis] * mid;
             if p < -extent[axis] || p > extent[axis] {
                 slope[axis] = direction[axis];
-                offset[axis] = origin[axis] - clamp(p, -extent[axis], extent[axis]);
+                offset[axis] = origin[axis] - p.clamp(-extent[axis], extent[axis]);
             }
         }
         let slope = Vector3::new(slope[0], slope[1], slope[2]);
         let offset = Vector3::new(offset[0], offset[1], offset[2]);
         let quadratic = slope.length_squared();
         let t = if quadratic > T::zero() {
-            clamp(-Vector3::dot(&slope, &offset) / quadratic, lo, hi)
+            (-Vector3::dot(&slope, &offset) / quadratic).clamp(lo, hi)
         } else {
             lo
         };

@@ -11,6 +11,10 @@ directly for zero vectors, finiteness, dot products and squared lengths. The
 shared `Vector::max_abs_component()` supplies component bounds for speed limits,
 world bounds, anchor matching and quiet thresholds. It preserves one-quantum
 fixed components without squaring; these thresholds use the largest component.
+Trusted setup constants use `T::cast_from`, delegating to the library's checked
+numeric conversion. Vector component conversion uses the library's owned `map`
+and array methods; the renderer uses `Matrix4::to_cols_array` for GLES uniforms.
+There are no example-local wrappers for these primitive operations.
 
 Run the shared teapot/bunny scene without a display:
 

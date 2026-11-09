@@ -52,14 +52,6 @@ struct Shapes<T: RealScalar> {
     triangle: Tri3<T>,
 }
 
-/// Converts fixtures once, before timing. Every backend receives the same f64
-/// source values, with its own documented input quantization.
-fn scalar<T: TryCastFrom<f64>>(value: f64) -> T {
-    T::try_cast_from(value)
-        .ok()
-        .expect("fixture must fit scalar")
-}
-
 /// Builds a varied primitive cluster. Boxes rotate around two axes; triangles
 /// use two intersecting planes so hits exercise a spatial triangle-triangle test.
 fn shapes<T: RealScalar + TryCastFrom<f64>>(i: usize, second: bool) -> Shapes<T> {
@@ -67,47 +59,54 @@ fn shapes<T: RealScalar + TryCastFrom<f64>>(i: usize, second: bool) -> Shapes<T>
     let shift = if second && i % 2 == 1 { 4.0 } else { 0.0 };
     let offset = if second { 0.125 } else { 0.0 };
     let center = Vector3::new(
-        scalar::<T>((n % 7.0 - 3.0) / 16.0 + offset + if i % 3 == 0 { shift } else { 0.0 }),
-        scalar::<T>((n % 11.0 - 5.0) / 32.0 - offset * 0.5 + if i % 3 == 1 { shift } else { 0.0 }),
-        scalar::<T>((n % 13.0 - 6.0) / 32.0 + offset * 0.5 + if i % 3 == 2 { shift } else { 0.0 }),
+        <T>::cast_from((n % 7.0 - 3.0) / 16.0 + offset + if i % 3 == 0 { shift } else { 0.0 }),
+        <T>::cast_from(
+            (n % 11.0 - 5.0) / 32.0 - offset * 0.5 + if i % 3 == 1 { shift } else { 0.0 },
+        ),
+        <T>::cast_from(
+            (n % 13.0 - 6.0) / 32.0 + offset * 0.5 + if i % 3 == 2 { shift } else { 0.0 },
+        ),
     );
-    let v = |x, y, z| Vector3::new(scalar::<T>(x), scalar::<T>(y), scalar::<T>(z));
     let angle = (n % 17.0 - 8.0) / 16.0 + if second { 0.25 } else { 0.0 };
     let (s, c) = angle.sin_cos();
     let (sy, cy) = (angle * 0.5).sin_cos();
     Shapes {
-        sphere: Sphere3::new(center, scalar(0.5)),
+        sphere: Sphere3::new(center, T::cast_from(0.5)),
         capsule: Capsule {
             a: center
                 + if second {
-                    v(-0.5, -0.125, 0.0)
+                    Vector3::from_array([-0.5, -0.125, 0.0]).map(T::cast_from)
                 } else {
-                    v(-0.125, -0.5, 0.0)
+                    Vector3::from_array([-0.125, -0.5, 0.0]).map(T::cast_from)
                 },
             b: center
                 + if second {
-                    v(0.5, 0.125, 0.125)
+                    Vector3::from_array([0.5, 0.125, 0.125]).map(T::cast_from)
                 } else {
-                    v(0.125, 0.5, 0.125)
+                    Vector3::from_array([0.125, 0.5, 0.125]).map(T::cast_from)
                 },
-            radius: scalar(0.375),
+            radius: T::cast_from(0.375),
         },
         obb: Obb {
             center,
-            axes: [v(c * cy, s * cy, -sy), v(-s, c, 0.0), v(c * sy, s * sy, cy)],
-            half: v(0.625, 0.5, 0.375),
+            axes: [
+                Vector3::from_array([c * cy, s * cy, -sy]).map(T::cast_from),
+                Vector3::from_array([-s, c, 0.0]).map(T::cast_from),
+                Vector3::from_array([c * sy, s * sy, cy]).map(T::cast_from),
+            ],
+            half: Vector3::from_array([0.625, 0.5, 0.375]).map(T::cast_from),
         },
         triangle: if second {
             Tri3::new([
-                center + v(-0.5, 0.0, -0.75),
-                center + v(0.5, 0.0, -0.75),
-                center + v(0.0, 0.0, 0.75),
+                center + Vector3::from_array([-0.5, 0.0, -0.75]).map(T::cast_from),
+                center + Vector3::from_array([0.5, 0.0, -0.75]).map(T::cast_from),
+                center + Vector3::from_array([0.0, 0.0, 0.75]).map(T::cast_from),
             ])
         } else {
             Tri3::new([
-                center + v(-0.75, -0.5, 0.0),
-                center + v(0.75, -0.5, 0.0),
-                center + v(0.0, 0.75, 0.0),
+                center + Vector3::from_array([-0.75, -0.5, 0.0]).map(T::cast_from),
+                center + Vector3::from_array([0.75, -0.5, 0.0]).map(T::cast_from),
+                center + Vector3::from_array([0.0, 0.75, 0.0]).map(T::cast_from),
             ])
         },
     }
@@ -186,8 +185,8 @@ fn scalars<T: RealScalar + TryCastFrom<f64>>(label: &str, batches: u32, samples:
     let input: Vec<_> = (0..PAIRS)
         .map(|i| {
             (
-                scalar::<T>(0.25 + i as f64 / 256.0),
-                scalar::<T>(1.0 + i as f64 / 256.0),
+                <T>::cast_from(0.25 + i as f64 / 256.0),
+                <T>::cast_from(1.0 + i as f64 / 256.0),
             )
         })
         .collect();

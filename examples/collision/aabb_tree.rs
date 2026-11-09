@@ -35,7 +35,9 @@
 //! intermediates. Mesh containment is not inferred from triangle soups.
 
 use super::{box_triangle, capsule_triangle, triangle_triangle, Capsule, Obb};
-use rs_math3d::{Box3, CrossProduct, Intersect, MathError, Ray, RealScalar, Tri3, Vector, Vector3};
+use rs_math3d::{
+    Box3, CrossProduct, Intersect, MathError, Ray, RealScalar, RealVector, Tri3, Vector, Vector3,
+};
 
 /// Failures at the tree's checked construction boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -145,20 +147,7 @@ pub struct AabbTree<T: RealScalar> {
 /// Componentwise closed bound of exactly three represented vertices.
 pub(super) fn triangle_bounds<T: RealScalar>(triangle: &Tri3<T>) -> Box3<T> {
     let [a, b, c] = *triangle.vertices();
-    Box3::new(
-        &Vector3::min(&a, &Vector3::min(&b, &c)),
-        &Vector3::max(&a, &Vector3::max(&b, &c)),
-    )
-}
-
-/// Closed interval overlap, preserving face/edge/point contacts.
-pub(super) fn overlap<T: RealScalar>(a: &Box3<T>, b: &Box3<T>) -> bool {
-    a.min.x <= b.max.x
-        && a.max.x >= b.min.x
-        && a.min.y <= b.max.y
-        && a.max.y >= b.min.y
-        && a.min.z <= b.max.z
-        && a.max.z >= b.min.z
+    Box3::new(&a, &b).add(&c)
 }
 
 /// Componentwise capsule envelope. Nonnegative radius and representable expanded
@@ -264,6 +253,7 @@ fn build<T: RealScalar>(
 /// Two-sided Moller-Trumbore solve with unscaled barycentric numerators. Delay
 /// division until after all sign/range rejection. A represented zero determinant
 /// is parallel/unresolved; fixed-point rounding can change edge classifications.
+/// This kernel has no angular tolerance; core Ray/triangle queries apply one.
 fn ray_triangle<T: RealScalar>(
     ray: &Ray<T, Vector3<T>>,
     triangle: &Tri3<T>,
@@ -311,10 +301,7 @@ impl<T: RealScalar> AabbTree<T> {
         for (index, triangle) in triangles.into_iter().enumerate() {
             let validate = || -> Result<(), MathError> {
                 let [a, b, c] = *triangle.vertices();
-                if [a, b, c]
-                    .iter()
-                    .any(|p| !p.x.is_finite() || !p.y.is_finite() || !p.z.is_finite())
-                {
+                if [a, b, c].iter().any(|p| !p.is_finite()) {
                     return Err(MathError::NonFinite);
                 }
                 let e1 = Vector3::checked_sub_vv(&b, &a)?;
@@ -392,14 +379,14 @@ impl<T: RealScalar> AabbTree<T> {
     ) {
         let node = &self.nodes[index];
         stats.bounds_tests += 1;
-        if !overlap(&node.bounds, bounds) {
+        if !node.bounds.overlap(bounds) {
             return;
         }
         match node.kind {
             Kind::Leaf { start } => {
                 for &id in &self.order[start..start + node.count] {
                     stats.bounds_tests += 1;
-                    if overlap(&self.entries[id].bounds, bounds) {
+                    if self.entries[id].bounds.overlap(bounds) {
                         stats.triangle_tests += 1;
                         visitor(id, &self.entries[id].triangle);
                     }
@@ -469,7 +456,7 @@ impl<T: RealScalar> AabbTree<T> {
             return result;
         }
         result.stats.bounds_tests += 1;
-        if !overlap(&self.nodes[0].bounds, bounds) {
+        if !self.nodes[0].bounds.overlap(bounds) {
             return result;
         }
         for id in 0..self.entries.len() {
@@ -491,7 +478,7 @@ impl<T: RealScalar> AabbTree<T> {
         stats: &mut QueryStats,
     ) -> bool {
         stats.bounds_tests += 1;
-        if !overlap(&self.entries[id].bounds, bounds) {
+        if !self.entries[id].bounds.overlap(bounds) {
             return false;
         }
         stats.triangle_tests += 1;
@@ -509,7 +496,7 @@ impl<T: RealScalar> AabbTree<T> {
     ) -> Option<usize> {
         let node = &self.nodes[index];
         stats.bounds_tests += 1;
-        if !overlap(&node.bounds, bounds) {
+        if !node.bounds.overlap(bounds) {
             return None;
         }
         match node.kind {
@@ -626,10 +613,10 @@ impl<T: RealScalar> AabbTree<T> {
             return result;
         }
         result.stats.bounds_tests += 1;
-        if !overlap(
-            &self.nodes[0].bounds,
-            &translated(&other.nodes[0].bounds, offset),
-        ) {
+        if !self.nodes[0]
+            .bounds
+            .overlap(&translated(&other.nodes[0].bounds, offset))
+        {
             return result;
         }
         for a in 0..self.entries.len() {
@@ -654,10 +641,10 @@ impl<T: RealScalar> AabbTree<T> {
         stats: &mut QueryStats,
     ) -> bool {
         stats.bounds_tests += 1;
-        if !overlap(
-            &self.entries[a].bounds,
-            &translated(&other.entries[b].bounds, offset),
-        ) {
+        if !self.entries[a]
+            .bounds
+            .overlap(&translated(&other.entries[b].bounds, offset))
+        {
             return false;
         }
         stats.triangle_tests += 1;
@@ -681,7 +668,7 @@ impl<T: RealScalar> AabbTree<T> {
         let lhs = &self.nodes[a];
         let rhs = &other.nodes[b];
         stats.bounds_tests += 1;
-        if !overlap(&lhs.bounds, &translated(&rhs.bounds, offset)) {
+        if !lhs.bounds.overlap(&translated(&rhs.bounds, offset)) {
             return None;
         }
         match (&lhs.kind, &rhs.kind) {

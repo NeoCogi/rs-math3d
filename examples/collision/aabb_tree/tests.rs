@@ -36,17 +36,13 @@ mod fixtures;
 #[path = "../shape_cases.rs"]
 mod shape_cases;
 
-/// Exact fixture conversion outside the algorithms under test.
-fn n<T: TryCastFrom<f64>>(x: f64) -> T {
-    T::try_cast_from(x).ok().unwrap()
-}
-/// Dyadic coordinates shared by every numeric backend.
-fn p<T: RealScalar + TryCastFrom<f64>>(x: f64, y: f64, z: f64) -> Vector3<T> {
-    Vector3::new(n(x), n(y), n(z))
-}
 /// Triangle with exactly representable edges and normal.
 fn triangle<T: RealScalar + TryCastFrom<f64>>(z: f64) -> Tri3<T> {
-    Tri3::new([p(-1.0, -1.0, z), p(1.0, -1.0, z), p(0.0, 1.0, z)])
+    Tri3::new([
+        Vector3::from_array([-1.0, -1.0, z]).map(T::cast_from),
+        Vector3::from_array([1.0, -1.0, z]).map(T::cast_from),
+        Vector3::from_array([0.0, 1.0, z]).map(T::cast_from),
+    ])
 }
 
 /// Selection may permute each partition arbitrarily. Feed the same stable IDs
@@ -128,7 +124,10 @@ fn structure<T: RealScalar>(tree: &AabbTree<T>, leaf_size: usize) {
 /// ties, empty input, containment semantics and tree enclosure/permutation.
 fn analytic<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
     let empty = AabbTree::<T>::new(Vec::new(), 4).unwrap();
-    let ray = Ray::new(&p(0.0, 0.0, 3.0), &p(0.0, 0.0, -1.0));
+    let ray = Ray::new(
+        &Vector3::from_array([0.0, 0.0, 3.0]).map(T::cast_from),
+        &Vector3::from_array([0.0, 0.0, -1.0]).map(T::cast_from),
+    );
     assert_eq!(empty.info().nodes, 0);
     assert_eq!(empty.info().depth, 0);
     assert!(empty.raycast(&ray).hit.is_none());
@@ -139,20 +138,47 @@ fn analytic<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
     let tree = AabbTree::new(vec![triangle::<T>(0.0), triangle(1.0)], 1).unwrap();
     let hit = tree.raycast(&ray).hit.unwrap();
     assert_eq!(hit.triangle, 1);
-    assert_eq!(hit.parameter, n(2.0));
-    assert_eq!(hit.point.z, n(1.0));
-    let mut scaled = Ray::new(&p(0.0, 0.0, 3.0), &p(0.0, 0.0, -1.0));
-    scaled.direction = p(0.0, 0.0, -2.0);
+    assert_eq!(hit.parameter, T::cast_from(2.0));
+    assert_eq!(hit.point.z, T::cast_from(1.0));
+    let mut scaled = Ray::new(
+        &Vector3::from_array([0.0, 0.0, 3.0]).map(T::cast_from),
+        &Vector3::from_array([0.0, 0.0, -1.0]).map(T::cast_from),
+    );
+    scaled.direction = Vector3::from_array([0.0, 0.0, -2.0]).map(T::cast_from);
     let hit = tree.raycast(&scaled).hit.unwrap();
-    assert_eq!(hit.parameter, n(1.0));
-    assert_eq!(hit.point.z, n(1.0));
+    assert_eq!(hit.parameter, T::cast_from(1.0));
+    assert_eq!(hit.point.z, T::cast_from(1.0));
     for (origin, direction, expected) in [
-        (p(0.0, 0.0, -3.0), p(0.0, 0.0, 1.0), true),
-        (p(-1.0, -1.0, 3.0), p(0.0, 0.0, -1.0), true),
-        (p(0.0, 0.0, 1.0), p(0.0, 0.0, 1.0), true),
-        (p(0.0, 0.0, -3.0), p(0.0, 0.0, -1.0), false),
-        (p(3.0, 0.0, 3.0), p(0.0, 0.0, -1.0), false),
-        (p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), false),
+        (
+            Vector3::from_array([0.0, 0.0, -3.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+            true,
+        ),
+        (
+            Vector3::from_array([-1.0, -1.0, 3.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.0, -1.0]).map(T::cast_from),
+            true,
+        ),
+        (
+            Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+            true,
+        ),
+        (
+            Vector3::from_array([0.0, 0.0, -3.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.0, -1.0]).map(T::cast_from),
+            false,
+        ),
+        (
+            Vector3::from_array([3.0, 0.0, 3.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.0, -1.0]).map(T::cast_from),
+            false,
+        ),
+        (
+            Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from),
+            Vector3::from_array([1.0, 0.0, 0.0]).map(T::cast_from),
+            false,
+        ),
     ] {
         let ray = Ray::new(&origin, &direction);
         let result = tree.raycast(&ray);
@@ -170,10 +196,16 @@ fn analytic<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
     structure(&duplicates, 1);
     let single = AabbTree::new(vec![triangle::<T>(0.0)], 1).unwrap();
     for (offset, expected) in [
-        (p(0.0, 0.0, 0.0), true),
-        (p(2.0, 0.0, 0.0), true),
-        (p(2.25, 0.0, 0.0), false),
-        (p(0.0, 0.0, 0.25), false),
+        (Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from), true),
+        (Vector3::from_array([2.0, 0.0, 0.0]).map(T::cast_from), true),
+        (
+            Vector3::from_array([2.25, 0.0, 0.0]).map(T::cast_from),
+            false,
+        ),
+        (
+            Vector3::from_array([0.0, 0.0, 0.25]).map(T::cast_from),
+            false,
+        ),
     ] {
         assert_eq!(single.intersects(&single, offset).hit.is_some(), expected);
         assert_eq!(
@@ -181,12 +213,24 @@ fn analytic<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
             expected
         );
     }
-    assert!(empty.intersects(&single, p(0.0, 0.0, 0.0)).hit.is_none());
-    assert!(single.intersects(&empty, p(0.0, 0.0, 0.0)).hit.is_none());
-    let a = p::<T>(0.0, 0.0, 0.0);
-    let b = p(4.0, 0.0, 0.0);
-    let c = p(0.0, 4.0, 0.0);
-    let d = p(0.0, 0.0, 4.0);
+    assert!(empty
+        .intersects(
+            &single,
+            Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from)
+        )
+        .hit
+        .is_none());
+    assert!(single
+        .intersects(
+            &empty,
+            Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from)
+        )
+        .hit
+        .is_none());
+    let a = Vector3::from_array([0.0, 0.0, 0.0]).map(<T>::cast_from);
+    let b = Vector3::from_array([4.0, 0.0, 0.0]).map(T::cast_from);
+    let c = Vector3::from_array([0.0, 4.0, 0.0]).map(T::cast_from);
+    let d = Vector3::from_array([0.0, 0.0, 4.0]).map(T::cast_from);
     let outer = AabbTree::new(
         vec![
             Tri3::new([a, b, c]),
@@ -199,27 +243,41 @@ fn analytic<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
     .unwrap();
     let inner = AabbTree::new(
         vec![Tri3::new([
-            p(0.5, 0.5, 0.5),
-            p(0.75, 0.5, 0.5),
-            p(0.5, 0.75, 0.5),
+            Vector3::from_array([0.5, 0.5, 0.5]).map(T::cast_from),
+            Vector3::from_array([0.75, 0.5, 0.5]).map(T::cast_from),
+            Vector3::from_array([0.5, 0.75, 0.5]).map(T::cast_from),
         ])],
         1,
     )
     .unwrap();
-    assert!(outer.intersects(&inner, p(0.0, 0.0, 0.0)).hit.is_none());
+    assert!(outer
+        .intersects(
+            &inner,
+            Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from)
+        )
+        .hit
+        .is_none());
     let capsule = Capsule {
-        a: p(0.5, 0.5, 0.5),
-        b: p(0.5, 0.5, 0.5),
-        radius: n(0.125),
+        a: Vector3::from_array([0.5, 0.5, 0.5]).map(T::cast_from),
+        b: Vector3::from_array([0.5, 0.5, 0.5]).map(T::cast_from),
+        radius: T::cast_from(0.125),
     };
     assert!(outer.intersects_capsule(&capsule).hit.is_none());
     let obb = Obb {
-        center: p(0.5, 0.5, 0.5),
-        axes: [p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, 0.0, 1.0)],
-        half: p(0.125, 0.125, 0.125),
+        center: Vector3::from_array([0.5, 0.5, 0.5]).map(T::cast_from),
+        axes: [
+            Vector3::from_array([1.0, 0.0, 0.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 1.0, 0.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+        ],
+        half: Vector3::from_array([0.125, 0.125, 0.125]).map(T::cast_from),
     };
     assert!(outer.intersects_obb(&obb).hit.is_none());
-    let bad = Tri3::new([p::<T>(0.0, 0.0, 0.0), p(1.0, 1.0, 1.0), p(2.0, 2.0, 2.0)]);
+    let bad = Tri3::new([
+        Vector3::from_array([0.0, 0.0, 0.0]).map(<T>::cast_from),
+        Vector3::from_array([1.0, 1.0, 1.0]).map(T::cast_from),
+        Vector3::from_array([2.0, 2.0, 2.0]).map(T::cast_from),
+    ]);
     assert!(matches!(
         AabbTree::new(vec![bad], 4),
         Err(BuildError::InvalidTriangle {
@@ -247,8 +305,9 @@ fn real_meshes<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
                     let mut direction = [0.0, 0.0, -1.0];
                     direction.swap(axis, 2);
                     let ray = Ray::new(
-                        &p(origin[0], origin[1], origin[2]),
-                        &p(direction[0], direction[1], direction[2]),
+                        &Vector3::from_array([origin[0], origin[1], origin[2]]).map(T::cast_from),
+                        &Vector3::from_array([direction[0], direction[1], direction[2]])
+                            .map(T::cast_from),
                     );
                     let actual = mesh.raycast(&ray);
                     let expected = mesh.brute_raycast(&ray);
@@ -267,7 +326,7 @@ fn real_meshes<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
         assert!(hits > 0 && misses > 0);
         assert!(mesh.info().depth < 20);
     }
-    let offset = p(0.0, 0.0, 0.0);
+    let offset = Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from);
     let actual = teapot.intersects(&bunny, offset);
     let expected = teapot.brute_intersects(&bunny, offset);
     assert_eq!(actual.hit.is_some(), expected.hit.is_some());
@@ -277,7 +336,13 @@ fn real_meshes<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
         teapot.triangle(a).unwrap(),
         bunny.triangle(b).unwrap()
     ));
-    assert!(teapot.intersects(&bunny, p(64.0, 0.0, 0.0)).hit.is_none());
+    assert!(teapot
+        .intersects(
+            &bunny,
+            Vector3::from_array([64.0, 0.0, 0.0]).map(T::cast_from)
+        )
+        .hit
+        .is_none());
 }
 
 /// Known shape/triangle contacts, misses, degenerate centerlines, tilted boxes
@@ -287,9 +352,9 @@ fn shape_contacts<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
     let empty = AabbTree::<T>::new(Vec::new(), 4).unwrap();
     for (z, expected) in [(0.0, true), (0.25, true), (0.5, false)] {
         let capsule = Capsule {
-            a: p(-0.5, 0.0, z),
-            b: p(0.5, 0.0, z),
-            radius: n(0.25),
+            a: Vector3::from_array([-0.5, 0.0, z]).map(T::cast_from),
+            b: Vector3::from_array([0.5, 0.0, z]).map(T::cast_from),
+            radius: T::cast_from(0.25),
         };
         assert_eq!(
             tree.intersects_capsule(&capsule).hit,
@@ -301,9 +366,13 @@ fn shape_contacts<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
         );
         assert!(empty.intersects_capsule(&capsule).hit.is_none());
         let obb = Obb {
-            center: p(0.0, 0.0, z),
-            axes: [p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, 0.0, 1.0)],
-            half: p(0.5, 0.25, 0.25),
+            center: Vector3::from_array([0.0, 0.0, z]).map(T::cast_from),
+            axes: [
+                Vector3::from_array([1.0, 0.0, 0.0]).map(T::cast_from),
+                Vector3::from_array([0.0, 1.0, 0.0]).map(T::cast_from),
+                Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+            ],
+            half: Vector3::from_array([0.5, 0.25, 0.25]).map(T::cast_from),
         };
         assert_eq!(
             tree.intersects_obb(&obb).hit,
@@ -316,51 +385,63 @@ fn shape_contacts<T: RealScalar + TryCastFrom<f64> + core::fmt::Debug>() {
         assert!(empty.intersects_obb(&obb).hit.is_none());
     }
     let piercing = Capsule {
-        a: p(0.0, 0.0, -1.0),
-        b: p(0.0, 0.0, 1.0),
-        radius: n(0.0),
+        a: Vector3::from_array([0.0, 0.0, -1.0]).map(T::cast_from),
+        b: Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+        radius: T::cast_from(0.0),
     };
     assert_eq!(tree.intersects_capsule(&piercing).hit, Some(0));
     let sphere = Capsule {
-        a: p(-1.0, -1.0, 0.25),
-        b: p(-1.0, -1.0, 0.25),
-        radius: n(0.25),
+        a: Vector3::from_array([-1.0, -1.0, 0.25]).map(T::cast_from),
+        b: Vector3::from_array([-1.0, -1.0, 0.25]).map(T::cast_from),
+        radius: T::cast_from(0.25),
     };
     assert_eq!(tree.intersects_capsule(&sphere).hit, Some(0));
     let corner = Capsule {
-        a: p(1.25, 1.25, 0.0),
-        b: p(1.25, 1.25, 0.0),
-        radius: n(0.25),
+        a: Vector3::from_array([1.25, 1.25, 0.0]).map(T::cast_from),
+        b: Vector3::from_array([1.25, 1.25, 0.0]).map(T::cast_from),
+        radius: T::cast_from(0.25),
     };
-    assert!(overlap(&capsule_bounds(&corner), &tree.nodes[0].bounds));
+    assert!(capsule_bounds(&corner).overlap(&tree.nodes[0].bounds));
     assert!(tree.intersects_capsule(&corner).hit.is_none());
     let rotated = Obb {
-        center: p(1.0, 1.0, 0.0),
-        axes: [p(0.6, -0.8, 0.0), p(0.8, 0.6, 0.0), p(0.0, 0.0, 1.0)],
-        half: p(1.0, 0.125, 0.125),
+        center: Vector3::from_array([1.0, 1.0, 0.0]).map(T::cast_from),
+        axes: [
+            Vector3::from_array([0.6, -0.8, 0.0]).map(T::cast_from),
+            Vector3::from_array([0.8, 0.6, 0.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+        ],
+        half: Vector3::from_array([1.0, 0.125, 0.125]).map(T::cast_from),
     };
-    assert!(overlap(&obb_bounds(&rotated), &tree.nodes[0].bounds));
+    assert!(obb_bounds(&rotated).overlap(&tree.nodes[0].bounds));
     assert!(tree.intersects_obb(&rotated).hit.is_none());
     let tilted = Obb {
-        center: p(0.0, 0.0, 0.0),
-        axes: [p(1.0, 0.0, 0.0), p(0.0, 0.6, 0.8), p(0.0, -0.8, 0.6)],
-        half: p(0.5, 0.25, 0.25),
+        center: Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from),
+        axes: [
+            Vector3::from_array([1.0, 0.0, 0.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.6, 0.8]).map(T::cast_from),
+            Vector3::from_array([0.0, -0.8, 0.6]).map(T::cast_from),
+        ],
+        half: Vector3::from_array([0.5, 0.25, 0.25]).map(T::cast_from),
     };
     assert_eq!(tree.intersects_obb(&tilted).hit, Some(0));
     let contained_triangle = Obb {
-        half: p(2.0, 2.0, 2.0),
+        half: Vector3::from_array([2.0, 2.0, 2.0]).map(T::cast_from),
         ..tilted
     };
     assert_eq!(tree.intersects_obb(&contained_triangle).hit, Some(0));
     let zero_size = Obb {
-        axes: [p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, 0.0, 1.0)],
-        half: p(0.0, 0.0, 0.0),
+        axes: [
+            Vector3::from_array([1.0, 0.0, 0.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 1.0, 0.0]).map(T::cast_from),
+            Vector3::from_array([0.0, 0.0, 1.0]).map(T::cast_from),
+        ],
+        half: Vector3::from_array([0.0, 0.0, 0.0]).map(T::cast_from),
         ..tilted
     };
     assert_eq!(tree.intersects_obb(&zero_size).hit, Some(0));
     assert!(tree
         .intersects_obb(&Obb {
-            center: p(0.75, 0.75, 0.0),
+            center: Vector3::from_array([0.75, 0.75, 0.0]).map(T::cast_from),
             ..zero_size
         })
         .hit
@@ -388,17 +469,17 @@ fn capsule_handles_tiny_triangle_projection() {
     type F = Fixed<i32, 16>;
     let tree = AabbTree::new(
         vec![Tri3::new([
-            p::<F>(0.0, 0.0, 0.0),
-            p(1.0 / 256.0, 0.0, 0.0),
-            p(0.0, 1.0 / 256.0, 0.0),
+            Vector3::from_array([0.0, 0.0, 0.0]).map(<F>::cast_from),
+            Vector3::from_array([1.0 / 256.0, 0.0, 0.0]).map(F::cast_from),
+            Vector3::from_array([0.0, 1.0 / 256.0, 0.0]).map(F::cast_from),
         ])],
         1,
     )
     .unwrap();
     let capsule = Capsule {
-        a: p(1.0 / 512.0, 1.0 / 256.0, 0.0),
-        b: p(1.0 / 512.0, 1.0 / 256.0, 0.0),
-        radius: n(0.125),
+        a: Vector3::from_array([1.0 / 512.0, 1.0 / 256.0, 0.0]).map(F::cast_from),
+        b: Vector3::from_array([1.0 / 512.0, 1.0 / 256.0, 0.0]).map(F::cast_from),
+        radius: F::cast_from(0.125),
     };
     assert_eq!(tree.intersects_capsule(&capsule).hit, Some(0));
 }
@@ -409,9 +490,13 @@ fn capsule_handles_tiny_triangle_projection() {
 #[test]
 fn obb_envelope_contains_rounded_corner() {
     let obb = Obb::<f32> {
-        center: p(-0.75, 0.0, 0.0),
-        axes: [p(0.6, 0.8, 0.0), p(-0.8, 0.6, 0.0), p(0.0, 0.0, 1.0)],
-        half: p(1.0, 0.5, 0.25),
+        center: Vector3::from_array([-0.75, 0.0, 0.0]).map(f32::cast_from),
+        axes: [
+            Vector3::from_array([0.6, 0.8, 0.0]).map(f32::cast_from),
+            Vector3::from_array([-0.8, 0.6, 0.0]).map(f32::cast_from),
+            Vector3::from_array([0.0, 0.0, 1.0]).map(f32::cast_from),
+        ],
+        half: Vector3::from_array([1.0, 0.5, 0.25]).map(f32::cast_from),
     };
     let corner =
         obb.center + obb.axes[0] * obb.half.x - obb.axes[1] * obb.half.y + obb.axes[2] * obb.half.z;
@@ -496,15 +581,21 @@ backend!(s31_32_tree_and_meshes,Fixed<i64,32>);
 #[test]
 fn build_rejects_unrepresentable_span_and_cross_product() {
     type F = Fixed<i32, 16>;
-    let remote = |x| Tri3::new([p::<F>(x, 0.0, 0.0), p(x + 1.0, 0.0, 0.0), p(x, 1.0, 0.0)]);
+    let remote = |x| {
+        Tri3::new([
+            Vector3::from_array([x, 0.0, 0.0]).map(<F>::cast_from),
+            Vector3::from_array([x + 1.0, 0.0, 0.0]).map(F::cast_from),
+            Vector3::from_array([x, 1.0, 0.0]).map(F::cast_from),
+        ])
+    };
     assert!(matches!(
         AabbTree::new(vec![remote(-30000.0), remote(30000.0)], 4),
         Err(BuildError::InvalidSpan(MathError::Overflow))
     ));
     let huge = Tri3::new([
-        p::<F>(0.0, 0.0, 0.0),
-        p(200.0, 0.0, 0.0),
-        p(0.0, 200.0, 0.0),
+        Vector3::from_array([0.0, 0.0, 0.0]).map(<F>::cast_from),
+        Vector3::from_array([200.0, 0.0, 0.0]).map(F::cast_from),
+        Vector3::from_array([0.0, 200.0, 0.0]).map(F::cast_from),
     ]);
     assert!(matches!(
         AabbTree::new(vec![huge], 4),
@@ -552,8 +643,8 @@ fn fixture_decoder_rejects_bad_lengths_and_indices() {
 #[test]
 fn nonfinite_geometry_is_rejected() {
     let bad = Tri3::new([
-        p::<f32>(0.0, 0.0, 0.0),
-        p(1.0, 0.0, 0.0),
+        Vector3::from_array([0.0, 0.0, 0.0]).map(<f32>::cast_from),
+        Vector3::from_array([1.0, 0.0, 0.0]).map(f32::cast_from),
         Vector3::new(0.0, f32::NAN, 0.0),
     ]);
     assert!(matches!(

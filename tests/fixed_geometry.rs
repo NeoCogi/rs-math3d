@@ -33,11 +33,6 @@ use rs_math3d::*;
 /// Shared S23.8 fixture scalar, with enough integer headroom for scene geometry.
 type F = Fixed<i32, 8>;
 
-/// Constructs exact integer fixtures without a float intermediary.
-fn f(value: i64) -> F {
-    F::try_from_int(value).unwrap()
-}
-
 /// Checks a numeric answer within an explicit number of destination quanta.
 fn close(value: F, expected: f64, quanta: f64) {
     assert!(
@@ -52,16 +47,35 @@ fn close(value: F, expected: f64, quanta: f64) {
 fn matrix_modes_and_default_preserve_small_reciprocals() {
     assert_eq!(InverseMode::default(), InverseMode::Reciprocal);
     // Scalar 1/det rounds to zero, but inverse diagonal 1/32 is representable.
-    let m2 = Matrix2::new(f(32), f(0), f(0), f(32));
+    let m2 = Matrix2::new(
+        F::cast_from(32),
+        F::cast_from(0),
+        F::cast_from(0),
+        F::cast_from(32),
+    );
     assert_eq!((F::ONE / m2.determinant()).to_bits(), 0);
     for mode in [InverseMode::Reciprocal, InverseMode::Rows] {
         let inverse = m2.checked_inverse_with(mode).unwrap();
         close(inverse.col[0].x, 1.0 / 32.0, 0.0);
         close((m2 * inverse).col[1].y, 1.0, 0.0);
-        let m3 = Matrix3::new(f(8), f(0), f(0), f(0), f(8), f(0), f(0), f(0), f(8));
+        let m3 = Matrix3::new(
+            F::cast_from(8),
+            F::cast_from(0),
+            F::cast_from(0),
+            F::cast_from(0),
+            F::cast_from(8),
+            F::cast_from(0),
+            F::cast_from(0),
+            F::cast_from(0),
+            F::cast_from(8),
+        );
         let inverse = m3.checked_inverse_with(mode).unwrap();
         close((m3 * inverse).col[2].z, 1.0, 0.0);
-        let m4 = transforms::scale(Vector3::new(f(8), f(8), f(8)));
+        let m4 = transforms::scale(Vector3::new(
+            F::cast_from(8),
+            F::cast_from(8),
+            F::cast_from(8),
+        ));
         let inverse = m4.checked_inverse_with(mode).unwrap();
         close((m4 * inverse).col[2].z, 1.0, 0.0);
     }
@@ -69,7 +83,12 @@ fn matrix_modes_and_default_preserve_small_reciprocals() {
         m2.inverse().col[0].x,
         m2.inverse_with(InverseMode::Reciprocal).col[0].x
     );
-    let singular = Matrix2::new(f(1), f(1), f(1), f(1));
+    let singular = Matrix2::new(
+        F::cast_from(1),
+        F::cast_from(1),
+        F::cast_from(1),
+        F::cast_from(1),
+    );
     for mode in [InverseMode::Reciprocal, InverseMode::Rows] {
         assert!(matches!(
             singular.checked_inverse_with(mode),
@@ -113,8 +132,8 @@ fn matrix_products_and_casts_preserve_raw_precision() {
 
 #[test]
 fn transforms_quaternions_and_affine_decomposition() {
-    let zero = f(0);
-    let one = f(1);
+    let zero = F::cast_from(0);
+    let one = F::cast_from(1);
     let axis = Vector3::new(zero, zero, one);
     let angle: F = core::f64::consts::FRAC_PI_2.into();
     let q = Quat::checked_of_axis_angle(&axis, angle, F::DELTA)
@@ -123,14 +142,25 @@ fn transforms_quaternions_and_affine_decomposition() {
     let rotated = q.mat3() * Vector3::new(one, zero, zero);
     close(rotated.x, 0.0, 4.0);
     close(rotated.y, 1.0, 4.0);
-    let doubled = f(2) * q;
+    let doubled = F::cast_from(2) * q;
     close(doubled.w, q.w.to_f64() * 2.0, 0.0);
-    let translation = transforms::translate(Vector3::new(f(2), f(3), f(4)));
-    let scale = transforms::scale(Vector3::new(f(2), f(4), f(8)));
+    let translation = transforms::translate(Vector3::new(
+        F::cast_from(2),
+        F::cast_from(3),
+        F::cast_from(4),
+    ));
+    let scale = transforms::scale(Vector3::new(
+        F::cast_from(2),
+        F::cast_from(4),
+        F::cast_from(8),
+    ));
     let matrix = translation * scale;
     let point = Vector3::new(one, one, one);
     let result = transforms::checked_transform_vec3(&matrix, &point).unwrap();
-    assert_eq!((result.x, result.y, result.z), (f(4), f(7), f(12)));
+    assert_eq!(
+        (result.x, result.y, result.z),
+        (F::cast_from(4), F::cast_from(7), F::cast_from(12))
+    );
     let inverse = matrix
         .checked_inverse_affine_with(InverseMode::Rows)
         .unwrap();
@@ -139,11 +169,11 @@ fn transforms_quaternions_and_affine_decomposition() {
     let parts = transforms::checked_decompose_affine(&matrix).ok().unwrap();
     assert_eq!(
         (parts.scale.x, parts.scale.y, parts.scale.z),
-        (f(2), f(4), f(8))
+        (F::cast_from(2), F::cast_from(4), F::cast_from(8))
     );
-    assert_eq!(parts.translation.x, f(2));
+    assert_eq!(parts.translation.x, F::cast_from(2));
     let basis = Basis::of_mat4(&matrix);
-    assert_eq!(basis.to_mat4().col[3].y, f(3));
+    assert_eq!(basis.to_mat4().col[3].y, F::cast_from(3));
     let orthogonal = checked_basis_from_unit_rh(&axis, F::DELTA).ok().unwrap();
     close(Vector3::dot(&orthogonal[0], &orthogonal[1]), 0.0, 1.0);
     // S2.61 can represent an identity quaternion but cannot represent trace 4.
@@ -156,12 +186,17 @@ fn transforms_quaternions_and_affine_decomposition() {
 
 #[test]
 fn checked_projection_and_camera_domains() {
-    let projection =
-        transforms::checked_perspective(F::from(1.0f32), f(1), f(1), f(10000)).unwrap();
+    let projection = transforms::checked_perspective(
+        F::from(1.0f32),
+        F::cast_from(1),
+        F::cast_from(1),
+        F::cast_from(10000),
+    )
+    .unwrap();
     close(projection.col[3].z, -2.0, 2.0);
-    let eye = Vector3::new(f(0), f(0), f(2));
-    let target = Vector3::new(f(0), f(0), f(0));
-    let up = Vector3::new(f(0), f(1), f(0));
+    let eye = Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(2));
+    let target = Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(0));
+    let up = Vector3::new(F::cast_from(0), F::cast_from(1), F::cast_from(0));
     let view = transforms::checked_lookat(&eye, &target, &up).unwrap();
     close(view.col[3].z, -2.0, 0.0);
     assert!(matches!(
@@ -169,20 +204,33 @@ fn checked_projection_and_camera_domains() {
         Err(MathError::Degenerate)
     ));
     assert!(matches!(
-        transforms::checked_perspective(f(1), f(0), f(1), f(2)),
+        transforms::checked_perspective(
+            F::cast_from(1),
+            F::cast_from(0),
+            F::cast_from(1),
+            F::cast_from(2)
+        ),
         Err(MathError::Domain)
     ));
-    let ortho = transforms::checked_ortho4(f(-1), f(1), f(-1), f(1), f(1), f(3)).unwrap();
-    let lo = Vector2::new(f(0), f(0));
-    let hi = Vector2::new(f(100), f(100));
+    let ortho = transforms::checked_ortho4(
+        F::cast_from(-1),
+        F::cast_from(1),
+        F::cast_from(-1),
+        F::cast_from(1),
+        F::cast_from(1),
+        F::cast_from(3),
+    )
+    .unwrap();
+    let lo = Vector2::new(F::cast_from(0), F::cast_from(0));
+    let hi = Vector2::new(F::cast_from(100), F::cast_from(100));
     let identity = Matrix4::identity();
-    let point = Vector3::new(f(0), f(0), f(-2));
+    let point = Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(-2));
     let screen = transforms::checked_project3(&identity, &ortho, &lo, &hi, &point).unwrap();
     let world = transforms::checked_unproject3(&identity, &ortho, &lo, &hi, &screen).unwrap();
     assert_eq!((world.x, world.y, world.z), (point.x, point.y, point.z));
     assert!(transforms::checked_frustum(
-        &Vector3::new(f(-1), f(-1), f(1)),
-        &Vector3::new(f(1), f(1), f(10))
+        &Vector3::new(F::cast_from(-1), F::cast_from(-1), F::cast_from(1)),
+        &Vector3::new(F::cast_from(1), F::cast_from(1), F::cast_from(10))
     )
     .is_ok());
     let mut invalid = Matrix4::<F>::identity();
@@ -194,8 +242,8 @@ fn checked_projection_and_camera_domains() {
     assert!(transforms::checked_decompose_affine(&invalid)
         .ok()
         .is_none());
-    invalid.col[0].w = f(0);
-    invalid.col[3].w = f(0);
+    invalid.col[0].w = F::cast_from(0);
+    invalid.col[3].w = F::cast_from(0);
     assert!(matches!(
         transforms::checked_transform_vec3(&invalid, &point),
         Err(MathError::DivisionByZero)
@@ -204,33 +252,53 @@ fn checked_projection_and_camera_domains() {
 
 #[test]
 fn primitive_construction_coordinates_and_distance() {
-    let dimension = Dimension::new(f(2), f(3));
-    assert_eq!(dimension.width, f(2));
-    let rect = Rect::new(f(0), f(0), f(2), f(3));
-    assert!(rect.contains(&Vector2::new(f(1), f(1))));
-    let zero = Vector3::new(f(0), f(0), f(0));
-    let x = Vector3::new(f(1), f(0), f(0));
-    let y = Vector3::new(f(0), f(1), f(0));
+    let dimension = Dimension::new(F::cast_from(2), F::cast_from(3));
+    assert_eq!(dimension.width, F::cast_from(2));
+    let rect = Rect::new(
+        F::cast_from(0),
+        F::cast_from(0),
+        F::cast_from(2),
+        F::cast_from(3),
+    );
+    assert!(rect.contains(&Vector2::new(F::cast_from(1), F::cast_from(1))));
+    let zero = Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(0));
+    let x = Vector3::new(F::cast_from(1), F::cast_from(0), F::cast_from(0));
+    let y = Vector3::new(F::cast_from(0), F::cast_from(1), F::cast_from(0));
     let triangle = Tri3::new([zero, x, y]);
     let quarter = F::try_from_ratio(1, 4).unwrap();
     let barycentric = triangle
-        .checked_barycentric_coordinates(&Vector3::new(quarter, quarter, f(0)))
+        .checked_barycentric_coordinates(&Vector3::new(quarter, quarter, F::cast_from(0)))
         .unwrap();
     assert_eq!(
         (barycentric.x, barycentric.y, barycentric.z),
         (F::try_from_ratio(1, 2).unwrap(), quarter, quarter)
     );
-    let plane = Plane::new(&Vector3::new(f(0), f(0), f(1)), &zero);
+    let plane = Plane::new(
+        &Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(1)),
+        &zero,
+    );
     assert_eq!(
         plane
-            .checked_distance(&Vector3::new(f(0), f(0), f(3)))
+            .checked_distance(&Vector3::new(
+                F::cast_from(0),
+                F::cast_from(0),
+                F::cast_from(3)
+            ))
             .ok()
             .unwrap(),
-        f(3)
+        F::cast_from(3)
     );
-    let parametrized = ParametricPlane::new(&zero, &x, &Vector3::new(f(1), f(1), f(0)));
+    let parametrized = ParametricPlane::new(
+        &zero,
+        &x,
+        &Vector3::new(F::cast_from(1), F::cast_from(1), F::cast_from(0)),
+    );
     let coordinates = parametrized
-        .checked_project(&Vector3::new(f(2), f(3), f(0)))
+        .checked_project(&Vector3::new(
+            F::cast_from(2),
+            F::cast_from(3),
+            F::cast_from(0),
+        ))
         .unwrap();
     // The scaled Gram solve quantizes several intermediates. Directed native
     // arithmetic no longer gets nearest-even's accidental cancellation here;
@@ -240,19 +308,23 @@ fn primitive_construction_coordinates_and_distance() {
     let segment = Segment::new(&zero, &x);
     assert_eq!(
         segment
-            .checked_distance(&Vector3::new(f(0), f(2), f(0)))
+            .checked_distance(&Vector3::new(
+                F::cast_from(0),
+                F::cast_from(2),
+                F::cast_from(0)
+            ))
             .ok()
             .unwrap(),
-        f(2)
+        F::cast_from(2)
     );
-    let tiny = Vector3::new(F::DELTA, f(0), f(0));
+    let tiny = Vector3::new(F::DELTA, F::cast_from(0), F::cast_from(0));
     let tiny_line = Line::checked_new(&zero, &tiny, F::ZERO).ok().unwrap();
     assert_eq!(tiny_line.checked_normalize(F::ZERO).unwrap().d.x, F::ONE);
     assert!(Matrix3::checked_of_axis_angle(&tiny, F::ONE, F::ZERO)
         .ok()
         .is_some());
     let normalized = tiny
-        .checked_normalize_with_inv_len(F::ZERO, f(256), F::ZERO)
+        .checked_normalize_with_inv_len(F::ZERO, F::cast_from(256), F::ZERO)
         .unwrap();
     assert_eq!(normalized.x, F::ONE);
     assert_eq!(
@@ -263,10 +335,13 @@ fn primitive_construction_coordinates_and_distance() {
             .x,
         F::ONE
     );
-    let bounds = Box3::new(&zero, &Vector3::new(f(2), f(2), f(2)));
-    assert_eq!(bounds.center().x, f(1));
+    let bounds = Box3::new(
+        &zero,
+        &Vector3::new(F::cast_from(2), F::cast_from(2), F::cast_from(2)),
+    );
+    assert_eq!(bounds.center().x, F::cast_from(1));
     assert_eq!(bounds.subdivide().len(), 8);
-    let sphere = Sphere3::new(zero, f(1));
+    let sphere = Sphere3::new(zero, F::cast_from(1));
     assert!(bounds.checked_intersect(&sphere).unwrap());
     assert!(sphere.checked_intersect(&triangle).unwrap());
 }
@@ -274,41 +349,53 @@ fn primitive_construction_coordinates_and_distance() {
 #[test]
 fn checked_queries_distinguish_misses_and_range_errors() {
     let triangle = Tri3::new([
-        Vector3::new(f(0), f(0), f(0)),
-        Vector3::new(f(1), f(0), f(0)),
-        Vector3::new(f(0), f(1), f(0)),
+        Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(0)),
+        Vector3::new(F::cast_from(1), F::cast_from(0), F::cast_from(0)),
+        Vector3::new(F::cast_from(0), F::cast_from(1), F::cast_from(0)),
     ]);
     let quarter = F::try_from_ratio(1, 4).unwrap();
-    let start = Vector3::new(quarter, quarter, f(1));
-    let mut ray = Ray::checked_new(&start, &Vector3::new(f(0), f(0), f(-1)), F::DELTA)
-        .ok()
-        .unwrap();
+    let start = Vector3::new(quarter, quarter, F::cast_from(1));
+    let mut ray = Ray::checked_new(
+        &start,
+        &Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(-1)),
+        F::DELTA,
+    )
+    .ok()
+    .unwrap();
     let hit = ray.checked_intersection(&triangle).unwrap().unwrap();
-    assert_eq!(hit.0, f(1));
-    assert_eq!(hit.1.z, f(0));
-    ray.direction.z = f(1);
+    assert_eq!(hit.0, F::cast_from(1));
+    assert_eq!(hit.1.z, F::cast_from(0));
+    ray.direction.z = F::cast_from(1);
     assert!(ray.checked_intersection(&triangle).unwrap().is_none());
-    ray.direction.z = f(0);
+    ray.direction.z = F::cast_from(0);
     assert!(matches!(
         ray.checked_intersection(&triangle),
         Err(MathError::Degenerate)
     ));
-    let origin = Vector3::new(f(0), f(0), f(0));
-    let mut ray = Ray::checked_new(&origin, &Vector3::new(f(1), f(0), f(0)), F::DELTA)
-        .ok()
-        .unwrap();
+    let origin = Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(0));
+    let mut ray = Ray::checked_new(
+        &origin,
+        &Vector3::new(F::cast_from(1), F::cast_from(0), F::cast_from(0)),
+        F::DELTA,
+    )
+    .ok()
+    .unwrap();
     let bounds = Box3::new(
-        &Vector3::new(f(1), f(-1), f(-1)),
-        &Vector3::new(f(2), f(1), f(1)),
+        &Vector3::new(F::cast_from(1), F::cast_from(-1), F::cast_from(-1)),
+        &Vector3::new(F::cast_from(2), F::cast_from(1), F::cast_from(1)),
     );
     assert!(bounds.checked_intersect(&ray).unwrap());
-    ray.start.y = f(2);
+    ray.start.y = F::cast_from(2);
     assert!(!bounds.checked_intersect(&ray).unwrap());
-    ray.start.y = f(0);
+    ray.start.y = F::cast_from(0);
     ray.direction.x = F::DELTA;
     let distant = Box3::new(
-        &Vector3::new(F::max_value() - f(1), f(-1), f(-1)),
-        &Vector3::new(F::max_value(), f(1), f(1)),
+        &Vector3::new(
+            F::max_value() - F::cast_from(1),
+            F::cast_from(-1),
+            F::cast_from(-1),
+        ),
+        &Vector3::new(F::max_value(), F::cast_from(1), F::cast_from(1)),
     );
     assert_eq!(distant.checked_intersect(&ray), Err(MathError::Overflow));
 }
@@ -339,21 +426,25 @@ fn supported_scene_format_families() {
 
 #[test]
 fn fixed_line_parameters_and_subquantum_angular_squares() {
-    let origin = Vector3::new(f(0), f(0), f(0));
-    let normal = Vector3::new(f(0), f(0), f(1));
+    let origin = Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(0));
+    let normal = Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(1));
     let plane = Plane::new(&normal, &origin);
-    let start = Vector3::new(f(0), f(0), f(2));
-    let mut line = Line::checked_new(&start, &Vector3::new(f(0), f(0), f(-2)), F::DELTA)
-        .ok()
-        .unwrap();
+    let start = Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(2));
+    let mut line = Line::checked_new(
+        &start,
+        &Vector3::new(F::cast_from(0), F::cast_from(0), F::cast_from(-2)),
+        F::DELTA,
+    )
+    .ok()
+    .unwrap();
     let first = plane
         .checked_intersect_line(&line, F::DELTA)
         .ok()
         .flatten()
         .unwrap();
-    assert_eq!(first.0, f(1));
-    assert_eq!(first.1.z, f(0));
-    line.d = line.d * f(2);
+    assert_eq!(first.0, F::cast_from(1));
+    assert_eq!(first.1.z, F::cast_from(0));
+    line.d = line.d * F::cast_from(2);
     let second = plane
         .checked_intersect_line(&line, F::DELTA)
         .ok()
@@ -361,8 +452,8 @@ fn fixed_line_parameters_and_subquantum_angular_squares() {
         .unwrap();
     assert_eq!(second.0, F::try_from_ratio(1, 2).unwrap());
     assert_eq!(second.1.z, first.1.z);
-    let x = Vector3::new(f(1), f(0), f(0));
-    let near_x = Vector3::new(f(1), F::DELTA, f(0));
+    let x = Vector3::new(F::cast_from(1), F::cast_from(0), F::cast_from(0));
+    let near_x = Vector3::new(F::cast_from(1), F::DELTA, F::cast_from(0));
     assert_eq!(F::DELTA * F::DELTA, F::ZERO);
     let unit = checked_tri_normal(&origin, &x, &near_x, F::ZERO)
         .ok()
@@ -371,8 +462,8 @@ fn fixed_line_parameters_and_subquantum_angular_squares() {
     assert!(checked_tri_normal(&origin, &x, &near_x, F::DELTA)
         .ok()
         .is_none());
-    let tiny_x = Vector3::new(F::DELTA, f(0), f(0));
-    let tiny_y = Vector3::new(f(0), F::DELTA, f(0));
+    let tiny_x = Vector3::new(F::DELTA, F::cast_from(0), F::cast_from(0));
+    let tiny_y = Vector3::new(F::cast_from(0), F::DELTA, F::cast_from(0));
     assert_eq!(
         checked_tri_normal(&origin, &tiny_x, &tiny_y, F::ZERO)
             .ok()
@@ -381,19 +472,23 @@ fn fixed_line_parameters_and_subquantum_angular_squares() {
         F::ONE
     );
     let line0 = Line::checked_new(&origin, &x, F::DELTA).ok().unwrap();
-    let line1 = Line::checked_new(&normal, &Vector3::new(f(0), f(1), f(0)), F::DELTA)
-        .ok()
-        .unwrap();
+    let line1 = Line::checked_new(
+        &normal,
+        &Vector3::new(F::cast_from(0), F::cast_from(1), F::cast_from(0)),
+        F::DELTA,
+    )
+    .ok()
+    .unwrap();
     let closest = checked_shortest_segment3d_between_lines3d(&line0, &line1, F::DELTA)
         .ok()
         .flatten()
         .unwrap();
-    assert_eq!(closest.e.z - closest.s.z, f(1));
+    assert_eq!(closest.e.z - closest.s.z, F::cast_from(1));
 }
 
 #[test]
 fn guarded_tangent_does_not_create_a_quantized_cosine_pole() {
     let angle = F::try_from_f64(core::f64::consts::FRAC_PI_2).unwrap();
     assert_eq!(angle.checked_cos().unwrap(), F::ZERO);
-    assert!(angle.checked_tan().unwrap() > f(1000));
+    assert!(angle.checked_tan().unwrap() > F::cast_from(1000));
 }

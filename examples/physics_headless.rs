@@ -78,7 +78,7 @@ where
     for (id, body) in world.bodies() {
         if !body.enabled() {
             let p = body.pose().position;
-            let xyz = [p.x, p.y, p.z].map(|x| f64::try_cast_from(x).ok().unwrap());
+            let xyz = p.map(f64::cast_from).to_array();
             println!("disabled body={} position={xyz:?}", id.index());
         }
     }

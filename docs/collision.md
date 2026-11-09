@@ -36,7 +36,20 @@ false positives. Triangle-triangle includes the in-plane axes needed to reject
 disjoint coplanar triangles.
 
 All arithmetic uses the library's ordinary, unchecked operators and vector
-kernels. This is safe Rust and introduces no `unsafe` or unchecked memory
+kernels. Setup conversion uses `TryCastFrom::cast_from`, component conversion
+uses `Vector3::map`, scalar clipping uses `Scalar::clamp`, and the tree/physics
+broad phases call `Box3::overlap` directly. The fixture corpus also uses core
+vector subtraction, cross and dot products before applying its common-grid snap.
+
+Some local geometry algorithms have additional contracts: closed-segment
+helpers accept collapsed endpoints, contact normalization fixes a fused
+squared-length quantization order, and the tree's raw determinant ray kernel
+uses no angular tolerance. These policies remain explicit rather than changing
+their numeric results through a different query's contract. Independent numeric
+reference calculations in tests and tools remain independent of the kernels
+they check.
+
+This is safe Rust and introduces no `unsafe` or unchecked memory
 access. The caller supplies:
 
 - Finite coordinates, nonnegative radii and half extents.

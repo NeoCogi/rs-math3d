@@ -4,6 +4,10 @@ rs-math3d is a no_std-friendly 2D/3D math library focused on computer graphics a
 It provides vectors, matrices, quaternions, transforms, and common geometric primitives with
 utility traits for intersection and distance queries.
 
+![S15.16 physics demo showing spheres, oriented boxes and capsules colliding with the Utah Teapot and Stanford Bunny](docs/images/physics-demo.png)
+
+[S15.16 (`fixed32`) physics example](docs/physics.md), rendered with SDL2 + glow using OpenGL ES 3.
+
 ## Features
 
 - Vector math (2D/3D/4D), dot/cross products, swizzles, and real-scalar normalization helpers
@@ -65,10 +69,6 @@ For the interactive SDL2/glow GLES3 demo, run
 `cargo run --release --features physics-demo --example physics_demo -- --scalar fixed32`.
 The [fixed-point replay checks](docs/physics-determinism.md) compare every tick,
 including sleeping and cached impulses, across x86-64, ARMv5TE and RISC-V64.
-
-![S15.16 physics demo showing spheres, oriented boxes and capsules colliding with the Utah Teapot and Stanford Bunny](docs/images/physics-demo.png)
-
-S15.16 (`fixed32`) scene rendered with SDL2 + glow using OpenGL ES 3.
 
 The [const-selected CORDIC experiment](docs/cordic.md) compares
 `angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with

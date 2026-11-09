@@ -66,6 +66,10 @@ For the interactive SDL2/glow GLES3 demo, run
 The [fixed-point replay checks](docs/physics-determinism.md) compare every tick,
 including sleeping and cached impulses, across x86-64, ARMv5TE and RISC-V64.
 
+![S15.16 physics demo showing spheres, oriented boxes and capsules colliding with the Utah Teapot and Stanford Bunny](docs/images/physics-demo.png)
+
+S15.16 (`fixed32`) scene rendered with SDL2 + glow using OpenGL ES 3.
+
 The [const-selected CORDIC experiment](docs/cordic.md) compares
 `angle.sin_cos_with::<64>()` against the default Q96/i128 implementation, with
 compile-time guard precision, speed measurements and independent high-precision errors.

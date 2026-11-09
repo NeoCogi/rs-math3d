@@ -83,7 +83,7 @@ fn contacts<T: RealScalar + TryCastFrom<f64>>() {
             for c in manifold.points() {
                 assert!(c.normal.x < scalar(-0.8));
                 assert!(c.depth >= T::zero());
-                assert!(finite(c.point));
+                assert!(c.point.is_finite());
             }
             let reverse = contact::convex(&b.convex(), &a.convex());
             assert!(!reverse.points().is_empty());
@@ -165,7 +165,7 @@ fn box_face_manifold_has_spread_and_depth() {
         assert!((p.depth - scalar::<T>(0.25)).tabs() < scalar(0.001));
         assert!(p.normal.y > scalar(0.99));
     }
-    assert!(magnitude(m.points()[0].point - m.points()[1].point) > scalar(0.5));
+    assert!((m.points()[0].point - m.points()[1].point).max_abs_component() > scalar(0.5));
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn friction_slows_a_sliding_box() {
         material(),
     )
     .unwrap();
-    body.set_velocity(v(2., 0., 0.), zero()).unwrap();
+    body.set_velocity(v(2., 0., 0.), Vector3::zero()).unwrap();
     let b = w.add_body(body).unwrap();
     for _ in 0..240 {
         w.step();
@@ -230,7 +230,7 @@ fn off_center_impulse_changes_spin() {
         Shape::Sphere {
             radius: scalar::<T>(1.),
         },
-        Pose::at(zero()),
+        Pose::at(Vector3::zero()),
         scalar(1.),
         material(),
     )
@@ -407,7 +407,7 @@ fn sweep_matches_flat_pairs_after_reordering() {
 fn escaped_body_has_a_terminal_motion_state() {
     type T = Fixed<i32, 16>;
     let mut w = World::<T>::new();
-    w.set_gravity(zero()).unwrap();
+    w.set_gravity(Vector3::zero()).unwrap();
     let mut body = Body::new(
         Shape::Sphere {
             radius: scalar(0.4),
@@ -417,7 +417,7 @@ fn escaped_body_has_a_terminal_motion_state() {
         material(),
     )
     .unwrap();
-    body.set_velocity(v(15., 0., 0.), zero()).unwrap();
+    body.set_velocity(v(15., 0., 0.), Vector3::zero()).unwrap();
     let id = w.add_body(body).unwrap();
     w.step();
     assert!(!w.body(id).unwrap().enabled());
@@ -425,11 +425,15 @@ fn escaped_body_has_a_terminal_motion_state() {
     w.set_gravity(v(0., 9.81, 0.)).unwrap();
     assert!(!w.body(id).unwrap().enabled());
     assert_eq!(
-        w.body_mut(id).unwrap().set_velocity(zero(), zero()),
+        w.body_mut(id)
+            .unwrap()
+            .set_velocity(Vector3::zero(), Vector3::zero()),
         Err(Error::InactiveBody)
     );
     assert_eq!(
-        w.body_mut(id).unwrap().apply_impulse(zero(), v(1., 0., 0.)),
+        w.body_mut(id)
+            .unwrap()
+            .apply_impulse(Vector3::zero(), v(1., 0., 0.)),
         Err(Error::InactiveBody)
     );
 }
@@ -470,7 +474,7 @@ fn settling<T: RealScalar + TryCastFrom<f64>>() {
         let b = w.body(id).unwrap();
         assert!(b.enabled());
         assert!((b.pose.position.y - scalar::<T>(height)).tabs() < scalar(0.1));
-        assert!(magnitude(b.velocity) < scalar::<T>(0.2));
+        assert!(b.velocity.max_abs_component() < scalar::<T>(0.2));
     }
 }
 #[test]
@@ -506,7 +510,7 @@ fn construction_and_capacity() {
         Body::new(
             shape,
             Pose {
-                position: zero(),
+                position: Vector3::zero(),
                 orientation: Quat::new(T::ZERO, T::ZERO, T::ZERO, T::ZERO)
             },
             T::ONE,
@@ -560,14 +564,14 @@ fn two_box_stack_remains_supported() {
     }
     assert!((w.body(a).unwrap().pose.position.y - scalar::<T>(0.4)).abs() < scalar(0.08));
     assert!((w.body(b).unwrap().pose.position.y - scalar::<T>(1.2)).abs() < scalar(0.08));
-    assert!(magnitude(w.body(b).unwrap().velocity) < scalar(0.2));
+    assert!(w.body(b).unwrap().velocity.max_abs_component() < scalar(0.2));
 }
 
 #[test]
 fn head_on_impulses_preserve_linear_momentum() {
     type T = Fixed<i64, 32>;
     let mut w = World::<T>::new();
-    w.set_gravity(zero()).unwrap();
+    w.set_gravity(Vector3::zero()).unwrap();
     let shape = Shape::Sphere {
         radius: scalar(0.5),
     };
@@ -581,7 +585,7 @@ fn head_on_impulses_preserve_linear_momentum() {
         },
     )
     .unwrap();
-    a.set_velocity(v(2., 0., 0.), zero()).unwrap();
+    a.set_velocity(v(2., 0., 0.), Vector3::zero()).unwrap();
     let mut b = Body::new(
         shape,
         Pose::at(v(0.49, 0., 0.)),
@@ -592,13 +596,16 @@ fn head_on_impulses_preserve_linear_momentum() {
         },
     )
     .unwrap();
-    b.set_velocity(v(-2., 0., 0.), zero()).unwrap();
+    b.set_velocity(v(-2., 0., 0.), Vector3::zero()).unwrap();
     let a = w.add_body(a).unwrap();
     let b = w.add_body(b).unwrap();
     w.step();
     assert!(w.body(a).unwrap().velocity.x < scalar(-1.9));
     assert!(w.body(b).unwrap().velocity.x > scalar(1.9));
-    assert!(magnitude(w.body(a).unwrap().velocity + w.body(b).unwrap().velocity) < scalar(0.0001));
+    assert!(
+        (w.body(a).unwrap().velocity + w.body(b).unwrap().velocity).max_abs_component()
+            < scalar(0.0001)
+    );
 }
 
 /// A slowly moving support must not leave a frozen dependent after separation.
@@ -627,7 +634,7 @@ fn slow_support_loss<T: RealScalar + TryCastFrom<f64>>() {
     assert!(!w.body(upper).unwrap().sleeping());
     w.body_mut(lower)
         .unwrap()
-        .set_velocity(v(0.14, 0., 0.), zero())
+        .set_velocity(v(0.14, 0., 0.), Vector3::zero())
         .unwrap();
     for _ in 0..1200 {
         w.step();
@@ -657,7 +664,7 @@ fn float_slow_support_loss_remains_dynamic() {
 fn fixed32_body_contacts_do_not_sleep() {
     type T = Fixed<i32, 16>;
     let mut w = World::<T>::new();
-    w.set_gravity(zero()).unwrap();
+    w.set_gravity(Vector3::zero()).unwrap();
     for x in [T::ZERO, scalar::<T>(0.4) * T::two()] {
         w.add_body(
             Body::new(

@@ -431,7 +431,8 @@ fn oblique_boxes_match_edge_clipping_reference() {
         assert_eq!(box_box(&a, &b), reference);
         assert_eq!(box_box(&b, &a), reference);
         let face_separated = a.axes.iter().chain(b.axes.iter()).any(|&axis| {
-            dot(b.center - a.center, axis).abs() > box_radius(&a, axis) + box_radius(&b, axis)
+            Vector3::dot(&(b.center - a.center), &axis).abs()
+                > box_radius(&a, axis) + box_radius(&b, axis)
         });
         if !reference && !face_separated {
             edge_only_misses += 1;

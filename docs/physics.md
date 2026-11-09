@@ -6,6 +6,12 @@ is independent of windowing/rendering and runs in f32, native S15.16/i32 or
 native S31.32/i64. All simulation arithmetic uses the selected scalar; scene
 setup and rendering conversions are separate.
 
+Physics and collision code use the library's `Vector` / `RealVector` operations
+directly for zero vectors, finiteness, dot products and squared lengths. The
+shared `Vector::max_abs_component()` supplies component bounds for speed limits,
+world bounds, anchor matching and quiet thresholds. It preserves one-quantum
+fixed components without squaring; these thresholds use the largest component.
+
 Run the shared teapot/bunny scene without a display:
 
 ```sh

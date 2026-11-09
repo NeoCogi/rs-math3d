@@ -82,7 +82,7 @@ impl<T: RealScalar> Manifold<T> {
         let z = T::zero();
         Self {
             points: [Contact {
-                point: Vector3::new(z, z, z),
+                point: Vector3::zero(),
                 normal: Vector3::new(z, T::one(), z),
                 depth: z,
             }; 4],
@@ -126,12 +126,12 @@ pub fn overlaps<T: RealScalar>(a: &Box3<T>, b: &Box3<T>) -> bool {
 /// Normalizes via the largest component so fixed small axes retain a denominator.
 /// A represented zero direction has no unique normal and returns None.
 pub fn unit<T: RealScalar>(v: Vector3<T>) -> Option<Vector3<T>> {
-    let scale = T::max(v.x.tabs(), T::max(v.y.tabs(), v.z.tabs()));
+    let scale = v.max_abs_component();
     if scale == T::zero() {
         None
     } else {
         let v = v / scale;
-        Some(v / squared(v).tsqrt())
+        Some(v / v.length_squared().tsqrt())
     }
 }
 /// Deterministic fallback for coincident primitive centers.
@@ -166,9 +166,9 @@ fn component<T: RealScalar>(v: Vector3<T>, i: usize) -> T {
 /// Closest point on a closed segment, including collapsed centerlines.
 fn segment_point<T: RealScalar>(p: Vector3<T>, a: Vector3<T>, b: Vector3<T>) -> Vector3<T> {
     let d = b - a;
-    let length = squared(d);
+    let length = d.length_squared();
     a + d * if length > T::zero() {
-        clamp(dot(p - a, d) / length, T::zero(), T::one())
+        clamp(Vector3::dot(&(p - a), &d) / length, T::zero(), T::one())
     } else {
         T::zero()
     }
@@ -184,17 +184,17 @@ fn segments<T: RealScalar>(
     let d = q - p;
     let e = b - a;
     let r = p - a;
-    let dd = squared(d);
-    let ee = squared(e);
+    let dd = d.length_squared();
+    let ee = e.length_squared();
     if dd == T::zero() {
         return (p, segment_point(p, a, b));
     }
     if ee == T::zero() {
         return (segment_point(a, p, q), a);
     }
-    let de = dot(d, e);
-    let dr = dot(d, r);
-    let er = dot(e, r);
+    let de = Vector3::dot(&d, &e);
+    let dr = Vector3::dot(&d, &r);
+    let er = Vector3::dot(&e, &r);
     let denom = dd * ee - de * de;
     let mut s = if denom > T::zero() {
         clamp((de * er - dr * ee) / denom, T::zero(), T::one())
@@ -215,14 +215,14 @@ fn segments<T: RealScalar>(
 fn triangle_point<T: RealScalar>(p: Vector3<T>, tri: &Tri3<T>) -> Vector3<T> {
     let [a, b, c] = *tri.vertices();
     if let Some(normal) = scaled_triangle_normal(tri) {
-        let projected = p - normal * (dot(p - a, normal) / squared(normal));
+        let projected = p - normal * (Vector3::dot(&(p - a), &normal) / normal.length_squared());
         if inside_triangle(projected, tri, normal) {
             return projected;
         }
     }
     let mut best = segment_point(p, a, b);
     for q in [segment_point(p, b, c), segment_point(p, c, a)] {
-        if squared(p - q) < squared(p - best) {
+        if (p - q).length_squared() < (p - best).length_squared() {
             best = q;
         }
     }
@@ -236,8 +236,8 @@ fn segment_triangle<T: RealScalar>(
 ) -> (Vector3<T>, Vector3<T>) {
     let [u, v, w] = *tri.vertices();
     if let Some(normal) = scaled_triangle_normal(tri) {
-        let da = dot(normal, a - u);
-        let db = dot(normal, b - u);
+        let da = Vector3::dot(&normal, &(a - u));
+        let db = Vector3::dot(&normal, &(b - u));
         if ((da <= T::zero() && db >= T::zero()) || (db <= T::zero() && da >= T::zero()))
             && da != db
         {
@@ -254,7 +254,7 @@ fn segment_triangle<T: RealScalar>(
         segments(a, b, v, w),
         segments(a, b, w, u),
     ] {
-        if squared(candidate.0 - candidate.1) < squared(best.0 - best.1) {
+        if (candidate.0 - candidate.1).length_squared() < (best.0 - best.1).length_squared() {
             best = candidate;
         }
     }
@@ -270,7 +270,7 @@ fn rounded<T: RealScalar>(
 ) -> Manifold<T> {
     let mut result = Manifold::empty();
     let d = a - b;
-    let distance = squared(d).tsqrt();
+    let distance = d.length_squared().tsqrt();
     let radius = ra + rb;
     if distance > radius {
         return result;
@@ -291,7 +291,7 @@ fn sphere_box_contact<T: RealScalar>(s: &Sphere3<T>, b: &Obb<T>) -> Manifold<T> 
         clamp(p.y, -b.half.y, b.half.y),
         clamp(p.z, -b.half.z, b.half.z),
     );
-    if squared(p - q) > T::zero() {
+    if (p - q).length_squared() > T::zero() {
         return rounded(s.center, s.radius, world(b, q), T::zero(), up());
     }
     let mut axis = 0;
@@ -357,7 +357,7 @@ fn segment_box<T: RealScalar>(
     let mut best = (a, closest(a));
     for p in [b] {
         let q = closest(p);
-        if squared(p - q) < squared(best.0 - best.1) {
+        if (p - q).length_squared() < (best.0 - best.1).length_squared() {
             best = (p, q);
         }
     }
@@ -377,15 +377,15 @@ fn segment_box<T: RealScalar>(
         }
         let slope = Vector3::new(slope[0], slope[1], slope[2]);
         let offset = Vector3::new(offset[0], offset[1], offset[2]);
-        let length = squared(slope);
+        let length = slope.length_squared();
         let t = if length > T::zero() {
-            clamp(-dot(slope, offset) / length, lo, hi)
+            clamp(-Vector3::dot(&slope, &offset) / length, lo, hi)
         } else {
             lo
         };
         let p = a + d * t;
         let q = closest(p);
-        if squared(p - q) < squared(best.0 - best.1) {
+        if (p - q).length_squared() < (best.0 - best.1).length_squared() {
             best = (p, q);
         }
     }
@@ -438,7 +438,7 @@ impl<T: RealScalar> Separation<T> {
 }
 /// Box interval on an arbitrary unit axis.
 fn box_interval<T: RealScalar>(b: &Obb<T>, n: Vector3<T>) -> (T, T) {
-    let c = dot(b.center, n);
+    let c = Vector3::dot(&b.center, &n);
     let r = box_radius(b, n);
     (c - r, c + r)
 }
@@ -475,11 +475,11 @@ fn polygon_manifold<T: RealScalar>(
             if used[i] {
                 continue;
             }
-            let p = p + normal * (plane - dot(p, normal));
+            let p = p + normal * (plane - Vector3::dot(&p, &normal));
             let distance = result
                 .points()
                 .iter()
-                .map(|c| squared(p - c.point))
+                .map(|c| (p - c.point).length_squared())
                 .reduce(T::min)
                 .unwrap_or(T::one());
             if chosen.is_none() || distance > score {
@@ -592,7 +592,7 @@ fn boxes<T: RealScalar>(a: &Obb<T>, b: &Obb<T>) -> Manifold<T> {
 /// Capsule/box contact, with a face escape direction when the centerline is inside.
 fn capsule_box_contact<T: RealScalar>(a: &Capsule<T>, b: &Obb<T>) -> Manifold<T> {
     let (p, q) = segment_box(local(b, a.a), local(b, a.b), b.half);
-    if squared(p - q) > T::zero() {
+    if (p - q).length_squared() > T::zero() {
         return rounded(world(b, p), a.radius, world(b, q), T::zero(), up());
     }
     let mut sat = Separation::new();
@@ -600,8 +600,8 @@ fn capsule_box_contact<T: RealScalar>(a: &Capsule<T>, b: &Obb<T>) -> Manifold<T>
         if !sat.axis(
             axis,
             |n| {
-                let x = dot(a.a, n);
-                let y = dot(a.b, n);
+                let x = Vector3::dot(&a.a, &n);
+                let y = Vector3::dot(&a.b, &n);
                 (T::min(x, y) - a.radius, T::max(x, y) + a.radius)
             },
             |n| box_interval(b, n),
@@ -671,7 +671,7 @@ pub fn convex<T: RealScalar>(a: &Convex<T>, b: &Convex<T>) -> Manifold<T> {
                             if result
                                 .points()
                                 .first()
-                                .is_some_and(|p| dot(p.normal, c.normal) > T::half())
+                                .is_some_and(|p| Vector3::dot(&p.normal, &c.normal) > T::half())
                             {
                                 result.push(c);
                             }
@@ -696,7 +696,7 @@ pub fn convex<T: RealScalar>(a: &Convex<T>, b: &Convex<T>) -> Manifold<T> {
 /// Rounded shape/triangle witness, using a face normal when distance collapses.
 fn capsule_triangle_contact<T: RealScalar>(a: &Capsule<T>, tri: &Tri3<T>) -> Manifold<T> {
     let (p, q) = segment_triangle(a.a, a.b, tri);
-    if squared(p - q) > T::zero() {
+    if (p - q).length_squared() > T::zero() {
         let mut result = rounded(p, a.radius, q, T::zero(), up());
         for endpoint in [a.a, a.b] {
             let closest = triangle_point(endpoint, tri);
@@ -705,7 +705,7 @@ fn capsule_triangle_contact<T: RealScalar>(a: &Capsule<T>, tri: &Tri3<T>) -> Man
                 if result
                     .points()
                     .first()
-                    .is_some_and(|first| dot(first.normal, c.normal) > T::half())
+                    .is_some_and(|first| Vector3::dot(&first.normal, &c.normal) > T::half())
                 {
                     result.push(c);
                 }
@@ -715,10 +715,14 @@ fn capsule_triangle_contact<T: RealScalar>(a: &Capsule<T>, tri: &Tri3<T>) -> Man
     }
     let mut normal = unit(scaled_triangle_normal(tri).unwrap_or(up())).unwrap_or(up());
     let origin = tri.vertices()[0];
-    if dot((a.a + a.b) * T::half() - origin, normal) < T::zero() {
+    if Vector3::dot(&((a.a + a.b) * T::half() - origin), &normal) < T::zero() {
         normal = -normal;
     }
-    let depth = a.radius - T::min(dot(a.a - origin, normal), dot(a.b - origin, normal));
+    let depth = a.radius
+        - T::min(
+            Vector3::dot(&(a.a - origin), &normal),
+            Vector3::dot(&(a.b - origin), &normal),
+        );
     let mut result = Manifold::empty();
     result.push(Contact {
         point: q,
@@ -760,9 +764,11 @@ fn box_triangle_contact<T: RealScalar>(b: &Obb<T>, tri: &Tri3<T>) -> Manifold<T>
                 return Manifold::empty();
             }
             let mut previous = polygon[count - 1];
-            let mut pd = dot(previous - b.center, b.axes[axis]) * sign - component(b.half, axis);
+            let mut pd = Vector3::dot(&(previous - b.center), &b.axes[axis]) * sign
+                - component(b.half, axis);
             for &current in &polygon[..count] {
-                let cd = dot(current - b.center, b.axes[axis]) * sign - component(b.half, axis);
+                let cd = Vector3::dot(&(current - b.center), &b.axes[axis]) * sign
+                    - component(b.half, axis);
                 if (pd <= T::zero()) != (cd <= T::zero()) {
                     let p = previous
                         + (current - previous) * clamp(pd / (pd - cd), T::zero(), T::one());

@@ -45,7 +45,7 @@ pub mod aabb_tree;
 #[allow(dead_code)]
 pub mod contact;
 
-use rs_math3d::{CrossProduct, RealScalar, Sphere3, Tri3, Vector, Vector3};
+use rs_math3d::{CrossProduct, RealScalar, RealVector, Sphere3, Tri3, Vector, Vector3};
 
 /// An oriented box with three orthonormal world-space axes.
 #[derive(Clone, Copy)]
@@ -69,16 +69,6 @@ pub struct Capsule<T: RealScalar> {
     pub radius: T,
 }
 
-/// Dot product with the library's scalar-specific accumulation and rounding.
-fn dot<T: RealScalar>(a: Vector3<T>, b: Vector3<T>) -> T {
-    Vector3::dot(&a, &b)
-}
-
-/// Squared length; avoids square roots in every overlap query.
-fn squared<T: RealScalar>(v: Vector3<T>) -> T {
-    dot(v, v)
-}
-
 /// Clamps a scalar to a closed interval.
 fn clamp<T: RealScalar>(x: T, lo: T, hi: T) -> T {
     T::max(lo, T::min(x, hi))
@@ -87,28 +77,33 @@ fn clamp<T: RealScalar>(x: T, lo: T, hi: T) -> T {
 /// Converts a world-space point to an orthonormal box's local coordinates.
 fn local<T: RealScalar>(b: &Obb<T>, p: Vector3<T>) -> Vector3<T> {
     let d = p - b.center;
-    Vector3::new(dot(d, b.axes[0]), dot(d, b.axes[1]), dot(d, b.axes[2]))
+    Vector3::new(
+        Vector3::dot(&d, &b.axes[0]),
+        Vector3::dot(&d, &b.axes[1]),
+        Vector3::dot(&d, &b.axes[2]),
+    )
 }
 
 /// Squared distance from a point to an origin-centered axis-aligned box.
 fn point_box_squared<T: RealScalar>(p: Vector3<T>, half: Vector3<T>) -> T {
-    squared(Vector3::new(
+    Vector3::new(
         p.x - clamp(p.x, -half.x, half.x),
         p.y - clamp(p.y, -half.y, half.y),
         p.z - clamp(p.z, -half.z, half.z),
-    ))
+    )
+    .length_squared()
 }
 
 /// Squared distance to a closed segment, including a zero-length segment.
 fn point_segment_squared<T: RealScalar>(p: Vector3<T>, a: Vector3<T>, b: Vector3<T>) -> T {
     let d = b - a;
-    let length = squared(d);
+    let length = d.length_squared();
     let t = if length > T::zero() {
-        clamp(dot(p - a, d) / length, T::zero(), T::one())
+        clamp(Vector3::dot(&(p - a), &d) / length, T::zero(), T::one())
     } else {
         T::zero()
     };
-    squared(p - (a + d * t))
+    (p - (a + d * t)).length_squared()
 }
 
 /// Squared distance between closed segments. Endpoint clamping recomputes the
@@ -122,17 +117,17 @@ fn segment_segment_squared<T: RealScalar>(
     let d = q - p;
     let e = b - a;
     let r = p - a;
-    let dd = squared(d);
-    let ee = squared(e);
+    let dd = d.length_squared();
+    let ee = e.length_squared();
     if dd == T::zero() {
         return point_segment_squared(p, a, b);
     }
     if ee == T::zero() {
         return point_segment_squared(a, p, q);
     }
-    let de = dot(d, e);
-    let dr = dot(d, r);
-    let er = dot(e, r);
+    let de = Vector3::dot(&d, &e);
+    let dr = Vector3::dot(&d, &r);
+    let er = Vector3::dot(&e, &r);
     let denominator = dd * ee - de * de;
     let mut s = if denominator > T::zero() {
         clamp((de * er - dr * ee) / denominator, T::zero(), T::one())
@@ -147,7 +142,7 @@ fn segment_segment_squared<T: RealScalar>(
         t = T::one();
         s = clamp((de - dr) / dd, T::zero(), T::one());
     }
-    squared((p + d * s) - (a + e * t))
+    ((p + d * s) - (a + e * t)).length_squared()
 }
 
 /// Scales the represented face normal by its largest component. A nonzero
@@ -156,7 +151,7 @@ fn segment_segment_squared<T: RealScalar>(
 fn scaled_triangle_normal<T: RealScalar>(triangle: &Tri3<T>) -> Option<Vector3<T>> {
     let [a, b, c] = *triangle.vertices();
     let normal = Vector3::cross(&(b - a), &(c - a));
-    let scale = T::max(normal.x.tabs(), T::max(normal.y.tabs(), normal.z.tabs()));
+    let scale = normal.max_abs_component();
     if scale == T::zero() {
         None
     } else {
@@ -181,10 +176,10 @@ fn point_triangle_with_normal<T: RealScalar>(
 ) -> T {
     let [a, b, c] = *triangle.vertices();
     if let Some(normal) = normal {
-        let height = dot(p - a, normal) / squared(normal);
+        let height = Vector3::dot(&(p - a), &normal) / normal.length_squared();
         let projected = p - normal * height;
         if inside_triangle(projected, triangle, normal) {
-            return squared(p - projected);
+            return (p - projected).length_squared();
         }
     }
     T::min(
@@ -201,7 +196,7 @@ fn inside_triangle<T: RealScalar>(p: Vector3<T>, tri: &Tri3<T>, normal: Vector3<
     let [a, b, c] = *tri.vertices();
     [(a, b), (b, c), (c, a)]
         .iter()
-        .all(|&(v, w)| dot(Vector3::cross(&(w - v), &(p - v)), normal) >= T::zero())
+        .all(|&(v, w)| Vector3::dot(&Vector3::cross(&(w - v), &(p - v)), &normal) >= T::zero())
 }
 
 /// Squared segment-triangle distance. A face piercing must be tested explicitly:
@@ -210,8 +205,8 @@ fn segment_triangle_squared<T: RealScalar>(a: Vector3<T>, b: Vector3<T>, tri: &T
     let [u, v, w] = *tri.vertices();
     let normal = scaled_triangle_normal(tri);
     if let Some(normal) = normal {
-        let da = dot(normal, a - u);
-        let db = dot(normal, b - u);
+        let da = Vector3::dot(&normal, &(a - u));
+        let db = Vector3::dot(&normal, &(b - u));
         if ((da <= T::zero() && db >= T::zero()) || (db <= T::zero() && da >= T::zero()))
             && da != db
         {
@@ -277,9 +272,9 @@ fn segment_box_squared<T: RealScalar>(a: Vector3<T>, b: Vector3<T>, half: Vector
         }
         let slope = Vector3::new(slope[0], slope[1], slope[2]);
         let offset = Vector3::new(offset[0], offset[1], offset[2]);
-        let quadratic = squared(slope);
+        let quadratic = slope.length_squared();
         let t = if quadratic > T::zero() {
-            clamp(-dot(slope, offset) / quadratic, lo, hi)
+            clamp(-Vector3::dot(&slope, &offset) / quadratic, lo, hi)
         } else {
             lo
         };
@@ -290,17 +285,17 @@ fn segment_box_squared<T: RealScalar>(a: Vector3<T>, b: Vector3<T>, half: Vector
 
 /// Projects a box onto an arbitrary axis without normalizing it.
 fn box_radius<T: RealScalar>(b: &Obb<T>, axis: Vector3<T>) -> T {
-    b.half.x * dot(b.axes[0], axis).tabs()
-        + b.half.y * dot(b.axes[1], axis).tabs()
-        + b.half.z * dot(b.axes[2], axis).tabs()
+    b.half.x * Vector3::dot(&b.axes[0], &axis).tabs()
+        + b.half.y * Vector3::dot(&b.axes[1], &axis).tabs()
+        + b.half.z * Vector3::dot(&b.axes[2], &axis).tabs()
 }
 
 /// Closed interval projection of a triangle onto an arbitrary SAT axis.
 fn triangle_interval<T: RealScalar>(tri: &Tri3<T>, axis: Vector3<T>) -> (T, T) {
     let [a, b, c] = *tri.vertices();
-    let pa = dot(a, axis);
-    let pb = dot(b, axis);
-    let pc = dot(c, axis);
+    let pa = Vector3::dot(&a, &axis);
+    let pb = Vector3::dot(&b, &axis);
+    let pc = Vector3::dot(&c, &axis);
     (T::min(pa, T::min(pb, pc)), T::max(pa, T::max(pb, pc)))
 }
 
@@ -313,7 +308,7 @@ fn edges<T: RealScalar>(tri: &Tri3<T>) -> [Vector3<T>; 3] {
 /// Sphere-sphere overlap from squared center distance.
 pub fn sphere_sphere<T: RealScalar>(a: &Sphere3<T>, b: &Sphere3<T>) -> bool {
     let radius = a.radius + b.radius;
-    squared(a.center - b.center) <= radius * radius
+    (a.center - b.center).length_squared() <= radius * radius
 }
 
 /// Sphere-capsule overlap from point-to-centerline distance.
@@ -352,7 +347,8 @@ pub fn capsule_triangle<T: RealScalar>(a: &Capsule<T>, b: &Tri3<T>) -> bool {
 /// Zero cross products project both shapes to zero and cannot separate them.
 pub fn box_box<T: RealScalar>(a: &Obb<T>, b: &Obb<T>) -> bool {
     let delta = b.center - a.center;
-    let separated = |axis| dot(delta, axis).tabs() > box_radius(a, axis) + box_radius(b, axis);
+    let separated =
+        |axis| Vector3::dot(&delta, &axis).tabs() > box_radius(a, axis) + box_radius(b, axis);
     for axis in a.axes.iter().chain(b.axes.iter()) {
         if separated(*axis) {
             return false;

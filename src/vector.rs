@@ -581,7 +581,7 @@ where
 /// Decomposes a nonzero direction without validation. Scaling is a numerical
 /// algorithm choice, not an input check; zero/nonfinite input has native semantics.
 pub(crate) fn normalized3<T: RealScalar>(vector: &Vector3<T>) -> Normalized3<T> {
-    let scale = T::max(vector.x.tabs(), T::max(vector.y.tabs(), vector.z.tabs()));
+    let scale = vector.max_abs_component();
     let scaled = *vector / scale;
     let scaled_length = scaled.length();
     Normalized3 {

@@ -288,8 +288,8 @@ fn runtime_input_failure_is_terminal() {
         tick: 1,
         input: Input::Velocity {
             body: BodyId(25),
-            linear: zero(),
-            angular: zero(),
+            linear: Vector3::zero(),
+            angular: Vector3::zero(),
         },
     }];
     r.step().unwrap();
@@ -314,8 +314,8 @@ fn same_tick_inputs_preserve_file_order() {
             tick: 0,
             input: Input::Velocity {
                 body,
-                linear: zero(),
-                angular: zero(),
+                linear: Vector3::zero(),
+                angular: Vector3::zero(),
             },
         },
         Scheduled {

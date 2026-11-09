@@ -687,7 +687,7 @@ pub fn record_demo<T: ReplayScalar>() -> Result<Vec<u8>, String> {
         scene::material(),
     )
     .map_err(|e| format!("{e:?}"))?;
-    exit.set_velocity(scene::vector([15., 0., 0.]), zero())
+    exit.set_velocity(scene::vector([15., 0., 0.]), Vector3::zero())
         .map_err(|e| format!("{e:?}"))?;
     world.add_body(exit).map_err(|e| format!("{e:?}"))?;
     let inputs: [Scheduled<T>; 5] = [

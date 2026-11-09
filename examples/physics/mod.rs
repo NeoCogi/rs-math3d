@@ -48,7 +48,9 @@ use crate::collision::{
     aabb_tree::AabbTree,
     contact::{self, Contact, Convex},
 };
-use rs_math3d::{Box3, CrossProduct, Quat, RealScalar, Sphere3, TryCastFrom, Vector, Vector3};
+use rs_math3d::{
+    Box3, CrossProduct, Quat, RealScalar, RealVector, Sphere3, TryCastFrom, Vector, Vector3,
+};
 
 /// World-local stable handle. No individual deletion or index reuse is exposed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,22 +157,6 @@ pub fn scalar<T: TryCastFrom<f64>>(x: f64) -> T {
         .ok()
         .expect("physics constant fits scalar")
 }
-/// Zero vector without a floating backend.
-fn zero<T: RealScalar>() -> Vector3<T> {
-    Vector3::new(T::zero(), T::zero(), T::zero())
-}
-/// Finite component validation at public mutation boundaries.
-fn finite<T: RealScalar>(v: Vector3<T>) -> bool {
-    v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
-}
-/// Vector dot product with fused fixed accumulation.
-fn dot<T: RealScalar>(a: Vector3<T>, b: Vector3<T>) -> T {
-    Vector3::dot(&a, &b)
-}
-/// Maximum component magnitude, also valid for sub-quantum squared distances.
-fn magnitude<T: RealScalar>(v: Vector3<T>) -> T {
-    T::max(v.x.tabs(), T::max(v.y.tabs(), v.z.tabs()))
-}
 /// First-order world-angular quaternion update followed by normalization.
 fn rotate<T: RealScalar>(q: Quat<T>, angle: Vector3<T>) -> Quat<T> {
     let derivative = Quat::new(angle.x, angle.y, angle.z, T::zero()) * q;
@@ -196,7 +182,7 @@ impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
         if !mass.is_finite() || mass < n(0.1) || mass > n(10.0) {
             return Err(Error::InvalidBody);
         }
-        if !finite(pose.position)
+        if !pose.position.is_finite()
             || ![
                 pose.orientation.x,
                 pose.orientation.y,
@@ -272,9 +258,9 @@ impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
                 position: pose.position,
                 orientation,
             },
-            axes: [zero(); 3],
-            velocity: zero(),
-            angular: zero(),
+            axes: [Vector3::zero(); 3],
+            velocity: Vector3::zero(),
+            angular: Vector3::zero(),
             inverse_mass,
             inverse_inertia,
             material,
@@ -317,7 +303,7 @@ impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
         if !self.enabled() {
             return Err(Error::InactiveBody);
         }
-        if !finite(linear) || !finite(angular) {
+        if !linear.is_finite() || !angular.is_finite() {
             return Err(Error::InvalidPose);
         }
         self.velocity = linear;
@@ -330,7 +316,7 @@ impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
         if !self.enabled() {
             return Err(Error::InactiveBody);
         }
-        if !finite(point) || !finite(impulse) {
+        if !point.is_finite() || !impulse.is_finite() {
             return Err(Error::InvalidPose);
         }
         self.wake();
@@ -365,9 +351,9 @@ impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
     fn local_point(&self, p: Vector3<T>) -> Vector3<T> {
         let d = p - self.pose.position;
         Vector3::new(
-            dot(d, self.axes[0]),
-            dot(d, self.axes[1]),
-            dot(d, self.axes[2]),
+            Vector3::dot(&d, &self.axes[0]),
+            Vector3::dot(&d, &self.axes[1]),
+            Vector3::dot(&d, &self.axes[2]),
         )
     }
     /// Converts a local anchor to its current world position.
@@ -391,11 +377,11 @@ impl<T: RealScalar + TryCastFrom<f64>> Body<T> {
     /// World inverse inertia action, using the current represented principal axes.
     fn inertia(&self, v: Vector3<T>) -> Vector3<T> {
         if self.mass() == T::zero() {
-            return zero();
+            return Vector3::zero();
         }
-        self.axes[0] * (dot(v, self.axes[0]) * self.inverse_inertia.x)
-            + self.axes[1] * (dot(v, self.axes[1]) * self.inverse_inertia.y)
-            + self.axes[2] * (dot(v, self.axes[2]) * self.inverse_inertia.z)
+        self.axes[0] * (Vector3::dot(&v, &self.axes[0]) * self.inverse_inertia.x)
+            + self.axes[1] * (Vector3::dot(&v, &self.axes[1]) * self.inverse_inertia.y)
+            + self.axes[2] * (Vector3::dot(&v, &self.axes[2]) * self.inverse_inertia.z)
     }
     /// Contact point velocity, including rotation around the center of mass.
     fn point_velocity(&self, p: Vector3<T>) -> Vector3<T> {
@@ -593,7 +579,7 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
         if self.bodies.len() >= 128 {
             return Err(Error::Capacity);
         }
-        if magnitude(body.pose.position) > self.config.domain {
+        if body.pose.position.max_abs_component() > self.config.domain {
             return Err(Error::InvalidPose);
         }
         let id = BodyId(self.bodies.len());
@@ -641,7 +627,7 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
     /// change wakes every enabled body before its next integration; identical
     /// gravity preserves sleep/quiet counters, and rejected input changes nothing.
     pub fn set_gravity(&mut self, gravity: Vector3<T>) -> Result<(), Error> {
-        if !finite(gravity) {
+        if !gravity.is_finite() {
             return Err(Error::InvalidPose);
         }
         let old = self.config.gravity;
@@ -669,7 +655,7 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                     (&mut body.velocity, c.speed_limit),
                     (&mut body.angular, c.spin_limit),
                 ] {
-                    let m = magnitude(*v);
+                    let m = v.max_abs_component();
                     if m > limit {
                         *v = *v * (limit / m);
                     }
@@ -677,10 +663,10 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                 body.pose.position = body.pose.position + body.velocity * c.dt;
                 body.pose.orientation = rotate(body.pose.orientation, body.angular * c.dt);
                 body.refresh();
-                if magnitude(body.pose.position) > c.domain {
+                if body.pose.position.max_abs_component() > c.domain {
                     body.motion = Motion::Disabled;
-                    body.velocity = zero();
-                    body.angular = zero();
+                    body.velocity = Vector3::zero();
+                    body.angular = Vector3::zero();
                 }
             }
         }
@@ -760,21 +746,27 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
         self.bodies[a].point_velocity(p)
             - match b {
                 Other::Body(id) => self.bodies[id].point_velocity(p),
-                Other::Mesh(_) => zero(),
+                Other::Mesh(_) => Vector3::zero(),
             }
     }
     /// Effective inverse mass including rotational leverage at one world point.
     fn effective(&self, a: usize, b: Other, p: Vector3<T>, n: Vector3<T>) -> T {
         let body = &self.bodies[a];
         let r = p - body.pose.position;
-        let mut mass =
-            body.mass() + dot(n, Vector3::cross(&body.inertia(Vector3::cross(&r, &n)), &r));
+        let mut mass = body.mass()
+            + Vector3::dot(
+                &n,
+                &Vector3::cross(&body.inertia(Vector3::cross(&r, &n)), &r),
+            );
         if let Other::Body(id) = b {
             let body = &self.bodies[id];
             let r = p - body.pose.position;
             mass = mass
                 + body.mass()
-                + dot(n, Vector3::cross(&body.inertia(Vector3::cross(&r, &n)), &r));
+                + Vector3::dot(
+                    &n,
+                    &Vector3::cross(&body.inertia(Vector3::cross(&r, &n)), &r),
+                );
         }
         if mass > T::zero() {
             T::one() / mass
@@ -810,8 +802,8 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
         let mut shallow = None;
         for (i, old) in self.contacts.iter().enumerate() {
             if old.a == a && old.other == other {
-                if magnitude(old.anchor_a - anchor_a) < self.config.merge_distance
-                    && dot(old.normal, c.normal) > self.config.normal_merge
+                if (old.anchor_a - anchor_a).max_abs_component() < self.config.merge_distance
+                    && Vector3::dot(&old.normal, &c.normal) > self.config.normal_merge
                 {
                     return;
                 }
@@ -840,7 +832,7 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
             Other::Mesh(m) => self.meshes[m].material,
         };
         let material_a = self.bodies[a].material;
-        let vn = dot(self.relative_velocity(a, other, c.point), c.normal);
+        let vn = Vector3::dot(&self.relative_velocity(a, other, c.point), &c.normal);
         let bounce = if vn < -T::one() {
             -vn * T::max(material_a.restitution, material_b.restitution)
         } else {
@@ -850,14 +842,14 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
         if let Some(old) = self.previous.iter().find(|old| {
             old.a == a
                 && old.other == other
-                && dot(old.normal, c.normal) > self.config.normal_match
-                && magnitude(old.anchor_a - anchor_a) < self.config.match_distance
+                && Vector3::dot(&old.normal, &c.normal) > self.config.normal_match
+                && (old.anchor_a - anchor_a).max_abs_component() < self.config.match_distance
         }) {
             let friction = old.tangent[0] * old.impulse[1] + old.tangent[1] * old.impulse[2];
             impulse = [
                 old.impulse[0] * self.config.warm,
-                dot(friction, t1) * self.config.warm,
-                dot(friction, t2) * self.config.warm,
+                Vector3::dot(&friction, &t1) * self.config.warm,
+                Vector3::dot(&friction, &t2) * self.config.warm,
             ];
         }
         let constraint = Constraint {
@@ -982,15 +974,15 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
             for i in 0..self.contacts.len() {
                 let mut c = self.contacts[i];
                 let p = self.bodies[c.a].world_point(c.anchor_a);
-                let vn = dot(self.relative_velocity(c.a, c.other, p), c.normal);
+                let vn = Vector3::dot(&self.relative_velocity(c.a, c.other, p), &c.normal);
                 let old = c.impulse[0];
                 c.impulse[0] = T::max(T::zero(), old + (c.bounce - vn) * c.mass[0]);
                 self.impulse(c, c.normal * (c.impulse[0] - old));
                 let velocity = self.relative_velocity(c.a, c.other, p);
                 let old = [c.impulse[1], c.impulse[2]];
                 let mut next = [
-                    old[0] - dot(velocity, c.tangent[0]) * c.mass[1],
-                    old[1] - dot(velocity, c.tangent[1]) * c.mass[2],
+                    old[0] - Vector3::dot(&velocity, &c.tangent[0]) * c.mass[1],
+                    old[1] - Vector3::dot(&velocity, &c.tangent[1]) * c.mass[2],
                 ];
                 let length = T::norm(&next);
                 let limit = c.friction * c.impulse[0];
@@ -1019,7 +1011,7 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                     Other::Body(b) => self.bodies[b].world_point(c.anchor_b),
                     Other::Mesh(_) => c.anchor_b,
                 };
-                let depth = c.depth + dot(pb - pa, c.normal) - self.config.slop;
+                let depth = c.depth + Vector3::dot(&(pb - pa), &c.normal) - self.config.slop;
                 if depth <= T::zero() {
                     continue;
                 }
@@ -1041,7 +1033,7 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
     /// dependency because every dynamically touching body remains active each tick.
     fn sleep(&mut self) {
         let gravity = self.config.gravity;
-        let zero_gravity = magnitude(gravity) == T::zero();
+        let zero_gravity = gravity.max_abs_component() == T::zero();
         for (i, b) in self.bodies.iter_mut().enumerate() {
             if let Motion::Awake { quiet_ticks } = b.motion {
                 b.velocity = b.velocity * self.config.linear_damping;
@@ -1049,7 +1041,7 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                 let supported = self.contacts.iter().any(|c| {
                     c.a == i
                         && matches!(c.other, Other::Mesh(_))
-                        && (zero_gravity || dot(c.normal, gravity) < T::zero())
+                        && (zero_gravity || Vector3::dot(&c.normal, &gravity) < T::zero())
                 });
                 let dynamic_contact = self
                     .contacts
@@ -1057,8 +1049,8 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                     .any(|c| matches!(c.other, Other::Body(b) if c.a == i || b == i));
                 let quiet = supported
                     && !dynamic_contact
-                    && magnitude(b.velocity) < self.config.sleep_linear
-                    && magnitude(b.angular) < self.config.sleep_angular;
+                    && b.velocity.max_abs_component() < self.config.sleep_linear
+                    && b.angular.max_abs_component() < self.config.sleep_angular;
                 let count = if quiet {
                     quiet_ticks.saturating_add(1)
                 } else {
@@ -1066,8 +1058,8 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                 };
                 if count >= 90 {
                     b.motion = Motion::Sleeping;
-                    b.velocity = zero();
-                    b.angular = zero();
+                    b.velocity = Vector3::zero();
+                    b.angular = Vector3::zero();
                 } else {
                     b.motion = Motion::Awake { quiet_ticks: count };
                 }

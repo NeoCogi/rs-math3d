@@ -253,6 +253,8 @@ pub fn project3<T: RealScalar>(
 /// Checked unproject3 construction/calculation for finite represented scalars.
 /// Returns an error for invalid domains, zero denominators, degenerate bases,
 /// or unrepresentable intermediate/output values; performs no float conversion.
+/// Only an exact represented affine last row selects the affine fast path;
+/// every nonzero projective coefficient is retained by general inversion.
 pub fn checked_unproject3<T: RealScalar>(
     world: &Matrix4<T>,
     persp: &Matrix4<T>,
@@ -261,7 +263,7 @@ pub fn checked_unproject3<T: RealScalar>(
     pt: &Vector3<T>,
 ) -> Result<Vector3<T>, MathError> {
     let combined = Matrix4::checked_mul_matrix_matrix(persp, world)?;
-    let inverse = if combined.checked_is_affine(T::epsilon())? {
+    let inverse = if combined.checked_is_affine(<T as Zero>::zero())? {
         combined.checked_inverse_affine()?
     } else {
         combined.checked_inverse()?
@@ -640,12 +642,14 @@ pub struct AffineParts<T: RealScalar> {
 /// Decomposes a finite nonsingular affine matrix as `T * R * H * S`.
 /// Uses checked QR arithmetic, rejects pivots at or below scalar epsilon, and
 /// propagates arithmetic errors. Reflection is represented by three negative scales.
+/// Requires the exact affine last row [0, 0, 0, 1]; projective structure returns
+/// Domain rather than being silently dropped under the pivot tolerance.
 pub fn checked_decompose_affine<T: RealScalar>(
     m: &Matrix4<T>,
 ) -> Result<AffineParts<T>, MathError> {
     let epsilon = T::epsilon();
-    if !m.checked_is_affine(epsilon)? {
-        return Err(MathError::Degenerate);
+    if !m.checked_is_affine(<T as Zero>::zero())? {
+        return Err(MathError::Domain);
     }
 
     let a0 = Vector3::new(m.col[0].x, m.col[0].y, m.col[0].z);

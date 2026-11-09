@@ -567,10 +567,7 @@ fn checked_triangle_intersection_from_point_dir<T: RealScalar>(
     // inversely while leaving the represented point unchanged. Unlike internal
     // barycentric coordinates, this returned parameter must not round a
     // nonzero travel distance to zero: callers need it to reconstruct the hit.
-    let t = normalized_direction.checked_divide_by_length(tau)?;
-    if tau != <T as Zero>::zero() && t == <T as Zero>::zero() {
-        return Err(MathError::Overflow);
-    }
+    let t = normalized_direction.checked_divide_by_length_preserving_nonzero(tau)?;
 
     // Construct the point from the unit direction and physical distance. This
     // avoids multiplying a huge direction by a tiny parameter (or vice versa),

@@ -1150,12 +1150,20 @@ impl<T: Scalar> Matrix4<T> {
         )
     }
 
-    /// Returns true if the matrix is affine (last row equals [0, 0, 0, 1]).
-    /// Tests the affine last row with ordinary scalar arithmetic.
+    /// Tests whether the last row is within epsilon of [0, 0, 0, 1].
+    /// Zero tolerance compares represented components exactly without arithmetic.
+    /// A positive tolerance is a property query, not permission to discard
+    /// projective coefficients during inversion or decomposition.
     pub fn is_affine(&self, epsilon: T) -> bool
     where
         T: RealScalar,
     {
+        if epsilon == <T as Zero>::zero() {
+            return self.col[0].w == <T as Zero>::zero()
+                && self.col[1].w == <T as Zero>::zero()
+                && self.col[2].w == <T as Zero>::zero()
+                && self.col[3].w == <T as One>::one();
+        }
         self.col[0].w.tabs() <= epsilon
             && self.col[1].w.tabs() <= epsilon
             && self.col[2].w.tabs() <= epsilon
@@ -1173,6 +1181,12 @@ impl<T: Scalar> Matrix4<T> {
             let v=self.col[column];
             if !v.x.is_finite() || !v.y.is_finite() || !v.z.is_finite() || !v.w.is_finite() { return Err(MathError::NonFinite); }
         });
+        // Structural equality needs no absolute value or subtraction, both of
+        // which can overflow on a finite fixed-point minimum. Reuse the same
+        // represented-row predicate as the ordinary zero-tolerance query.
+        if epsilon == <T as Zero>::zero() {
+            return Ok(self.is_affine(epsilon));
+        }
         Ok(self.col[0].w.checked_abs()? <= epsilon
             && self.col[1].w.checked_abs()? <= epsilon
             && self.col[2].w.checked_abs()? <= epsilon
@@ -1353,8 +1367,9 @@ impl<T: Scalar> Matrix4<T> {
         self.inverse_with(InverseMode::default())
     }
 
-    /// Checks the affine last row and inverts its linear part before computing
-    /// the inverse translation. All products and negations are checked.
+    /// Requires the exact represented affine last row [0, 0, 0, 1], returning
+    /// Domain for projective structure even within scalar epsilon. Inverts its
+    /// linear part and translation with checked products and negations.
     pub fn checked_inverse_affine(&self) -> Result<Self, MathError>
     where
         T: RealScalar,
@@ -1367,7 +1382,7 @@ impl<T: Scalar> Matrix4<T> {
     where
         T: RealScalar,
     {
-        if !self.checked_is_affine(T::epsilon())? {
+        if !self.checked_is_affine(<T as Zero>::zero())? {
             return Err(MathError::Domain);
         }
         let rot = Matrix3::new(

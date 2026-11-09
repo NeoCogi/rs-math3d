@@ -621,10 +621,23 @@ impl<T: RealScalar> Normalized3<T> {
         value: T,
     ) -> Result<T, MathError> {
         let quotient = self.checked_divide_by_length(value)?;
-        if value != <T as Zero>::zero() && quotient == <T as Zero>::zero() {
-            return Err(MathError::Overflow);
-        }
-        Ok(quotient)
+        checked_preserve_nonzero_parameter(value, quotient)
+    }
+}
+
+/// Validates the cross-field invariant of a returned geometric parameter.
+/// `travel` and `parameter` come from successful checked arithmetic; finite
+/// scalar underflow is allowed there, but a nonzero travel must not become a
+/// zero stored parameter beside a separately reconstructed non-origin point.
+/// This policy is dimension-independent and does not alter scalar division.
+pub(crate) fn checked_preserve_nonzero_parameter<T: RealScalar>(
+    travel: T,
+    parameter: T,
+) -> Result<T, MathError> {
+    if travel != <T as Zero>::zero() && parameter == <T as Zero>::zero() {
+        Err(MathError::Overflow)
+    } else {
+        Ok(parameter)
     }
 }
 

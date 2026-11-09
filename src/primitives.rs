@@ -472,6 +472,7 @@ impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
 
     /// Computes `(t, point)` with checked arithmetic and scale-aware normalization.
     /// A finite nonnegative epsilon rejects a direction at or below that length.
+    /// Nonzero physical travel whose stored parameter rounds to zero is Overflow.
     pub fn checked_closest_point_on_line(&self, p: &V, epsilon: T) -> Result<(T, V), MathError> {
         if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
             return Err(MathError::InvalidTolerance);
@@ -480,7 +481,10 @@ impl<T: RealScalar, V: RealVector<T>> Line<T, V> {
         let direction = self.d.checked_normalize(epsilon)?;
         let delta = V::checked_sub_vv(p, &self.p)?;
         let travel = V::checked_dot(&direction, &delta)?;
-        let t = travel.checked_div(self.d.checked_length()?)?;
+        let t = checked_preserve_nonzero_parameter(
+            travel,
+            travel.checked_div(self.d.checked_length()?)?,
+        )?;
         let point = V::checked_add_vv(&self.p, &V::checked_mul_vs(&direction, travel)?)?;
         Ok((t, point))
     }
@@ -646,6 +650,8 @@ impl<T: RealScalar, V: RealVector<T>> Segment<T, V> {
 
     /// Computes a clamped closest point with checked arithmetic.
     /// Returns `Degenerate` for length at or below finite nonnegative epsilon.
+    /// Interior nonzero travel whose stored parameter rounds to zero is Overflow;
+    /// exact zero and endpoint clamps retain their represented parameters.
     pub fn checked_closest_point_on_segment(&self, p: &V, epsilon: T) -> Result<(T, V), MathError> {
         if !epsilon.is_finite() || epsilon < <T as Zero>::zero() {
             return Err(MathError::InvalidTolerance);
@@ -662,7 +668,7 @@ impl<T: RealScalar, V: RealVector<T>> Segment<T, V> {
         if travel >= length {
             return Ok((<T as One>::one(), self.e));
         }
-        let t = travel.checked_div(length)?;
+        let t = checked_preserve_nonzero_parameter(travel, travel.checked_div(length)?)?;
         let point = V::checked_add_vv(&self.s, &V::checked_mul_vs(&direction, travel)?)?;
         Ok((t, point))
     }
@@ -753,12 +759,13 @@ impl<T: RealScalar> Ray<T, Vector3<T>> {
     /// Solves a forward ray-plane hit with checked arithmetic.
     /// Returns `Ok(None)` for a geometric miss; invalid input, angular tolerance
     /// or arithmetic returns `MathError`. Angular epsilon is finite in `0..=1`.
+    /// Plane coefficient finiteness is validated before any parallel miss.
     pub fn checked_intersect_plane(
         &self,
         p: &Plane<T>,
         epsilon: T,
     ) -> Result<Option<Vector3<T>>, MathError> {
-        if !self.start.is_finite() {
+        if !self.start.is_finite() || !p.constant().is_finite() {
             return Err(MathError::NonFinite);
         }
         if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {
@@ -1142,12 +1149,13 @@ impl<T: RealScalar> Plane<T> {
     /// Returns a checked line hit as `(t, point)` in its original parameterization.
     /// `Ok(None)` denotes angular parallelism. Invalid input/tolerance and
     /// unrepresentable arithmetic or parameters return `MathError`.
+    /// Plane coefficient finiteness is validated before any parallel miss.
     pub fn checked_intersect_line(
         &self,
         line: &Line<T, Vector3<T>>,
         epsilon: T,
     ) -> Result<Option<(T, Vector3<T>)>, MathError> {
-        if !line.p.is_finite() {
+        if !line.p.is_finite() || !self.constant().is_finite() {
             return Err(MathError::NonFinite);
         }
         if !epsilon.is_finite() || epsilon < <T as Zero>::zero() || epsilon > <T as One>::one() {

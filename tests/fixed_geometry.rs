@@ -189,7 +189,7 @@ fn checked_projection_and_camera_domains() {
     invalid.col[0].w = F::min_value();
     assert!(matches!(
         invalid.checked_inverse_affine(),
-        Err(MathError::Overflow)
+        Err(MathError::Domain)
     ));
     assert!(transforms::checked_decompose_affine(&invalid)
         .ok()

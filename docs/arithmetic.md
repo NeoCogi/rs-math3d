@@ -91,6 +91,14 @@ scalar `1/det` that rounds to zero does not erase a representable inverse.
 modes have directly implemented unchecked and checked paths. They can differ
 in intermediate range and rounding; unchecked does not mean exact arithmetic.
 
+`is_affine(epsilon)` and `checked_is_affine(epsilon)` are approximate property
+queries when epsilon is positive. Zero epsilon tests the represented last row
+exactly, without subtracting or taking absolute values. Checked affine inverse
+and decomposition require exactly `[0,0,0,1]` and report `Domain` for projective
+structure. Checked unprojection selects the affine fast path only for that exact
+row; otherwise it uses the complete inverse, preserving every projective term.
+A coefficient smaller than epsilon can still matter at the queried world scale.
+
 All fixed-size matrix/vector kernels remain explicitly expanded. The checked
 paths contain validation branches; the ordinary paths do not add them.
 Data-dependent pivot choices and geometric miss decisions remain necessary.
@@ -141,6 +149,15 @@ angular rejection band. Checked normal constructors report a collapsed span as
 finite in `0..=1`. Unchecked APIs assume a valid epsilon when one is supplied.
 An exact zero quaternion has no unit direction: ordinary normalization follows
 native arithmetic, and checked normalization reports `Degenerate`.
+
+Checked closest-point line/segment tuples enforce the same stored-parameter rule
+as checked intersections: nonzero physical travel that becomes a zero parameter
+is `Overflow`. Exact zero travel and clamped segment endpoints remain valid.
+Scalar checked division still permits finite underflow; this extra rule belongs
+to geometric result construction. Checked plane queries validate the plane
+constant before an angular miss, so nonfinite input cannot become `Ok(None)`
+merely because a ray or line happens to be parallel. Unused solve arithmetic
+does not need to execute for a valid finite miss.
 
 ## Migration
 

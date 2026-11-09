@@ -154,6 +154,30 @@ pub trait Vector<T: Scalar, Rhs = Self, Output = Self>:
 
     /// Returns a vector with the maximum components from both vectors.
     fn max(l: &Self, r: &Self) -> Self;
+
+    /// Returns the largest absolute component (the infinity norm).
+    ///
+    /// This reduction performs no products or square root, preserving small
+    /// fixed-point components even when their squares would quantize to zero.
+    /// Zero vectors return zero. Components must be finite and their absolute
+    /// values representable; otherwise ordinary scalar arithmetic applies.
+    /// Use [`Vector::checked_max_abs_component`] to validate those requirements.
+    ///
+    /// ```
+    /// use rs_math3d::{Fixed, Vector, Vector3};
+    /// type F = Fixed<i32, 16>;
+    /// let v = Vector3::new(F::DELTA, -F::DELTA, F::ZERO);
+    /// assert_eq!(v.max_abs_component(), F::DELTA);
+    /// ```
+    fn max_abs_component(&self) -> T;
+
+    /// Returns the largest absolute component with checked scalar absolutes.
+    ///
+    /// Visits components in coordinate order and propagates the first error:
+    /// [`MathError::NonFinite`] for exceptional floating-point values, or
+    /// [`MathError::Overflow`] when a signed minimum has no positive counterpart.
+    /// Zero vectors return zero; no squared length or norm must fit.
+    fn checked_max_abs_component(&self) -> Result<T, MathError>;
 }
 
 /// Trait for vectors with fractional real components, including fixed point.
@@ -329,6 +353,16 @@ macro_rules! implVector {
             fn rem_vv(l: &Self, r: &Self) -> Self { Self::new($(l.$field % r.$field),*) }
             fn min(l: &Self, r: &Self) -> Self { Self::new($(T::min(l.$field, r.$field)),*) }
             fn max(l: &Self, r: &Self) -> Self { Self::new($(T::max(l.$field, r.$field)),*) }
+            fn max_abs_component(&self) -> T {
+                let mut maximum = <T as Zero>::zero();
+                $(maximum = T::max(maximum, self.$field.tabs());)*
+                maximum
+            }
+            fn checked_max_abs_component(&self) -> Result<T, MathError> {
+                let mut maximum = <T as Zero>::zero();
+                $(maximum = T::max(maximum, self.$field.checked_abs()?);)*
+                Ok(maximum)
+            }
         }
 
         impl<T> Add for $vecName<T> where T: Scalar {
@@ -426,8 +460,7 @@ macro_rules! implRealVector {
             fn checked_normalize(&self, epsilon: T) -> Result<Self, MathError> {
                 let values = [$(self.$field),*];
                 if !T::checked_norm_exceeds(&values, epsilon)? { return Err(MathError::Degenerate); }
-                let mut scale = <T as Zero>::zero();
-                $(scale = T::max(scale, self.$field.checked_abs()?);)*
+                let scale = self.checked_max_abs_component()?;
                 let scaled = Self::checked_div_vs(self, scale)?;
                 let length = scaled.checked_length()?;
                 Self::checked_div_vs(&scaled, length)
@@ -662,24 +695,6 @@ pub(crate) enum AngularClassification {
     Invalid,
 }
 
-/// Returns whether the scalar is a finite represented value.
-///
-/// Fixed storage contains no exceptional bit patterns; checked arithmetic must
-/// reject overflow before producing a value. Float implementations reject both
-/// infinities and NaNs through their explicit finiteness capability.
-pub(crate) fn is_finite_scalar<T: RealScalar>(value: T) -> bool {
-    // Absolute value maps both infinities to positive infinity while leaving a
-    // NaN unordered, making the strict comparison sufficient for both cases.
-    value.is_finite()
-}
-
-/// Returns whether all three components of a 3D vector are finite.
-pub(crate) fn is_finite_vector3<T: RealScalar>(vector: &Vector3<T>) -> bool {
-    // Test every component independently; accepting even one NaN or infinity
-    // would make max-component scaling and orientation comparisons unordered.
-    is_finite_scalar(vector.x) && is_finite_scalar(vector.y) && is_finite_scalar(vector.z)
-}
-
 /// Validates a dimensionless angular tolerance shared by orientation predicates.
 ///
 /// Sine and cosine magnitudes both occupy the closed interval `[0, 1]`.
@@ -689,7 +704,7 @@ pub(crate) fn is_finite_vector3<T: RealScalar>(vector: &Vector3<T>) -> bool {
 fn is_valid_angular_epsilon<T: RealScalar>(angular_epsilon: T) -> bool {
     // Comparisons with NaN are unordered, but the explicit finiteness check
     // also makes that behavior clear for custom `RealScalar` implementations.
-    is_finite_scalar(angular_epsilon)
+    angular_epsilon.is_finite()
         && angular_epsilon >= <T as Zero>::zero()
         && angular_epsilon <= <T as One>::one()
 }
@@ -702,10 +717,7 @@ pub(crate) fn checked_normalized3<T: RealScalar>(
     if !vector.is_finite() {
         return Err(MathError::NonFinite);
     }
-    let scale = T::max(
-        vector.x.checked_abs()?,
-        T::max(vector.y.checked_abs()?, vector.z.checked_abs()?),
-    );
+    let scale = vector.checked_max_abs_component()?;
     if scale == <T as Zero>::zero() {
         return Err(MathError::Degenerate);
     }
@@ -785,7 +797,7 @@ pub(crate) fn classify_nearly_perpendicular_normalized3<T: RealScalar>(
         Ok(value) => value,
         Err(_) => return AngularClassification::Invalid,
     };
-    if !is_finite_scalar(cosine) {
+    if !cosine.is_finite() {
         return AngularClassification::Invalid;
     }
 
@@ -1138,18 +1150,14 @@ mod tests {
 
         // Scalar and vector finiteness must accept the complete finite range and
         // reject every IEEE non-finite category.
-        assert!(is_finite_scalar(zero));
-        assert!(is_finite_scalar(largest_finite));
-        assert!(!is_finite_scalar(nan));
-        assert!(!is_finite_scalar(infinity));
-        assert!(!is_finite_scalar(-infinity));
-        assert!(is_finite_vector3(&Vector3::new(
-            smallest_positive,
-            zero,
-            largest_finite,
-        )));
-        assert!(!is_finite_vector3(&Vector3::new(nan, zero, zero)));
-        assert!(!is_finite_vector3(&Vector3::new(zero, infinity, zero)));
+        assert!(zero.is_finite());
+        assert!(largest_finite.is_finite());
+        assert!(!nan.is_finite());
+        assert!(!infinity.is_finite());
+        assert!(!(-infinity).is_finite());
+        assert!(Vector3::new(smallest_positive, zero, largest_finite).is_finite());
+        assert!(!Vector3::new(nan, zero, zero).is_finite());
+        assert!(!Vector3::new(zero, infinity, zero).is_finite());
 
         // A 3-4-5 vector checks the ordinary unit direction and the method that
         // divides a caller's value by the original, unscaled length.
@@ -1183,7 +1191,7 @@ mod tests {
         let balanced_quotient = balanced
             .checked_divide_by_length(largest_finite)
             .expect("a representable quotient must survive intermediate overflow");
-        assert!(is_finite_scalar(balanced_quotient));
+        assert!(balanced_quotient.is_finite());
         assert!(balanced_quotient > zero);
 
         // Axis vectors at both exponent extremes would underflow or overflow in

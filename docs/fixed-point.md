@@ -179,6 +179,16 @@ Fixed values work with vectors, matrices, quaternions, transforms, bases, and
 the geometric primitives and queries. `RealScalar` / `RealVector` replace the
 old float-only trait names; no compatibility aliases are retained.
 
+Use the shared vector API for component operations: `Vector::zero()` constructs
+a zero vector, `Vector::dot()` uses scalar-specific fused accumulation, and
+`RealVector::is_finite()` validates all components. `Vector::max_abs_component()`
+returns the largest absolute component for 2D/3D/4D integer, fixed or floating
+vectors. It performs no products, preserving a one-quantum component whose
+square would quantize to zero. Its checked counterpart rejects nonfinite
+floating components and unrepresentable signed-minimum absolutes. These
+`Vector` component operations require no floating math backend. Floating
+`RealVector` methods require a selected backend as described above.
+
 ```rust
 use rs_math3d::{Fixed, InverseMode, Matrix4, MathError, RealVector, Vector3};
 use rs_math3d::transforms;

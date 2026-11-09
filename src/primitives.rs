@@ -573,7 +573,7 @@ pub fn checked_shortest_segment3d_between_lines3d<T: RealScalar>(
     // nearly parallel lines.
     let cross = Vector3::checked_cross(&unit0, &unit1)?;
     let denominator = Vector3::checked_dot(&cross, &cross)?;
-    if !is_finite_scalar(denominator) || denominator <= <T as Zero>::zero() {
+    if !denominator.is_finite() || denominator <= <T as Zero>::zero() {
         return Err(MathError::Overflow);
     }
 
@@ -589,7 +589,7 @@ pub fn checked_shortest_segment3d_between_lines3d<T: RealScalar>(
     let distance1 = projection1
         .checked_sub(direction_dot.checked_mul(projection0)?)?
         .checked_div(denominator)?;
-    if !is_finite_scalar(distance0) || !is_finite_scalar(distance1) {
+    if !distance0.is_finite() || !distance1.is_finite() {
         return Err(MathError::Overflow);
     }
 
@@ -597,7 +597,7 @@ pub fn checked_shortest_segment3d_between_lines3d<T: RealScalar>(
     // avoids multiplying an extreme stored direction by an inverse-scale t.
     let start = Vector3::checked_add_vv(&line0.p, &Vector3::checked_mul_vs(&unit0, distance0)?)?;
     let end = Vector3::checked_add_vv(&line1.p, &Vector3::checked_mul_vs(&unit1, distance1)?)?;
-    if !is_finite_vector3(&start) || !is_finite_vector3(&end) {
+    if !start.is_finite() || !end.is_finite() {
         return Err(MathError::Overflow);
     }
 
@@ -800,7 +800,7 @@ impl<T: RealScalar> Ray<T, Vector3<T>> {
         let numerator =
             unit_constant.checked_add(Vector3::checked_dot(&unit_normal, &self.start)?)?;
         let denominator = Vector3::checked_dot(&unit_normal, &unit_direction)?;
-        if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
+        if !numerator.is_finite() || !denominator.is_finite() {
             return Err(MathError::Overflow);
         }
 
@@ -1185,7 +1185,7 @@ impl<T: RealScalar> Plane<T> {
         let unit_constant = normal_metric.checked_divide_by_length(self.constant())?;
         let numerator = unit_constant.checked_add(Vector3::checked_dot(&unit_normal, &line.p)?)?;
         let denominator = Vector3::checked_dot(&unit_normal, &unit_direction)?;
-        if !is_finite_scalar(numerator) || !is_finite_scalar(denominator) {
+        if !numerator.is_finite() || !denominator.is_finite() {
             return Err(MathError::Overflow);
         }
 
@@ -1193,7 +1193,7 @@ impl<T: RealScalar> Plane<T> {
         // the stored direction length then restores the caller's original line
         // parameterization without using an overflow-prone raw length.
         let distance = numerator.checked_neg()?.checked_div(denominator)?;
-        if !is_finite_scalar(distance) {
+        if !distance.is_finite() {
             return Err(MathError::Overflow);
         }
         // This is `distance / |line.d|`, evaluated from the bounded length
@@ -1210,7 +1210,7 @@ impl<T: RealScalar> Plane<T> {
             &line.p,
             &Vector3::checked_mul_vs(&unit_direction, distance)?,
         )?;
-        if !is_finite_vector3(&point) {
+        if !point.is_finite() {
             return Err(MathError::Overflow);
         }
 

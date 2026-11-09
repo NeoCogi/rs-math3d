@@ -516,14 +516,14 @@ fn checked_triangle_intersection_from_point_dir<T: RealScalar>(
     // reject overflow and invalid coordinates before using them in cross/dot
     // products, since NaN would otherwise bypass every ordered comparison.
     let tvec = Vector3::checked_sub_vv(start, &v0)?;
-    if !is_finite_vector3(&tvec) {
+    if !tvec.is_finite() {
         return Err(MathError::Overflow);
     }
 
     // Solving against unit edge 1 first yields a physical distance along that
     // edge. Divide by the original edge length to recover dimensionless `u`.
     let edge1_distance = Vector3::checked_dot(&tvec, &pvec)?.checked_div(det)?;
-    if !is_finite_scalar(edge1_distance) {
+    if !edge1_distance.is_finite() {
         return Err(MathError::Overflow);
     }
     let u = normalized_edge1.checked_divide_by_length(edge1_distance)?;
@@ -534,14 +534,14 @@ fn checked_triangle_intersection_from_point_dir<T: RealScalar>(
     // The second Cramer numerator is shared by the second barycentric
     // coordinate and the signed travel distance along the unit direction.
     let qvec = Vector3::checked_cross(&tvec, &edge1_unit)?;
-    if !is_finite_vector3(&qvec) {
+    if !qvec.is_finite() {
         return Err(MathError::Overflow);
     }
 
     // As for `u`, the normalized solve first produces a physical distance;
     // divide by edge 2's original length to obtain dimensionless `v`.
     let edge2_distance = Vector3::checked_dot(&direction_unit, &qvec)?.checked_div(det)?;
-    if !is_finite_scalar(edge2_distance) {
+    if !edge2_distance.is_finite() {
         return Err(MathError::Overflow);
     }
     let v = normalized_edge2.checked_divide_by_length(edge2_distance)?;
@@ -555,7 +555,7 @@ fn checked_triangle_intersection_from_point_dir<T: RealScalar>(
     // distance `tau`. Its sign is therefore the correct ray-domain decision,
     // independent of the magnitude of the caller's stored direction.
     let tau = Vector3::checked_dot(&edge2_unit, &qvec)?.checked_div(det)?;
-    if !is_finite_scalar(tau) {
+    if !tau.is_finite() {
         return Err(MathError::Overflow);
     }
     if matches!(kind, TriangleIntersectionKind::Ray) && tau < <T as Zero>::zero() {
@@ -573,7 +573,7 @@ fn checked_triangle_intersection_from_point_dir<T: RealScalar>(
     // avoids multiplying a huge direction by a tiny parameter (or vice versa),
     // either of which can overflow or underflow before their scales cancel.
     let point = Vector3::checked_add_vv(start, &Vector3::checked_mul_vs(&direction_unit, tau)?)?;
-    if !is_finite_scalar(t) || !is_finite_vector3(&point) {
+    if !t.is_finite() || !point.is_finite() {
         return Err(MathError::Overflow);
     }
 

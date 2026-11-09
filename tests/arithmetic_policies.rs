@@ -181,6 +181,7 @@ fn ordinary_vectors_matrices_and_quaternions_never_validate() {
         a.length(),
         a.normalize(),
         Vector3::distance(&a, &b),
+        a.max_abs_component(),
     );
     let m2 = Matrix2::new(
         Unchecked(2.0),

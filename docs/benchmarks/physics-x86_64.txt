@@ -1,0 +1,60 @@
+Full example rigid-body physics comparison, 2026-11-08 (America/Toronto)
+Simulation behavior: 8ae5323; benchmark source included with this record.
+CPU: Intel Core Ultra 7 155H, pinned logical CPU 0, x86_64 Linux.
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01), LLVM 22.1.8.
+Host: x86_64-unknown-linux-gnu; default std/release.
+No custom RUSTFLAGS, LTO or target-cpu. No parallel build/test during timing.
+Build: cargo build --offline --release --example physics_bench
+Run: taskset -c 0 target/release/examples/physics_bench 1200 5 9
+
+Five batches of 1200 complete World::step calls per sample, nine samples.
+Full warm-up for each workload before measurement; alternate scalar order.
+Full CPU pipeline: integration/orientation, coherent sweep/static AABB trees,
+contact generation/reduction, cached impulses, twelve velocity passes,
+four position passes, damping and conservative static-supported sleeping.
+Normal native fixed arithmetic, without changing quantization/solver policy.
+Work-counter accumulation included for both backends. No rendering.
+Trees, scene initialization, frame capture/conversion/restoration, finite checks
+and repeated-sample end-state/work assertions are outside measured intervals.
+Trees/scratch are warm; this does not measure cold setup or allocation costs.
+
+Native mode: native setup/configuration per scalar; contiguous trajectories.
+Shared-state mode: every pre-step state from S15.16 is restored into each
+backend, including prepared inverse inertia, cached axes, sweep order, sleep
+counters, both constraint buffers and all represented configuration. Shared
+f32 also uses the S15.16 timestep/tolerances. Untimed conversion checks ensure
+each shared component is exactly representable by f32. Static trees are built
+once from the same represented triangles/IDs; layouts and next contact results
+can still differ. This is not a sustained native f32 trajectory.
+
+Native timer: one interval per 1200-tick batch.
+Shared timer: one interval per tick, with measured empty-clock cost included.
+Each reported sample is total timed duration divided by its 6000 full steps.
+Final values and work counts must repeat exactly within a workload/backend.
+Per-tick work is averaged over all measured steps, not just awake bodies.
+The field end_position_sum is diagnostic, not a cross-scalar accuracy measure.
+Ten nominal simulated seconds includes falling, contact and settling/sleep;
+reported averages are not maximum individual-tick latency or a scale-up claim.
+ARMv5/RISC-V results elsewhere in the repo are determinism checks, not timings.
+
+Captured output:
+Full physics: 24 bodies, 6320 teapot + 3851 bunny + 128 floor triangles
+ticks=1200 batches=5 samples=9; warm scratch; alternating scalar order; setup/reset/validation excluded
+native f32: median=51.792 us/tick min=51.066 max=53.049
+  samples_us=[53.04893583333334, 51.649686, 52.204988166666666, 51.7551665, 51.792215666666664, 51.066086999999996, 53.01819066666667, 51.416582000000005, 52.19559816666667]
+  per_tick pairs=4.388 triangles=131.853 bounds=688.819 contacts=27.999 awake=18.475 sleeping=5.072 disabled=0.453
+  end_position_sum=-8.362382509
+native S15.16: median=84.992 us/tick min=83.928 max=86.931
+  samples_us=[86.32968900000002, 83.92768699999999, 86.93086149999998, 84.61417449999999, 84.48742916666667, 84.058731, 85.94268983333332, 84.99213466666666, 85.44675316666667]
+  per_tick pairs=4.070 triangles=186.993 bounds=847.180 contacts=33.328 awake=19.738 sleeping=4.263 disabled=0.000
+  end_position_sum=-13.463424683
+shared-state f32: median=64.995 us/tick min=64.222 max=65.936
+  samples_us=[64.9693745, 65.9357265, 65.63444416666667, 65.79099249999999, 64.561321, 64.73970233333334, 64.995188, 64.22245583333333, 65.46451683333333]
+  per_tick pairs=4.071 triangles=186.965 bounds=847.106 contacts=33.422 awake=19.738 sleeping=4.263 disabled=0.000
+  end_position_sum=-13.462819695
+shared-state S15.16: median=84.329 us/tick min=83.748 max=86.164
+  samples_us=[85.02216650000001, 86.16416616666666, 83.98302516666668, 84.32917583333332, 84.2833995, 83.74837383333333, 83.83149283333334, 84.42873533333334, 85.06430250000001]
+  per_tick pairs=4.070 triangles=186.993 bounds=847.180 contacts=33.328 awake=19.738 sleeping=4.263 disabled=0.000
+  end_position_sum=-13.463424683
+S15.16/f32 time ratio: native=1.641 shared-state=1.297
+empty per-step clock interval average=12.63 ns (included in shared-state times)

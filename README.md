@@ -58,6 +58,9 @@ default's timings, precision and contact behavior alongside the earlier comparis
 The [example physics engine](docs/physics.md) adds two-phase collision detection,
 rigid-body impulses, friction and resting contacts. Run its teapot/bunny scene
 with `cargo run --release --example physics_headless -- fixed32 1200`.
+Run `cargo run --release --example physics_bench -- 1200 5 9` for
+[full-step S15.16/f32 timings](docs/physics.md#full-simulation-benchmarks), including
+both native trajectories and shared pre-step states.
 For the interactive SDL2/glow GLES3 demo, run
 `cargo run --release --features physics-demo --example physics_demo -- --scalar fixed32`.
 The [fixed-point replay checks](docs/physics-determinism.md) compare every tick,

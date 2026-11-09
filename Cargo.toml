@@ -43,6 +43,10 @@ name = "physics_headless"
 required-features = ["std"]
 
 [[example]]
+name = "physics_bench"
+required-features = ["std"]
+
+[[example]]
 name = "physics_replay"
 required-features = ["std"]
 

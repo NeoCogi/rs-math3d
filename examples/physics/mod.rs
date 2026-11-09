@@ -33,6 +33,9 @@
 //! uses T, including native fixed point; only scene setup/rendering convert floats.
 //! This is discrete collision detection with bounded example-scale inputs.
 
+/// Hosted full-step measurements, including a shared-state comparison.
+#[cfg(feature = "std")]
+pub mod benchmark;
 /// Portable raw fixed-point replay and full dynamic-state fingerprints.
 pub mod replay;
 #[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]

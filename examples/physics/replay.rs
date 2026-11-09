@@ -270,7 +270,7 @@ fn config<T: ReplayScalar>(v: [T; CONFIG_SCALARS]) -> Result<Config<T>, ReplayEr
 /// layout, sweep scratch, allocation capacities and work counters are excluded:
 /// canonical candidates make them irrelevant to future simulated state. Static
 /// triangles and input order are already covered by the immutable seed identity.
-fn state_hash<T: ReplayScalar>(world: &World<T>, seed_hash: u64, tick: u32) -> u64 {
+pub(super) fn state_hash<T: ReplayScalar>(world: &World<T>, seed_hash: u64, tick: u32) -> u64 {
     let mut h = Digest::new();
     h.word(seed_hash);
     h.word(u64::from(tick));

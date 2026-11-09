@@ -164,6 +164,77 @@ This example uses discrete contacts and two-sided triangle surfaces. It does
 not provide CCD, joints, deformables, dynamic concave meshes, exact predicates,
 solid containment tests, or production-grade arbitrary-scale stability.
 
+## Full simulation benchmarks
+
+```sh
+cargo build --release --example physics_bench
+taskset -c 0 target/release/examples/physics_bench 1200 5 9
+```
+
+Arguments are ticks per trajectory, batches per sample, and samples; all must be
+positive. `taskset` is an optional Linux CPU-affinity tool. This measures the full
+`World::step()` CPU pipeline above, including integration, quaternion updates,
+both collision phases, warm starts, all twelve velocity/four position passes,
+damping and sleep accounting. Rendering, tree/scene construction, frame conversion,
+state restoration, warm-up and finite/end-state checks are outside the timers.
+Both backends include the same work-counter accumulation. Scratch storage is warm
+and reused; the benchmark does not measure cold-start allocations.
+
+On an Intel Core Ultra 7 155H, x86-64 Linux, pinned logical CPU 0, using rustc
+1.98.1 / LLVM 22.1.8 with default release settings (2026-11-08):
+
+| Full-step workload | f32, µs/tick median [min, max] | S15.16, µs/tick median [min, max] | S15.16 / f32 time |
+| --- | ---: | ---: | ---: |
+| Native trajectories | 51.79 [51.07, 53.05] | 84.99 [83.93, 86.93] | 1.641× |
+| Shared S15.16 pre-step states | 65.00 [64.22, 65.94] | 84.33 [83.75, 86.16] | 1.297× |
+
+Each sample measures five 1,200-tick trajectories (ten nominal simulated seconds
+each), with nine samples and alternating f32/fixed measurement order. The scene
+has 24 spheres/boxes/capsules, 6,320 teapot triangles, 3,851 bunny triangles and
+128 floor triangles. The native medians consume about 0.62% and 1.02% of a
+120 Hz tick's 8,333 µs budget on this host. These are average costs over this
+scene's fall/contact/settling sequence, not worst-case frame latency or estimates
+for other body counts, scenes or processors.
+
+Native trajectories use each backend's ordinary setup and represented timestep.
+They diverge as contacts, quantization, sleep and escape decisions accumulate.
+The native S15.16 run does more collision work, so its 1.641× time ratio does not
+isolate arithmetic cost:
+
+| Mean work per tick | Native f32 | Native S15.16 | Shared-state f32 | Shared-state S15.16 |
+| --- | ---: | ---: | ---: | ---: |
+| Dynamic candidate pairs | 4.388 | 4.070 | 4.071 | 4.070 |
+| Static triangle candidates | 131.853 | 186.993 | 186.965 | 186.993 |
+| Tree bounds tested | 688.819 | 847.180 | 847.106 | 847.180 |
+| Reduced solver contacts | 27.999 | 33.328 | 33.422 | 33.328 |
+| Awake bodies | 18.475 | 19.738 | 19.738 | 19.738 |
+| Sleeping bodies | 5.072 | 4.263 | 4.263 | 4.263 |
+| Disabled bodies | 0.453 | 0.000 | 0.000 | 0.000 |
+
+The shared-state comparison records every S15.16 pre-step state, then restores
+it before each timed full step in both backends. f32 receives exactly dequantized
+body poses, cached orientation axes, velocities, prepared mass/inertia, motion
+counters, both contact/impulse buffers, sweep order and configuration, including
+the S15.16 timestep/tolerances. Untimed checks reject any shared component that
+f32 cannot represent exactly. Static trees are rebuilt once from the same
+represented input triangles and original IDs. Tree layout and the next contact
+decisions can still differ with arithmetic; the work table exposes that difference.
+This is a sequence of complete steps from shared inputs, not a sustained native
+f32 trajectory or a scalar-operation microbenchmark.
+
+Shared-state measurements include a clock interval per step; the measured empty
+interval averaged 12.63 ns, included without subtraction. Native measurements
+use one interval per complete trajectory. Repeated samples must have identical
+work counts and final represented body values within each backend/workload.
+The restoration regression also compares complete fixed-state fingerprints to
+uninterrupted execution. Neither timing nor trajectory divergence establishes
+simulation accuracy. S15.16 is slower on this host even for the closely matched
+shared inputs; fixed arithmetic does not imply a speed advantage on an FPU-equipped
+processor. ARMv5/RISC-V replay checks establish deterministic results, not hardware
+performance measurements.
+
+See [raw measurements and build metadata](benchmarks/physics-x86_64.txt).
+
 ## Regression coverage
 
 `cargo test --test physics_examples` covers all shape pairs, misses, contact

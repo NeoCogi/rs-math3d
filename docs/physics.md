@@ -60,13 +60,18 @@ ticks per frame and disables vsync, allowing reproducible driver smoke tests:
 cargo build --release --features physics-demo --example physics_demo
 SDL_VIDEODRIVER=offscreen target/release/examples/physics_demo \
   --scalar fixed32 --frames 120 --hidden --capture /tmp/physics.ppm
+ffmpeg -hide_banner -loglevel error -y -i /tmp/physics.ppm \
+  -frames:v 1 -update 1 -compression_level 9 docs/images/physics-demo.png
 ```
 
 The offscreen driver depends on the local SDL/EGL installation. Capture reads
 the final back buffer before swapping, using GLES' supported RGBA byte format,
 checks GL errors, and writes a top-down RGB PPM file. `--capture` applies when
 the `--frames` limit is reached. The committed screenshot is from this real
-fixed-point render path, converted from PPM to PNG with FFmpeg.
+S15.16 render path at frame 120 (240 simulation ticks), using the default camera
+and a 1280 × 800 drawable. It was refreshed after the contact-ordering and sleep
+changes, with SDL2 2.32.10 and Mesa 26.0.8's OpenGL ES 3.2 context. FFmpeg encodes
+the captured RGB pixels as lossless PNG; the command above reproduces the asset.
 
 ## Tick and ownership contracts
 

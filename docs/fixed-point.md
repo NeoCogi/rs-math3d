@@ -189,6 +189,14 @@ floating components and unrepresentable signed-minimum absolutes. These
 `Vector` component operations require no floating math backend. Floating
 `RealVector` methods require a selected backend as described above.
 
+`TryCastFrom::cast_from` is the panicking convenience for trusted setup values;
+it delegates to `try_cast_from`, retaining the destination's quantization and
+range rules. Use the checked conversion for external inputs. Vectors provide
+`from_array`, `to_array` and an owned, coordinate-ordered `map` for component
+conversion without example-local scalar/vector wrappers. Matrices expose
+`to_cols_array` for allocation-free column-major uniform packing. Scalar
+interval restriction lives in `Scalar::clamp` and `checked_clamp`.
+
 ```rust
 use rs_math3d::{Fixed, InverseMode, Matrix4, MathError, RealVector, Vector3};
 use rs_math3d::transforms;

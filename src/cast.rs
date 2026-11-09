@@ -40,6 +40,23 @@ use num_traits::ToPrimitive;
 pub trait TryCastFrom<Source>: Sized {
     /// Converts one scalar, returning an error when its value cannot fit.
     fn try_cast_from(source: Source) -> Result<Self, MathError>;
+
+    /// Converts a trusted value using the checks and quantization of
+    /// [`TryCastFrom::try_cast_from`]. Useful for representable setup constants.
+    ///
+    /// # Panics
+    /// Panics if the checked conversion returns an error. Use `try_cast_from`
+    /// for input whose range or representation has not been established.
+    ///
+    /// ```
+    /// use rs_math3d::{Fixed, TryCastFrom};
+    /// type F = Fixed<i32, 16>;
+    /// assert_eq!(F::cast_from(0.5f64), F::ONE / F::cast_from(2));
+    /// ```
+    #[track_caller]
+    fn cast_from(source: Source) -> Self {
+        Self::try_cast_from(source).expect("numeric conversion must fit")
+    }
 }
 
 impl<R: Format<F>, S: Format<G>, const F: u32, const G: u32> TryCastFrom<Fixed<R, F>>

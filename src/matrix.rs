@@ -388,6 +388,10 @@ pub struct Matrix4<T: Scalar> {
  *
  *****************************************************************************/
 impl<T: Scalar> Matrix2<T> {
+    /// Copies elements in column-major order, without conversion or allocation.
+    pub fn to_cols_array(&self) -> [T; 4] {
+        [self.col[0].x, self.col[0].y, self.col[1].x, self.col[1].y]
+    }
     /// Creates a new 2x2 matrix from individual elements.
     ///
     /// Elements are provided in column-major order:
@@ -670,6 +674,20 @@ impl<T: Scalar> Matrix2<T> {
  *
  *****************************************************************************/
 impl<T: Scalar> Matrix3<T> {
+    /// Copies elements in column-major order, without conversion or allocation.
+    pub fn to_cols_array(&self) -> [T; 9] {
+        [
+            self.col[0].x,
+            self.col[0].y,
+            self.col[0].z,
+            self.col[1].x,
+            self.col[1].y,
+            self.col[1].z,
+            self.col[2].x,
+            self.col[2].y,
+            self.col[2].z,
+        ]
+    }
     /// Creates a new 3x3 matrix from column-major elements.
     #[allow(clippy::too_many_arguments)]
     pub fn new(m0: T, m1: T, m2: T, m3: T, m4: T, m5: T, m6: T, m7: T, m8: T) -> Self {
@@ -1022,6 +1040,28 @@ impl<T: RealScalar> Matrix3<T> {
  *
  *****************************************************************************/
 impl<T: Scalar> Matrix4<T> {
+    /// Copies elements in column-major order, without conversion or allocation.
+    /// This order is suitable for a GLES matrix uniform with transpose disabled.
+    pub fn to_cols_array(&self) -> [T; 16] {
+        [
+            self.col[0].x,
+            self.col[0].y,
+            self.col[0].z,
+            self.col[0].w,
+            self.col[1].x,
+            self.col[1].y,
+            self.col[1].z,
+            self.col[1].w,
+            self.col[2].x,
+            self.col[2].y,
+            self.col[2].z,
+            self.col[2].w,
+            self.col[3].x,
+            self.col[3].y,
+            self.col[3].z,
+            self.col[3].w,
+        ]
+    }
     /// Creates a new 4x4 matrix from column-major elements.
     #[allow(clippy::too_many_arguments)]
     pub fn new(

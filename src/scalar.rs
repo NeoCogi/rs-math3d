@@ -121,6 +121,22 @@ pub trait Scalar:
     fn min(l: Self, r: Self) -> Self;
     /// Returns the maximum of two values.
     fn max(l: Self, r: Self) -> Self;
+    /// Restricts a value to a closed interval using ordinary scalar comparisons.
+    /// Requires finite input and ordered finite bounds; performs no validation.
+    fn clamp(self, lower: Self, upper: Self) -> Self {
+        Self::max(lower, Self::min(self, upper))
+    }
+    /// Restricts a value to a closed interval after validating all inputs.
+    /// Returns `NonFinite` for exceptional floats and `Domain` for reversed bounds.
+    fn checked_clamp(self, lower: Self, upper: Self) -> Result<Self, MathError> {
+        if !self.is_finite() || !lower.is_finite() || !upper.is_finite() {
+            return Err(MathError::NonFinite);
+        }
+        if lower > upper {
+            return Err(MathError::Domain);
+        }
+        Ok(self.clamp(lower, upper))
+    }
     /// Computes the square with range and input validation.
     fn checked_squared(self) -> Result<Self, MathError> {
         self.checked_mul(self)

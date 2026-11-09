@@ -303,11 +303,26 @@ macro_rules! vector_field_doc {
 }
 
 macro_rules! implVector {
-    ($(#[$meta:meta])* $vecName:ident, $($field:ident)*) => {
+    ($(#[$meta:meta])* $vecName:ident, $dimension:literal, $($field:ident)*) => {
         $(#[$meta])*
         #[repr(C)]
         #[derive(Copy, Clone, Debug, Default)]
         pub struct $vecName<T> { $(#[doc = vector_field_doc!($field)] pub $field: T),* }
+
+        impl<T> $vecName<T> {
+            /// Moves array components into coordinate order, without conversion.
+            pub fn from_array(values: [T; $dimension]) -> Self {
+                let [$($field),*] = values;
+                Self { $($field),* }
+            }
+            /// Moves components into an array in coordinate order, without conversion.
+            pub fn to_array(self) -> [T; $dimension] { [$(self.$field),*] }
+            /// Maps owned components once each, in coordinate order. No numeric
+            /// policy is imposed; the callback owns conversion, checks or projection.
+            pub fn map<U>(self, mut map: impl FnMut(T) -> U) -> $vecName<U> {
+                $vecName { $($field: map(self.$field)),* }
+            }
+        }
 
         impl<T: Scalar> $vecName<T> {
             /// Creates a vector from components.
@@ -504,7 +519,7 @@ implVector!(
     /// assert_eq!(v.x, 3.0);
     /// assert_eq!(v.y, 4.0);
     /// ```
-    Vector2,
+    Vector2, 2,
     x y
 );
 
@@ -520,7 +535,7 @@ implVector!(
     /// let cross = Vector3::cross(&v1, &v2);
     /// // Result is (0, 0, 1) - the z-axis
     /// ```
-    Vector3,
+    Vector3, 3,
     x y z
 );
 
@@ -536,7 +551,7 @@ implVector!(
     /// let v = Vector4::new(1.0, 2.0, 3.0, 1.0);
     /// // w=1 for positions, w=0 for directions
     /// ```
-    Vector4,
+    Vector4, 4,
     x y z w
 );
 

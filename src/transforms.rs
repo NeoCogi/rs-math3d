@@ -313,9 +313,17 @@ pub fn unproject3<T: RealScalar>(
     )
 }
 
-/// Checked frustum construction/calculation for finite represented scalars.
-/// Returns an error for invalid domains, zero denominators, degenerate bases,
-/// or unrepresentable intermediate/output values; performs no float conversion.
+/// Constructs a perspective projection from frustum bounds with checked arithmetic.
+///
+/// `lbn` is the left-bottom-near corner and `rtf` the right-top-far corner.
+/// Nonfinite operands, zero width/height/depth and unrepresentable arithmetic
+/// return [`MathError`]. The scalar calculations perform no float conversion.
+///
+/// The current validation is algebraic: it does not enforce positive near/far
+/// distances or ordering along any axis. Mirrored or reversed bounds can succeed
+/// when the arithmetic fits. Zero near distance can also succeed and produce a
+/// singular matrix. Callers must establish their camera-volume conventions and
+/// sufficient scalar resolution; success does not certify invertibility.
 pub fn checked_frustum<T: RealScalar>(
     lbn: &Vector3<T>,
     rtf: &Vector3<T>,
@@ -388,9 +396,13 @@ pub fn frustum<T: RealScalar>(lbn: &Vector3<T>, rtf: &Vector3<T>) -> Matrix4<T> 
     )
 }
 
-/// Checked ortho4 construction/calculation for finite represented scalars.
-/// Returns an error for invalid domains, zero denominators, degenerate bases,
-/// or unrepresentable intermediate/output values; performs no float conversion.
+/// Constructs an orthographic projection with checked arithmetic.
+///
+/// Nonfinite operands, zero width/height/depth and unrepresentable arithmetic
+/// return [`MathError`]. Positive distances and ordering of the bounds are not
+/// enforced; reversed axes are accepted when the arithmetic fits. Quantization
+/// can still collapse a coefficient, so success does not certify invertibility.
+/// The scalar calculations perform no float conversion.
 pub fn checked_ortho4<T: RealScalar>(
     left: T,
     right: T,
@@ -467,9 +479,19 @@ pub fn ortho4<T: RealScalar>(left: T, right: T, bottom: T, top: T, near: T, far:
     )
 }
 
-/// Checked perspective construction/calculation for finite represented scalars.
-/// Returns an error for invalid domains, zero denominators, degenerate bases,
-/// or unrepresentable intermediate/output values; performs no float conversion.
+/// Constructs a perspective projection with checked arithmetic and input guards.
+///
+/// `fovy` is the vertical field of view in radians, `aspect` is width/height,
+/// and `near`/`far` are clipping distances. Inputs must be finite, with
+/// `fovy > 0`, `aspect > 0` and `0 < near < far`. The represented tangent of
+/// `fovy / 2` must also be positive. Invalid inequalities return
+/// [`MathError::Domain`]; nonfinite inputs and failed scalar calculations
+/// propagate their corresponding [`MathError`]. No float conversion is used.
+///
+/// The current guards do not require `fovy < pi`: tangent is periodic, so some
+/// larger angles pass. Callers requiring a conventional camera aperture must
+/// establish `0 < fovy < pi`. Success does not certify invertibility, since
+/// scalar quantization can collapse projection coefficients.
 pub fn checked_perspective<T: RealScalar>(
     fovy: T,
     aspect: T,

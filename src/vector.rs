@@ -35,15 +35,15 @@
 //! require fractional results, such as normalization, are available only through
 //! [`RealVector`].
 //!
-//! Intersection code also uses crate-private, max-component-scaled 3D
-//! normalization helpers. Those helpers keep angular decisions independent of
-//! a vector's magnitude and let each query reuse a prepared representation.
-//! Angular predicates use stable scalar norms: floats scale components before
-//! taking a norm, while fixed scalars compare unquantized squared integers. Their internal result is an explicit classification—within the
-//! tolerance, outside it, or invalid—so invalid arithmetic cannot be confused
-//! with either geometric answer. Checked query call sites share one crate-local
-//! gate that continues only for a valid outside-tolerance classification. None
-//! of this changes the public [`RealVector`] normalization methods.
+//! Checked 3D geometry uses crate-private, max-component-scaled normalization
+//! helpers and reuses the prepared directions, subject to scalar quantization.
+//! Its angular classifiers use stable scalar norms: floats scale components
+//! before taking a norm, while fixed scalars compare unquantized squared
+//! integers. They distinguish within-tolerance, outside-tolerance and invalid
+//! results. Public checked queries preserve invalid input or arithmetic as an
+//! error and reserve `Ok(None)` for valid geometric rejection. Public ordinary
+//! and checked [`RealVector`] methods follow the crate's
+//! [arithmetic contracts](crate#arithmetic-contracts).
 //!
 //! # Examples
 //!
@@ -493,8 +493,9 @@ macro_rules! implRealVector {
 
 /// Trait for computing the cross product of 3D vectors.
 ///
-/// The cross product is only defined for 3D vectors and produces
-/// a vector perpendicular to both input vectors.
+/// In exact arithmetic the 3D cross product produces a vector perpendicular
+/// to both inputs. Scalar rounding can affect perpendicularity and algebraic
+/// identities in a represented result.
 pub trait CrossProduct {
     /// Computes the cross product of two vectors.
     ///
@@ -503,8 +504,9 @@ pub trait CrossProduct {
     /// v × w = (v₂w₃ - v₃w₂, v₃w₁ - v₁w₃, v₁w₂ - v₂w₁)
     /// ```
     ///
-    /// The resulting vector is perpendicular to both input vectors,
+    /// In exact arithmetic the result is perpendicular to both input vectors,
     /// with magnitude ||v|| ||w|| sin(θ), where θ is the angle between them.
+    /// Implementations follow their scalar's arithmetic and rounding rules.
     fn cross(l: &Self, r: &Self) -> Self;
 }
 
@@ -562,6 +564,8 @@ implRealVector!(Vector4, x, y, z, w);
 impl<T: Scalar> Vector3<T> {
     /// Computes a cross product with checked, single-rounding differences of
     /// products, preserving cancellation below one stored quantum.
+    /// Uses the same scalar quantization as [`CrossProduct::cross`]; checking
+    /// range does not restore exact-arithmetic identities.
     pub fn checked_cross(l: &Self, r: &Self) -> Result<Self, MathError> {
         Ok(Self::new(
             T::checked_sum_products(&[(l.y, r.z, false), (l.z, r.y, true)])?,
@@ -577,13 +581,30 @@ where
 {
     /// Computes the cross product of two 3D vectors.
     ///
-    /// The cross product **v** × **w** produces a vector perpendicular
-    /// to both **v** and **w**, following the right-hand rule.
+    /// In exact arithmetic, **v** × **w** is perpendicular to both inputs and
+    /// follows the right-hand rule.
     ///
-    /// # Properties
+    /// # Exact-arithmetic properties
+    ///
     /// - Anti-commutative: **v** × **w** = -(**w** × **v**)
     /// - Distributive: **v** × (**w** + **u**) = **v** × **w** + **v** × **u**
     /// - **v** × **v** = **0**
+    ///
+    /// These identities and perpendicularity are subject to scalar arithmetic
+    /// and rounding. Fixed components accumulate widened differences of products
+    /// and floor-shift once, as described in the [fixed-point guide](crate::fixed).
+    /// Reversing the operands can therefore differ from negating the result:
+    ///
+    /// ```
+    /// use rs_math3d::{CrossProduct, Fixed, Vector3};
+    /// type F = Fixed<i32, 16>;
+    /// let half = F::from_bits(1 << 15);
+    /// let a = Vector3::new(F::DELTA, F::ZERO, F::ZERO);
+    /// let b = Vector3::new(F::ZERO, half, F::ZERO);
+    /// assert_eq!(Vector3::cross(&a, &b).z, F::ZERO);
+    /// assert_eq!(Vector3::cross(&b, &a).z, -F::DELTA);
+    /// assert_eq!(Vector3::checked_cross(&b, &a).unwrap().z, -F::DELTA);
+    /// ```
     fn cross(l: &Vector3<T>, r: &Vector3<T>) -> Vector3<T> {
         Vector3::new(
             T::sum_products(&[(l.y, r.z, false), (l.z, r.y, true)]),
@@ -1227,7 +1248,7 @@ mod tests {
         }
 
         // Invalid source vectors and invalid numerators are reported through
-        // `None`; no NaN or infinity is allowed to escape the helper layer.
+        // errors; no NaN or infinity is allowed to escape the checked helpers.
         assert!(checked_normalized3(&Vector3::<T>::zero()).ok().is_none());
         assert!(checked_normalized3(&Vector3::new(nan, zero, zero))
             .ok()
@@ -1239,16 +1260,16 @@ mod tests {
         assert!(ordinary.checked_divide_by_length(infinity).is_err());
 
         // Dividing one by the smallest subnormal exceeds the scalar range. The
-        // operation is valid mathematically but deliberately returns `None`
+        // operation is valid mathematically but deliberately returns an error
         // because this API promises a finite result.
         let smallest = checked_normalized3(&Vector3::new(smallest_positive, zero, zero))
             .expect("the smallest positive axis vector must normalize");
         assert!(smallest.checked_divide_by_length(one).is_err());
 
         // The opposite exponent pairing has a mathematical nonzero quotient
-        // below the scalar's representable range. Returning zero would make a
-        // geometric parameter inconsistent with its separately computed point,
-        // so the helper must report that loss of information as failure.
+        // below the scalar's representable range. Scalar checked division
+        // permits finite underflow; the nonzero-preserving geometric parameter
+        // helper reports an error to keep the parameter consistent with its point.
         let largest = checked_normalized3(&Vector3::new(largest_finite, zero, zero))
             .expect("the largest finite axis vector must normalize");
         assert_eq!(

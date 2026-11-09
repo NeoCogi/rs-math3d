@@ -180,6 +180,21 @@ constant before an angular miss, so nonfinite input cannot become `Ok(None)`
 merely because a ray or line happens to be parallel. Unused solve arithmetic
 does not need to execute for a valid finite miss.
 
+## Projection validation
+
+Checked projection builders validate their documented input rules and scalar
+calculations. They do not share a complete camera-volume validation policy:
+[`checked_frustum`](crate::transforms::checked_frustum) and
+[`checked_ortho4`](crate::transforms::checked_ortho4) check algebraic bounds,
+whereas [`checked_perspective`](crate::transforms::checked_perspective) also
+applies positive/order guards. Its positive tangent check does not impose the
+conventional field-of-view interval `(0,pi)`.
+
+Establish the aperture, clipping-distance and axis-ordering conventions required
+by the application. A successful checked construction does not certify an
+invertible projection; for example, a zero near distance can produce a singular
+frustum matrix, and scalar quantization can collapse nonzero coefficients.
+
 ## Migration
 
 Replace fallible arithmetic `try_*` calls with `checked_*`; conversion names

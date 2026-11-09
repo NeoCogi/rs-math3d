@@ -301,3 +301,10 @@ pub fn color4b(r: u8, g: u8, b: u8, a: u8) -> Color4b {
         w: a,
     }
 }
+
+// Test the exact displayed README blocks with the hosted float backend. This
+// private rustdoc-only module adds no library API or fixed-only/std-free burden;
+// keeping the prose as the sole source catches later signature migrations.
+#[cfg(all(doctest, feature = "std"))]
+#[doc = include_str!("../README.md")]
+mod readme_examples {}

@@ -99,6 +99,10 @@ use std::f32;
 pub fn quarter_turn_sine() -> f32 {
     (f32::consts::FRAC_PI_2).tsin()
 }
+
+fn main() {
+    assert!((quarter_turn_sine() - 1.0).abs() < 1.0e-6);
+}
 ```
 
 The `#![no_std]` attribute alone therefore does not require `libm`; what matters
@@ -166,18 +170,20 @@ rounding, inverse modes and backend-free use.
 use rs_math3d::vector::Vector3;
 use rs_math3d::transforms;
 use rs_math3d::EPS_F32;
-use core::f32::consts::PI;
+use core::f32::consts::{PI, FRAC_1_SQRT_2};
 
 fn main() {
     let axis = Vector3::new(0.0f32, 1.0, 0.0);
-    let rot = transforms::rotation_from_axis_angle(&axis, PI / 4.0, EPS_F32)
+    let rot = transforms::checked_rotation_from_axis_angle(&axis, PI / 4.0, EPS_F32)
         .expect("axis length too small");
     let trans = transforms::translate(Vector3::new(1.0f32, 2.0, 3.0));
 
     let m = trans * rot;
     let p = Vector3::new(1.0f32, 0.0, 0.0);
     let out = m * p;
-    let _ = out;
+    assert!((out.x - (1.0 + FRAC_1_SQRT_2)).abs() < 1.0e-5);
+    assert_eq!(out.y, 2.0);
+    assert!((out.z - (3.0 - FRAC_1_SQRT_2)).abs() < 1.0e-5);
 }
 ```
 

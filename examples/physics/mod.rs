@@ -91,16 +91,19 @@ pub struct Material<T: RealScalar> {
     /// Normal impact restitution, mixed by maximum.
     pub restitution: T,
 }
-/// Explicit motion lifecycle. Sleeping is reversible by an impulse/energetic
-/// collision; out-of-bounds bodies remain disabled until the world is reset.
+/// Explicit motion lifecycle. Sleeping requires immutable support and is
+/// reversible by body contact, external motion commands or changed gravity;
+/// out-of-bounds bodies remain disabled until the world is reset.
 #[derive(Clone, Copy)]
 enum Motion {
     /// Integrates gravity and participates with finite mass.
     Awake {
-        /// Consecutive supported quiet ticks; ninety transitions to sleep.
+        /// Consecutive quiet ticks with static support and no body contact;
+        /// ninety transitions to sleep.
         quiet_ticks: u16,
     },
-    /// At rest; acts as a static support until awakened.
+    /// Quiet against immutable geometry with no body/body contacts. Dynamic
+    /// contacts always wake both participants before preparing solver masses.
     Sleeping,
     /// Outside the demo's bounded simulation domain; no longer participates.
     Disabled,
@@ -506,8 +509,6 @@ struct Config<T: RealScalar> {
     spin_limit: T,
     /// Absolute center-coordinate limit beyond which a body is disabled.
     domain: T,
-    /// Contact wake/sleep thresholds and warm-start strength.
-    wake_speed: T,
     /// Maximum linear component considered quiet for sleep accounting.
     sleep_linear: T,
     /// Maximum angular component considered quiet for sleep accounting.
@@ -571,7 +572,6 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
                 speed_limit: n(15.0),
                 spin_limit: n(15.0),
                 domain: n(24.0),
-                wake_speed: n(0.15),
                 sleep_linear: n(0.06),
                 sleep_angular: n(0.1),
                 warm: n(0.8),
@@ -629,12 +629,20 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
     pub fn stats(&self) -> Stats {
         self.stats
     }
-    /// Replaces gravity at a validated, finite mutation boundary.
+    /// Replaces gravity at a validated, finite mutation boundary. An effective
+    /// change wakes every enabled body before its next integration; identical
+    /// gravity preserves sleep/quiet counters, and rejected input changes nothing.
     pub fn set_gravity(&mut self, gravity: Vector3<T>) -> Result<(), Error> {
         if !finite(gravity) {
             return Err(Error::InvalidPose);
         }
-        self.config.gravity = gravity;
+        let old = self.config.gravity;
+        if old.x != gravity.x || old.y != gravity.y || old.z != gravity.z {
+            self.config.gravity = gravity;
+            for body in &mut self.bodies {
+                body.wake();
+            }
+        }
         Ok(())
     }
     /// Contact point/normal snapshots for debug rendering.
@@ -770,12 +778,12 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
     /// each body/object pair retains at most eight deepest contacts.
     fn add_contact(&mut self, a: usize, other: Other, c: Contact<T>) {
         if let Other::Body(b) = other {
-            let energetic = magnitude(self.bodies[a].velocity - self.bodies[b].velocity)
-                > self.config.wake_speed;
-            if energetic || c.depth > self.config.slop + self.config.slop {
-                self.bodies[a].wake();
-                self.bodies[b].wake();
-            }
+            // Sleeping has no dynamic-support dependency graph in this bounded
+            // example. Even a slow or angular-only body contact invalidates it.
+            // Candidates order bodies before meshes, so wake precedes every
+            // effective-mass calculation involving either participant this tick.
+            self.bodies[a].wake();
+            self.bodies[b].wake();
         }
         if self.bodies[a].mass() == T::zero()
             && match other {
@@ -1019,17 +1027,28 @@ impl<T: RealScalar + TryCastFrom<f64>> World<T> {
             }
         }
     }
-    /// Completes sleep transitions and damping after contacts settle.
+    /// Completes damping and conservative sleep transitions after contacts settle.
+    /// Only gravity-opposing immutable support (any static contact at zero gravity)
+    /// with no dynamic contacts permits sleep. Moving supports cannot outlive their
+    /// dependency because every dynamically touching body remains active each tick.
     fn sleep(&mut self) {
+        let gravity = self.config.gravity;
+        let zero_gravity = magnitude(gravity) == T::zero();
         for (i, b) in self.bodies.iter_mut().enumerate() {
             if let Motion::Awake { quiet_ticks } = b.motion {
                 b.velocity = b.velocity * self.config.linear_damping;
                 b.angular = b.angular * self.config.angular_damping;
-                let supported = self
+                let supported = self.contacts.iter().any(|c| {
+                    c.a == i
+                        && matches!(c.other, Other::Mesh(_))
+                        && (zero_gravity || dot(c.normal, gravity) < T::zero())
+                });
+                let dynamic_contact = self
                     .contacts
                     .iter()
-                    .any(|c| c.a == i || c.other == Other::Body(i));
+                    .any(|c| matches!(c.other, Other::Body(b) if c.a == i || b == i));
                 let quiet = supported
+                    && !dynamic_contact
                     && magnitude(b.velocity) < self.config.sleep_linear
                     && magnitude(b.angular) < self.config.sleep_angular;
                 let count = if quiet {

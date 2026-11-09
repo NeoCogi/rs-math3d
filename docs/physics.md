@@ -86,7 +86,7 @@ fixed-point render path, converted from PPM to PNG with FFmpeg.
    impulses; tangent impulses are transformed into the new contact basis.
 5. Four split position passes remove penetration without adding correction
    velocity. Seam points merge, and each body/object pair retains at most eight
-   deepest constraints. Damping and supported quiet ticks drive sleeping.
+   deepest constraints. Damping and static-supported quiet ticks drive sleeping.
 
 Tree splits break equal center keys by original triangle ID, and each leaf
 visits IDs in ascending order. Before contact reduction, candidates sort by
@@ -110,11 +110,26 @@ representable. Supported scene dimensions are 0.1–4 units, capsule centerline
 half-length 0–4, mass 0.1–10, and centers within ±24. Other geometry/scales need
 their own range analysis; finite input alone does not prove every product fits.
 
-`Awake` accumulates supported quiet ticks; 90 transitions to `Sleeping`.
-An external impulse or energetic collision wakes a sleeping body. A center
+`Awake` accumulates quiet ticks only with immutable mesh support whose normal
+opposes gravity (any static contact at zero gravity) and **no body/body contact**;
+90 transitions to `Sleeping`. Dynamically touching bodies stay active, so a
+support sliding away cannot leave an asleep body suspended. Any body contact
+wakes both participants before preparing contact masses, including slow or
+angular-only contact. External velocity/impulse commands also wake the body.
+
+An effective gravity change wakes all enabled bodies before their next
+integration and resets quiet counters. Identical gravity preserves them;
+nonfinite gravity is rejected without changing force or motion state. A center
 outside ±24 becomes `Disabled`, is omitted from collision/rendering and rejects
 motion commands. Resetting the whole world starts a fresh ID domain. The floor
 is finite: bodies can roll off its edge and subsequently leave the world.
+
+This conservative rule replaces the original per-body dynamic-support sleep
+optimization. Sleeping stacks would require a continuous support/island lifecycle;
+one-time waking on external mutation is insufficient because a dependent can
+resleep before slow support motion separates it. The bounded example keeps
+stacks active instead of introducing that graph. This trades additional stack
+work for a smaller, explicit lifecycle while retaining isolated floor/mesh sleep.
 
 `Stats` reports candidate pairs, tree bounds/triangle work, reduced contacts and
 motion states for the completed tick. The headless runner also checks every
@@ -141,6 +156,10 @@ all-candidate traversal, sweep versus
 an exhaustive pair oracle, floor settling on all three backends, restitution
 and momentum, friction, angular impulses, stacked boxes, sleeping/waking,
 terminal disabled bodies, construction/capacity and repeated fixed ticks.
+Slow-support regressions run 1,200 ticks after a 0.14-unit/s support velocity
+change, exceeding the quiet window. Gravity reversal, unchanged/rejected gravity,
+side-wall contacts, zero-speed dynamic contacts and disabled-body force changes
+exercise the sleep eligibility and mutation boundaries.
 Partition-permutation tests cover coincident split keys and five leaf sizes;
 a dense six-box test reverses/rotates candidate visitation for 180 ticks and
 compares raw poses, velocities and warm impulses against the normal pipeline.

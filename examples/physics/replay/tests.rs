@@ -50,6 +50,10 @@ const TRACE64: &str = include_str!(concat!(
     "/tests/fixtures/physics-fixed64.hashes"
 ));
 
+/// Header plus raw configuration precedes the first sphere constructor record.
+/// Body offsets below are relative to that record, independent of config length.
+const FIRST_BODY: usize = 32 + CONFIG_SCALARS * 8;
+
 /// Confirms every frame, and independently requires the scenario to exercise
 /// quiet/sleep/disabled states plus current and previous accumulated impulses.
 fn golden<T: ReplayScalar>(seed: &[u8], trace: &str) {
@@ -95,6 +99,32 @@ fn fixed32_matches_every_reference_tick() {
 #[test]
 fn fixed64_matches_every_reference_tick() {
     golden::<Fixed<i64, 32>>(SEED64, TRACE64);
+}
+
+/// Version 02's tick-900 upward force invalidates the actual settled states,
+/// rather than merely proving that some sleeper and some gravity input occurred.
+#[test]
+fn gravity_command_wakes_reference_sleepers() {
+    fn check<T: ReplayScalar>(seed: &[u8]) {
+        let mut r = Replay::<T>::decode(seed).unwrap();
+        for _ in 0..900 {
+            r.step().unwrap();
+        }
+        let sleepers: Vec<_> = r
+            .world
+            .bodies
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| b.sleeping().then_some(i))
+            .collect();
+        assert!(!sleepers.is_empty());
+        assert_eq!(r.step().unwrap().unwrap().tick, 901);
+        for id in sleepers {
+            assert!(!r.world.bodies[id].sleeping());
+        }
+    }
+    check::<Fixed<i32, 16>>(SEED32);
+    check::<Fixed<i64, 32>>(SEED64);
 }
 
 /// Different tree topologies/work counts must produce the same simulated state.
@@ -178,7 +208,7 @@ fn fingerprints_cover_motion_and_solver_cache() {
 #[test]
 fn malformed_seeds_are_rejected() {
     type T = Fixed<i32, 16>;
-    for end in (0..192).chain(SEED32.len() - 100..SEED32.len()) {
+    for end in (0..FIRST_BODY).chain(SEED32.len() - 100..SEED32.len()) {
         assert!(
             Replay::<T>::decode(&SEED32[..end]).is_err(),
             "prefix {}",
@@ -195,6 +225,7 @@ fn malformed_seeds_are_rejected() {
         );
     };
     rejects(0, b"badmagic");
+    rejects(7, b"1"); // retired solver/schema version is not silently replayed
     rejects(8, &64u32.to_le_bytes());
     rejects(12, &8u32.to_le_bytes());
     for (offset, value) in [
@@ -207,11 +238,11 @@ fn malformed_seeds_are_rejected() {
         rejects(offset, &value.to_le_bytes());
     }
     rejects(32, &i64::MAX.to_le_bytes()); // nonrepresentable raw S15.16 configuration
-    rejects(192, &9u32.to_le_bytes()); // invalid shape tag
-    rejects(196, &0i64.to_le_bytes()); // zero sphere radius
-    rejects(228, &[0; 32]); // zero quaternion
-    rejects(260, &0i64.to_le_bytes()); // zero mass
-    rejects(284, &i64::MIN.to_le_bytes()); // invalid initial velocity
+    rejects(FIRST_BODY, &9u32.to_le_bytes()); // invalid shape tag
+    rejects(FIRST_BODY + 4, &0i64.to_le_bytes()); // zero sphere radius
+    rejects(FIRST_BODY + 36, &[0; 32]); // zero quaternion
+    rejects(FIRST_BODY + 68, &0i64.to_le_bytes()); // zero mass
+    rejects(FIRST_BODY + 92, &i64::MIN.to_le_bytes()); // invalid initial velocity
     let commands = SEED32.len() - 244;
     rejects(commands + 4, &99u32.to_le_bytes());
     rejects(commands + 8, &128u32.to_le_bytes());
@@ -231,7 +262,13 @@ fn malformed_seeds_are_rejected() {
 /// the signed minimum rather than relying on narrowing or wrapping absolute value.
 #[test]
 fn fixed64_signed_minimum_vectors_are_rejected() {
-    for offset in [40, 204, 284, SEED64.len() - 244 + 12, SEED64.len() - 24] {
+    for offset in [
+        40,
+        FIRST_BODY + 12,
+        FIRST_BODY + 92,
+        SEED64.len() - 244 + 12,
+        SEED64.len() - 24,
+    ] {
         let mut seed = SEED64.to_vec();
         seed[offset..offset + 8].copy_from_slice(&i64::MIN.to_le_bytes());
         assert!(matches!(

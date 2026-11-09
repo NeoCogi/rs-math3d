@@ -1,75 +1,91 @@
 Raw fixed-point physics replay verification
 Date: 2026-11-08
-Wire/solver reference: M3RPLY01, native fixed arithmetic, canonical constraints
+Wire/solver reference: M3RPLY02, native fixed arithmetic, canonical constraints
+
+Version 02: static-support-only sleeping replaces dynamic-support sleeping.
+Body/body contacts keep both bodies active before contact-mass preparation;
+only opposing immutable support with no body contact permits 90-tick sleep.
+Changed gravity wakes enabled bodies; identical/rejected gravity preserves state.
+The obsolete wake-speed word is removed from the 19-scalar configuration. The
+reference force reverses upward at tick 900 and returns downward at tick 1100.
+Version-01 packets are rejected; both seeds and all traces were regenerated.
+Historical v1 data and execution evidence remain available in commit a2e5857.
 
 Host: x86_64 Linux, Intel Core Ultra 7 155H
 rustc 1.98.1 (48a229cea 2026-09-01), LLVM 22.1.8
 QEMU user: 10.2.1 (Ubuntu 1:10.2.1+ds-1ubuntu3.3)
-Cargo: --offline --release --example physics_replay, no custom native RUSTFLAGS
+Cargo: --offline --release --example physics_replay
 
 Executed targets:
   x86_64-unknown-linux-gnu: native process
   armv5te-unknown-linux-musleabi: QEMU qemu-arm -cpu arm926, static rust-lld build
-    readelf attributes confirm CPU_name 5TE / CPU_arch v5TE
+    fresh readelf attributes: CPU_name 5TE / CPU_arch v5TE
   riscv64gc-unknown-linux-musl: QEMU qemu-riscv64, static rust-lld build
     target RUSTFLAGS: -C target-feature=+crt-static -C link-self-contained=yes
-    readelf confirms ELF64 RISC-V, RVC and double-float ABI
+    fresh readelf: ELF64 RISC-V, RVC and double-float ABI
 
 Each target consumed the same checked-in seed and compared every expected frame
 using `physics_replay check SEED TRACE`. Seeds have 26 dynamic bodies, the shared
 tiled floor/bunny/teapot triangles, raw constructor inputs/configuration, and five
 ordered commands. Reference duration is 1440 steps plus initial state (1441
-hashes). The decoder prepares state with fixed arithmetic; it does not regenerate
-the scene from hosted floating-point setup.
+hashes). Playback does not regenerate the hosted floating-point scene.
 
                        fixed32 final       fixed64 final       states checked
-  x86_64 native        391128de5b3e471f     1157865a0cbea7c2    1441 per format
-  ARMv5TE / ARM926     391128de5b3e471f     1157865a0cbea7c2    1441 per format
-  RISC-V64 GC          391128de5b3e471f     1157865a0cbea7c2    1441 per format
+  x86_64 native        882112ab87efb978     13929f9aa73ae966    1441 per format
+  ARMv5TE / ARM926     882112ab87efb978     13929f9aa73ae966    1441 per format
+  RISC-V64 GC          882112ab87efb978     13929f9aa73ae966    1441 per format
 
-Each fixed32 invocation returned:
-  verified 1441 states; final 391128de5b3e471f
-Each fixed64 invocation returned:
-  verified 1441 states; final 1157865a0cbea7c2
 All six processes exited successfully, with no mismatching frame.
-
 Golden tick-zero hashes:
-  fixed32: 85a1e5c3261c0f60
-  fixed64: ff77fd633507a204
+  fixed32: 2317cc26408b7982
+  fixed64: 1c892891ffeef051
 
 SHA256 input/reference identities:
-3210efc404ab676177178c63da4f3970839da6853fca19a2f824e59740081713  tests/fixtures/physics-fixed32.bin
-93b61e2f920054bb802c76eaee538b92c0b6ae880421fe39024009b4a06071cb  tests/fixtures/physics-fixed32.hashes
-efa2c10110ccb7c5dffcf6d329136559ad412e2d70205157d66c6d786a49bfd3  tests/fixtures/physics-fixed64.bin
-2d323d606b5ac6b92cf48097b1b2aea5d423adbf04a9fd7b08ec538330a24f51  tests/fixtures/physics-fixed64.hashes
+66e52bb443a24def700e630a6f6eb409a63d904a36865a95a0e7dfe8c729e77d  tests/fixtures/physics-fixed32.bin
+9666dc20a2ed85454bcdc0e5548fca2a0416de42fbd4e3b2fd9bd7556a7ac20b  tests/fixtures/physics-fixed32.hashes
+2005ece6a08c6f1d347575a6586439ccfca08713610e7699daefb94881f42092  tests/fixtures/physics-fixed64.bin
+12427ca5eff95946cd9421f657a5a12d8f4477d3adce3f0da366963ae25d1998  tests/fixtures/physics-fixed64.hashes
 
 Fresh validation:
   cargo test --offline --features physics-demo --all-targets: passed
-  cargo test --offline --no-default-features: passed
-  final focused cargo test --offline --test physics_examples: 44 passed
-  final fixed-only physics_examples: 35 passed
+  physics_examples: 54 default / 41 fixed-only tests passed
+  checked_geometry: 6 host tests passed, plus all 6 under ARM926 and RISC-V64 QEMU
+    cross invocations: cargo test --offline --release --target TARGET --test checked_geometry
+    target link settings/runners are the same as the replay executables above
+  cargo test --offline --no-default-features: passed, including 24 doctests
+  cargo test --offline --doc: 27 passed, including all displayed README Rust blocks
   cargo check --offline --all-targets --no-default-features --features libm: passed
+  cargo check --offline --all-targets --no-default-features --features system-libm: passed
   RUSTDOCFLAGS=-Dwarnings cargo doc --offline --no-deps --lib --examples --features physics-demo: passed
   cargo fmt --all -- --check: passed
+  Rust check-unrolled-codegen: 65 consumers, 4 outlined helpers, 14 wide and
+    28 narrow shared chunks passed acyclic checks; narrow chunks have no i128 math
 
-New regressions check partition permutations, candidate visitation permutations,
-different leaf sizes, every reference tick, observed quiet/sleep/disabled states,
-both impulse buffers, hidden-state hash sensitivity, malformed seeds including
-signed-minimum words, same-tick command order and terminal runtime input failure.
+Behavioral regressions exercise slow support loss for 1200 post-mutation ticks
+on f32/S31.32, active zero-speed body contact, static wall support direction,
+genuine static sleeping, gravity reversal on all three backends, unchanged and
+rejected force atomicity, disabled terminal state, and actual tick-900 sleepers
+waking at tick 901 in both raw fixed reference scenarios.
+
+The checked-geometry suite covers small projective coefficients with in-viewport
+f32 and amplified f64 roundtrips, nonzero fixed last-row quanta, signed minima,
+both affine inverse modes, closest-point parameter loss in 2D/3D/4D, accepted
+minimum subnormals, and nonfinite plane constants across query orientations.
+
+Application checks:
+  physics_headless completed 1200 finite-state-checked ticks in f32/fixed32/fixed64.
+  SDL offscreen physics_demo rendered 120 fixed32 frames in OpenGL ES 3.2 Mesa
+  26.0.8 and captured the final back buffer without a GL error.
+  These are correctness smoke runs, not comparative performance measurements.
 
 CLI negative control:
   Changed only tick 1's expected fixed32 hash to zero in a temporary trace.
-  The checker exited with failure at tick 1 (actual decimal hash
-  6027733598610031138), without regenerating the expected file.
-
-Target-selection diagnostic:
-  The generic arm-unknown-linux-musleabi build advertised ARMv6 and faulted in
-  libc memset on ARM926. Switched to the explicit armv5te target; its ELF
-  attributes and successful ARM926 runs establish the ARMv5TE result above.
-  All final runs use that explicit target.
+  The checker failed at tick 1 (actual decimal hash 233263566844644332), without
+  regenerating or altering the checked-in expectation.
 
 Scope: diagnostic noncryptographic fingerprints, a bounded versioned scenario,
 and the measured compiler/targets. No physical ARM/RISC-V board, RISC-V32 or
 big-endian target was executed. Emulation is not a hardware performance result.
-No claim of arbitrary-input physical stability or proof against hash collisions.
+Sleeping stacks are intentionally kept active rather than managed as sleep
+islands. No arbitrary-input physical-stability or hash-collision proof is claimed.
 No Python was used.

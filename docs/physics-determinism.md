@@ -44,16 +44,17 @@ complete owned replay or an error without changing an existing world.
 The reference scene adds two diagnostic spheres to the ordinary 24 bodies:
 one settles/sleeps and receives an impulse at tick 320; one immediately exits the
 bounded world. Tick 640 applies ordered velocity/impulse commands, and ticks
-900/1,100 change/restore gravity. Tests require nonzero quiet counters, sleeping,
+900/1,100 reverse/restore gravity. A regression checks the actual tick-900
+sleepers wake at tick 901 in both formats. Tests require nonzero quiet counters, sleeping,
 disabled bodies, and nonzero current/previous cached impulses in both formats.
 
-Wire version `M3RPLY01` uses explicit little-endian values:
+Wire/solver version `M3RPLY02` uses explicit little-endian values:
 
 | Field | Encoding |
 | --- | --- |
 | Header | Eight magic bytes, then u32 storage width, fraction width, tick count, body count, mesh count, input count |
 | Scalar | Sign-extended raw i64, eight bytes for either format |
-| Configuration | 20 scalars in `config_values()` order |
+| Configuration | 19 scalars in `config_values()` order |
 | Body | Shape tag/dimensions, position XYZ, quaternion XYZW, mass, friction/restitution, linear XYZ, angular XYZ |
 | Mesh | Friction/restitution, u32 triangle count, input-order triangles with three XYZ vertices |
 | Input | u32 tick/tag; velocity/impulse include u32 body ID and two XYZ vectors; gravity includes one XYZ vector |
@@ -61,9 +62,17 @@ Wire version `M3RPLY01` uses explicit little-endian values:
 Shape tags are sphere=0, capsule=1, box=2. Input tags are velocity=0, impulse=1,
 gravity=2. Configuration order is timestep, gravity XYZ, slop, position rate,
 maximum correction, anchor-match distance, seam-merge distance, linear damping,
-angular damping, speed limit, spin limit, domain, wake speed, linear sleep
+angular damping, speed limit, spin limit, domain, linear sleep
 threshold, angular sleep threshold, warm fraction, merge-normal threshold and
 match-normal threshold. Dimensions follow the corresponding `Shape` fields.
+
+Version 02 adopts static-support-only sleeping: body/body contacts always wake
+their participants and prevent sleep; changed gravity wakes all enabled bodies.
+It removes the obsolete wake-speed threshold from the raw configuration and
+reverses the reference gravity at tick 900. Version-01 packets are rejected,
+and both seeds and complete traces are deliberately regenerated together. The
+portable byte order/hash contract is unchanged; trajectories and hash identities
+change with the solver contract. Old v1 evidence remains in commit `a2e5857`.
 
 Decoding rejects wrong formats/versions, short/trailing data, invalid tags,
 out-of-storage scalars, invalid constructor geometry/material/poses, invalid

@@ -40,7 +40,10 @@ mod tests;
 
 /// Wire identity: changing field order, solver contracts or input semantics must
 /// bump this version and deliberately regenerate the independently checked traces.
-const MAGIC: &[u8; 8] = b"M3RPLY01";
+const MAGIC: &[u8; 8] = b"M3RPLY02";
+/// Version 02 removes the obsolete dynamic-contact wake-speed threshold; the
+/// remaining raw fields define static-support-only sleeping on every backend.
+const CONFIG_SCALARS: usize = 19;
 /// Replay resource limits bound allocation before untrusted lengths are used.
 const MAX_TRIANGLES: usize = 32_768;
 /// Upper bounds for scene resources and execution requested by a seed packet.
@@ -202,7 +205,7 @@ impl Digest {
     }
 }
 /// Canonical configuration field order, shared by seed encoding and hashing.
-fn config_values<T: RealScalar>(c: &Config<T>) -> [T; 20] {
+fn config_values<T: RealScalar>(c: &Config<T>) -> [T; CONFIG_SCALARS] {
     [
         c.dt,
         c.gravity.x,
@@ -218,7 +221,6 @@ fn config_values<T: RealScalar>(c: &Config<T>) -> [T; 20] {
         c.speed_limit,
         c.spin_limit,
         c.domain,
-        c.wake_speed,
         c.sleep_linear,
         c.sleep_angular,
         c.warm,
@@ -228,7 +230,7 @@ fn config_values<T: RealScalar>(c: &Config<T>) -> [T; 20] {
 }
 /// Reconstructs configuration only from quantized words. Every non-gravity
 /// component is nonnegative; divisors, coefficients and domain are bounded.
-fn config<T: ReplayScalar>(v: [T; 20]) -> Result<Config<T>, ReplayError> {
+fn config<T: ReplayScalar>(v: [T; CONFIG_SCALARS]) -> Result<Config<T>, ReplayError> {
     let one = T::one();
     let integer = |n: i64| T::from_raw(n << T::FRAC).unwrap();
     if v.iter()
@@ -238,7 +240,7 @@ fn config<T: ReplayScalar>(v: [T; 20]) -> Result<Config<T>, ReplayError> {
         || v[0] > one
         || v[13] < one
         || v[13] > integer(24)
-        || [5, 9, 10, 17, 18, 19].iter().any(|&i| v[i] > one)
+        || [5, 9, 10, 16, 17, 18].iter().any(|&i| v[i] > one)
         || v.iter()
             .any(|x| x.raw().unsigned_abs() > (24u64 << T::FRAC))
     {
@@ -257,12 +259,11 @@ fn config<T: ReplayScalar>(v: [T; 20]) -> Result<Config<T>, ReplayError> {
         speed_limit: v[11],
         spin_limit: v[12],
         domain: v[13],
-        wake_speed: v[14],
-        sleep_linear: v[15],
-        sleep_angular: v[16],
-        warm: v[17],
-        normal_merge: v[18],
-        normal_match: v[19],
+        sleep_linear: v[14],
+        sleep_angular: v[15],
+        warm: v[16],
+        normal_merge: v[17],
+        normal_match: v[18],
     })
 }
 /// Fingerprints every represented body value and both contact buffers. Tree
@@ -460,7 +461,7 @@ impl<T: ReplayScalar> Replay<T> {
         let bodies = r.count(128)?;
         let meshes = r.count(MAX_MESHES)?;
         let count = r.count(MAX_INPUTS)?;
-        let mut values = [T::zero(); 20];
+        let mut values = [T::zero(); CONFIG_SCALARS];
         for v in &mut values {
             *v = r.scalar()?;
         }
@@ -716,7 +717,7 @@ pub fn record_demo<T: ReplayScalar>() -> Result<Vec<u8>, String> {
         },
         Scheduled {
             tick: 900,
-            input: Input::Gravity(scene::vector([0., -6., 0.])),
+            input: Input::Gravity(scene::vector([0., 6., 0.])),
         },
         Scheduled {
             tick: 1100,

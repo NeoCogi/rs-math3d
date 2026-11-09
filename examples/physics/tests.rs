@@ -422,6 +422,8 @@ fn escaped_body_has_a_terminal_motion_state() {
     w.step();
     assert!(!w.body(id).unwrap().enabled());
     assert_eq!(w.stats().disabled, 1);
+    w.set_gravity(v(0., 9.81, 0.)).unwrap();
+    assert!(!w.body(id).unwrap().enabled());
     assert_eq!(
         w.body_mut(id).unwrap().set_velocity(zero(), zero()),
         Err(Error::InactiveBody)
@@ -597,4 +599,239 @@ fn head_on_impulses_preserve_linear_momentum() {
     assert!(w.body(a).unwrap().velocity.x < scalar(-1.9));
     assert!(w.body(b).unwrap().velocity.x > scalar(1.9));
     assert!(magnitude(w.body(a).unwrap().velocity + w.body(b).unwrap().velocity) < scalar(0.0001));
+}
+
+/// A slowly moving support must not leave a frozen dependent after separation.
+/// Run far beyond the quiet window so one-time waking cannot satisfy the test.
+fn slow_support_loss<T: RealScalar + TryCastFrom<f64>>() {
+    let mut w = World::<T>::new();
+    floor(&mut w);
+    let surface = Material {
+        friction: T::zero(),
+        restitution: T::zero(),
+    };
+    let shape = Shape::Box {
+        half: v(0.4, 0.4, 0.4),
+    };
+    let lower = w
+        .add_body(Body::new(shape, Pose::at(v(0., 0.4, 0.)), T::one(), surface).unwrap())
+        .unwrap();
+    let upper = w
+        .add_body(Body::new(shape, Pose::at(v(0., 1.2, 0.)), T::one(), surface).unwrap())
+        .unwrap();
+    for _ in 0..600 {
+        w.step();
+    }
+    assert!(w.body(upper).unwrap().pose.position.y > scalar(1.1));
+    assert!(!w.body(lower).unwrap().sleeping());
+    assert!(!w.body(upper).unwrap().sleeping());
+    w.body_mut(lower)
+        .unwrap()
+        .set_velocity(v(0.14, 0., 0.), zero())
+        .unwrap();
+    for _ in 0..1200 {
+        w.step();
+        for contact in &w.contacts {
+            if let Other::Body(b) = contact.other {
+                assert!(!w.bodies[contact.a].sleeping());
+                assert!(!w.bodies[b].sleeping());
+            }
+        }
+    }
+    assert!(w.body(lower).unwrap().pose.position.x > scalar(0.8));
+    assert!(w.body(upper).unwrap().pose.position.y < scalar(0.6));
+}
+#[test]
+fn fixed64_slow_support_loss_remains_dynamic() {
+    slow_support_loss::<Fixed<i64, 32>>();
+}
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+#[test]
+fn float_slow_support_loss_remains_dynamic() {
+    slow_support_loss::<f32>();
+}
+
+/// Body/body contact stays active even at zero relative speed and zero gravity;
+/// without static geometry there is no immutable support eligible for sleeping.
+#[test]
+fn fixed32_body_contacts_do_not_sleep() {
+    type T = Fixed<i32, 16>;
+    let mut w = World::<T>::new();
+    w.set_gravity(zero()).unwrap();
+    for x in [T::ZERO, scalar::<T>(0.4) * T::two()] {
+        w.add_body(
+            Body::new(
+                Shape::Sphere {
+                    radius: scalar(0.4),
+                },
+                Pose::at(Vector3::new(x, T::ONE, T::ZERO)),
+                T::ONE,
+                material(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    for _ in 0..240 {
+        w.step();
+        assert!(w.contacts.iter().any(|c| matches!(c.other, Other::Body(_))));
+    }
+    for (_, body) in w.bodies() {
+        assert!(!body.sleeping());
+    }
+}
+
+/// Accepted force changes invalidate sleep immediately; equal gravity does not
+/// restart the quiet window. Static floor sleeping remains available afterward.
+fn gravity_wakes<T: RealScalar + TryCastFrom<f64>>() {
+    let mut w = World::<T>::new();
+    floor(&mut w);
+    let id = w
+        .add_body(
+            Body::new(
+                Shape::Sphere {
+                    radius: scalar(0.4),
+                },
+                Pose::at(v(0., 0.4, 0.)),
+                T::one(),
+                material(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    for _ in 0..480 {
+        w.step();
+    }
+    assert!(w.body(id).unwrap().sleeping());
+    let before = w.body(id).unwrap().pose.position.y;
+    w.set_gravity(w.config.gravity).unwrap();
+    assert!(w.body(id).unwrap().sleeping());
+    w.set_gravity(v(0., 9.81, 0.)).unwrap();
+    assert!(!w.body(id).unwrap().sleeping());
+    w.step();
+    assert!(w.body(id).unwrap().velocity.y > T::zero());
+    for _ in 0..119 {
+        w.step();
+    }
+    assert!(w.body(id).unwrap().pose.position.y > before + scalar(1.));
+    let mut quiet = World::<T>::new();
+    floor(&mut quiet);
+    quiet
+        .add_body(
+            Body::new(
+                Shape::Sphere {
+                    radius: scalar(0.4),
+                },
+                Pose::at(v(0., 0.4, 0.)),
+                T::one(),
+                material(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    for _ in 0..20 {
+        quiet.step();
+    }
+    let Motion::Awake {
+        quiet_ticks: before,
+    } = quiet.bodies[0].motion
+    else {
+        panic!("quiet fixture must be awake")
+    };
+    assert!(before > 0);
+    quiet.set_gravity(quiet.config.gravity).unwrap();
+    assert!(matches!(quiet.bodies[0].motion,Motion::Awake{quiet_ticks} if quiet_ticks==before));
+}
+#[test]
+fn fixed32_gravity_change_wakes_sleepers() {
+    gravity_wakes::<Fixed<i32, 16>>();
+}
+#[test]
+fn fixed64_gravity_change_wakes_sleepers() {
+    gravity_wakes::<Fixed<i64, 32>>();
+}
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+#[test]
+fn float_gravity_change_wakes_sleepers() {
+    gravity_wakes::<f32>();
+}
+
+/// A quiet side-wall contact cannot support gravity parallel to that wall.
+fn wall_is_not_support<T: RealScalar + TryCastFrom<f64>>() {
+    let mut w = World::<T>::new();
+    w.set_gravity(v(0., -0.01, 0.)).unwrap();
+    w.add_mesh(StaticMesh {
+        tree: AabbTree::new(
+            vec![
+                Tri3::new([v(0., -2., -2.), v(0., 2., -2.), v(0., 2., 2.)]),
+                Tri3::new([v(0., -2., -2.), v(0., 2., 2.), v(0., -2., 2.)]),
+            ],
+            4,
+        )
+        .unwrap(),
+        material: material(),
+    })
+    .unwrap();
+    let id = w
+        .add_body(
+            Body::new(
+                Shape::Sphere {
+                    radius: scalar(0.4),
+                },
+                Pose::at(v(0.4, 0., 0.)),
+                T::one(),
+                material(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    for _ in 0..180 {
+        w.step();
+    }
+    assert!(!w.body(id).unwrap().sleeping());
+    assert!(w.body(id).unwrap().pose.position.y < T::zero());
+}
+#[test]
+fn fixed32_side_wall_is_not_sleep_support() {
+    wall_is_not_support::<Fixed<i32, 16>>();
+}
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+#[test]
+fn float_side_wall_is_not_sleep_support() {
+    wall_is_not_support::<f32>();
+}
+
+#[cfg(any(feature = "std", feature = "libm", feature = "system-libm"))]
+#[test]
+fn rejected_gravity_preserves_sleep_and_force() {
+    let mut w = World::<f32>::new();
+    floor(&mut w);
+    let id = w
+        .add_body(
+            Body::new(
+                Shape::Sphere { radius: 0.4 },
+                Pose::at(v(0., 0.4, 0.)),
+                1.,
+                material(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    for _ in 0..480 {
+        w.step();
+    }
+    assert!(w.body(id).unwrap().sleeping());
+    let gravity = w.config.gravity;
+    for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert_eq!(
+            w.set_gravity(Vector3::new(invalid, 0., 0.)),
+            Err(Error::InvalidPose)
+        );
+        assert!(w.body(id).unwrap().sleeping());
+    }
+    assert_eq!(
+        [w.config.gravity.x, w.config.gravity.y, w.config.gravity.z],
+        [gravity.x, gravity.y, gravity.z]
+    );
+    assert!(w.body(id).unwrap().sleeping());
 }
